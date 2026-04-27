@@ -5,11 +5,16 @@
 
 ## Status (2026-04-27)
 
-**Phase 1 (Setup) complete.** T001–T009 all landed on branch `001-snapshot-format-smoke` in [PR #8](https://github.com/lambdasistemi/amaru-bootstrap/pull/8). `nix flake show` evaluates and resolves three packages: `amaru-0.1.2` (crane-built from `pragma-org/amaru@d44d84cd9c7a`), `db-synthesizer-0.25.1.0`, `db-analyser-0.25.1.0` (both from `IntersectMBO/ouroboros-consensus@8e3afe10` via haskell.nix + CHaP + iohk-nix crypto overlays). Fixture vendored at `specs/001-snapshot-format-smoke/fixtures/p1-config/` — SHA matches the `amaru` flake input, so bundle and binary come from the same upstream commit.
+**Phases 1–3 complete (T001–T024).** All 24 tasks have landed on branch `001-snapshot-format-smoke` in [PR #8](https://github.com/lambdasistemi/amaru-bootstrap/pull/8).
 
-**Current**: Phase 2 — orchestrator. Next moves are T010–T012 (bats failure-path tests, parallel) FIRST, then T013–T021 implementing `scripts/smoke-test.sh` step-by-step matching the [`data-model.md` state transitions](./data-model.md#state-transitions).
+- Phase 1: flake foundation (`flake.nix` + 6 `nix/*` modules) + vendored fixture; `nix flake show` resolves `amaru-0.1.2`, `db-synthesizer-0.25.1.0`, `db-analyser-0.25.1.0`
+- Phase 2: `scripts/smoke-test.sh` implements the data-model state transitions; 15/15 bats tests green in the Nix sandbox; flake exposes `nix run .#smoke-test` and three flake checks (`shellcheck`, `smoke-test-bats`, `smoke-test-integration`)
+- Phase 3: real `Build Gate` workflow + `Smoke Test (Phase 0 verdict)` job replacing the stub; verdict + report path emitted to `$GITHUB_STEP_SUMMARY`, `smoke-out/` uploaded as a 30-day artefact
+- Phase 4 (T024): `justfile` mirroring CI
 
-**Blockers**: none. Build Gate is still the stub workflow; real flake-build CI lands in T022.
+**Current**: T025 (manual quickstart wall-clock validation against [SC-005](./spec.md#measurable-outcomes)) and T026 (close issue [#1](https://github.com/lambdasistemi/amaru-bootstrap/issues/1)) — both gated on the GitHub `Smoke Test` job recording the verdict.
+
+**Blockers**: none. Verdict will materialise on the next CI run after PR #8's first push containing the real workflow.
 
 ## Summary
 
