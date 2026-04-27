@@ -11,10 +11,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Build Gate — populates the shared nix store. Self-hosted nixos
+  # runners share /nix; without a single warming job, every downstream
+  # job evaluates the same derivations and fights the eval-cache lock.
   build-gate:
     name: Build Gate
     runs-on: nixos
     steps:
       - uses: actions/checkout@v4
-      - name: Stub CI
-        run: echo "CI stub — will be replaced by real CI"
+      - uses: cachix/cachix-action@v15
+        with:
+          name: paolino
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build all flake checks (except the smoke-test verdict)
+        run: >-
+          nix build --quiet
+          .#checks.x86_64-linux.amaru
+          .#checks.x86_64-linux.db-synthesizer
+          .#checks.x86_64-linux.db-analyser
+          .#checks.x86_64-linux.shellcheck
+          .#checks.x86_64-linux.smoke-test-bats
+
+  # The Phase 0 verdict job. Runs the orchestrator end-to-end against
+  # the vendored fixture; its pass/fail answers the no-fork hypothesis.
+  smoke-test:
+    name: Smoke Test (Phase 0 verdict)
+    needs: build-gate
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/cachix-action@v15
+        with:
+          name: paolino
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Run smoke test
+        run: |
+          set -o pipefail
+          out_dir="$RUNNER_TEMP/smoke-out"
+          rm -rf "$out_dir"
+          nix run --quiet .#smoke-test -- \
+            specs/001-snapshot-format-smoke/fixtures/p1-config \
+            "$out_dir" \
+            | tee "$RUNNER_TEMP/verdict.log"
+          verdict="$(tail -n 1 "$RUNNER_TEMP/verdict.log")"
+          report="$(tail -n 2 "$RUNNER_TEMP/verdict.log" | head -n 1)"
+          {
+            echo "## Phase 0 Verdict"
+            echo
+            echo "**\`$verdict\`**"
+            echo
+            echo "Report: \`${report#report: }\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+          case "$verdict" in
+            PASS) ;;
+            *) echo "::error::Phase 0 verdict: $verdict"; exit 1 ;;
+          esac
+      - name: Upload verdict artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-out
+          path: ${{ runner.temp }}/smoke-out
+          if-no-files-found: warn
+          retention-days: 30
