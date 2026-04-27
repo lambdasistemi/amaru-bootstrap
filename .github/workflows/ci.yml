@@ -46,13 +46,19 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Run smoke test
         run: |
-          set -o pipefail
           out_dir="$RUNNER_TEMP/smoke-out"
           rm -rf "$out_dir"
+          # The orchestrator exits non-zero on FAIL: format mismatch
+          # (per contracts/smoke-test-cli.md exit-codes), so we MUST
+          # capture-and-ignore its exit code. Whether the *job*
+          # passes or fails is decided below from the verdict string,
+          # not from the orchestrator's exit code.
+          set +e
           nix run --quiet .#smoke-test -- \
             specs/001-snapshot-format-smoke/fixtures/p1-config \
             "$out_dir" \
-            | tee "$RUNNER_TEMP/verdict.log"
+            2>&1 | tee "$RUNNER_TEMP/verdict.log"
+          set -e
           verdict="$(tail -n 1 "$RUNNER_TEMP/verdict.log")"
           report="$(tail -n 2 "$RUNNER_TEMP/verdict.log" | head -n 1)"
           {
