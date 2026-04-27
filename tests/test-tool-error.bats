@@ -33,13 +33,66 @@ teardown() {
   rm -rf "$TMP_DIR"
 }
 
-# install_passing_mock <toolname>: a do-nothing shim that exits 0.
+# install_passing_mock <toolname>: a shim that exits 0 AND creates the
+# minimal artefacts the next pipeline step expects, so each test can
+# exercise its target failure point without earlier steps falling
+# through to fail_tool.
 install_passing_mock() {
   local tool="$1"
-  cat >"$MOCK_BIN/$tool" <<'SHIM'
+  case "$tool" in
+    db-synthesizer)
+      cat >"$MOCK_BIN/$tool" <<'SHIM'
+#!/usr/bin/env bash
+db=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --db) db="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[[ -n "$db" ]] && mkdir -p "$db"
+exit 0
+SHIM
+      ;;
+    db-analyser)
+      cat >"$MOCK_BIN/$tool" <<'SHIM'
+#!/usr/bin/env bash
+db=""; slot=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --db) db="$2"; shift 2 ;;
+    --store-ledger) slot="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [[ -n "$db" && -n "$slot" ]]; then
+  mkdir -p "$db"
+  : >"$db/${slot}_DB-Analyser-Stub"
+fi
+exit 0
+SHIM
+      ;;
+    amaru)
+      cat >"$MOCK_BIN/$tool" <<'SHIM'
+#!/usr/bin/env bash
+target=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --target-dir) target="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[[ -n "$target" ]] && mkdir -p "$target"
+exit 0
+SHIM
+      ;;
+    *)
+      cat >"$MOCK_BIN/$tool" <<'SHIM'
 #!/usr/bin/env bash
 exit 0
 SHIM
+      ;;
+  esac
   chmod +x "$MOCK_BIN/$tool"
 }
 
