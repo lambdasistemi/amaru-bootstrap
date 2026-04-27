@@ -23,11 +23,21 @@ craneLib.buildPackage {
   cargoExtraArgs = "--package amaru";
   doCheck = false;
 
+  # m4 / autoconf / automake required by some sys-* crates (gmp,
+  # libsodium-sys, etc.) when their build.rs invokes ./configure.
+  # bindgen-pulled crates pull libclang.
   nativeBuildInputs = with pkgs; [
     pkg-config
+    m4
+    autoconf
+    automake
+    libtool
+    cmake
   ];
 
   buildInputs = with pkgs; [
     openssl
   ];
+
+  LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 }
