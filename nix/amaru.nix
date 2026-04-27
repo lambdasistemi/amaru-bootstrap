@@ -18,7 +18,9 @@ craneLib.buildPackage {
 
   # Build only the amaru binary; its sibling crates in the workspace
   # build as transitive deps as needed.
-  cargoExtraArgs = "--package amaru --release";
+  # NB: crane already adds --release for buildPackage, so don't repeat
+  # it here — cargo errors out on duplicate --release flags.
+  cargoExtraArgs = "--package amaru";
   doCheck = false;
 
   nativeBuildInputs = with pkgs; [
