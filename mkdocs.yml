@@ -1,0 +1,65 @@
+site_name: amaru-bootstrap
+site_description: Bootstrap data pipeline for Amaru on custom Cardano testnets
+site_url: https://lambdasistemi.github.io/amaru-bootstrap/
+repo_url: https://github.com/lambdasistemi/amaru-bootstrap
+repo_name: lambdasistemi/amaru-bootstrap
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.indexes
+    - navigation.sections
+    - navigation.path
+    - navigation.tabs
+    - toc.integrate
+    - content.code.copy
+    - content.action.edit
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - footnotes
+  - def_list
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+nav:
+  - Home: index.md
+  - Concepts:
+      - What Amaru needs: what-amaru-needs.md
+  - Constitution: constitution.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/lambdasistemi/amaru-bootstrap
