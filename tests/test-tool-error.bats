@@ -19,6 +19,10 @@ setup() {
   TMP_DIR="$(mktemp -d)"
   MOCK_BIN="$TMP_DIR/mock-bin"
   mkdir -p "$MOCK_BIN"
+  # The shebang in mocks must resolve in any environment, including
+  # Nix sandboxes that don't ship /usr/bin/env. Capture the actual
+  # bash on PATH so install_*_mock can write a hardcoded shebang.
+  BASH_PATH="$(command -v bash)"
   # Shim every tool to a passing no-op by default; individual tests
   # override one shim to a failing variant.
   install_passing_mock db-synthesizer
@@ -41,56 +45,53 @@ install_passing_mock() {
   local tool="$1"
   case "$tool" in
     db-synthesizer)
-      cat >"$MOCK_BIN/$tool" <<'SHIM'
-#!/usr/bin/env bash
+      cat >"$MOCK_BIN/$tool" <<SHIM
+#!${BASH_PATH}
 db=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --db) db="$2"; shift 2 ;;
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --db) db="\$2"; shift 2 ;;
     *) shift ;;
   esac
 done
-[[ -n "$db" ]] && mkdir -p "$db"
+[[ -n "\$db" ]] && mkdir -p "\$db"
 exit 0
 SHIM
       ;;
     db-analyser)
-      cat >"$MOCK_BIN/$tool" <<'SHIM'
-#!/usr/bin/env bash
+      cat >"$MOCK_BIN/$tool" <<SHIM
+#!${BASH_PATH}
 db=""; slot=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --db) db="$2"; shift 2 ;;
-    --store-ledger) slot="$2"; shift 2 ;;
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --db) db="\$2"; shift 2 ;;
+    --store-ledger) slot="\$2"; shift 2 ;;
     *) shift ;;
   esac
 done
-if [[ -n "$db" && -n "$slot" ]]; then
-  mkdir -p "$db"
-  : >"$db/${slot}_DB-Analyser-Stub"
+if [[ -n "\$db" && -n "\$slot" ]]; then
+  mkdir -p "\$db"
+  : >"\$db/\${slot}_DB-Analyser-Stub"
 fi
 exit 0
 SHIM
       ;;
     amaru)
-      cat >"$MOCK_BIN/$tool" <<'SHIM'
-#!/usr/bin/env bash
+      cat >"$MOCK_BIN/$tool" <<SHIM
+#!${BASH_PATH}
 target=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --target-dir) target="$2"; shift 2 ;;
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --target-dir) target="\$2"; shift 2 ;;
     *) shift ;;
   esac
 done
-[[ -n "$target" ]] && mkdir -p "$target"
+[[ -n "\$target" ]] && mkdir -p "\$target"
 exit 0
 SHIM
       ;;
     *)
-      cat >"$MOCK_BIN/$tool" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
+      printf '#!%s\nexit 0\n' "${BASH_PATH}" >"$MOCK_BIN/$tool"
       ;;
   esac
   chmod +x "$MOCK_BIN/$tool"
@@ -102,7 +103,7 @@ install_failing_mock() {
   local tool="$1"
   local message="$2"
   cat >"$MOCK_BIN/$tool" <<SHIM
-#!/usr/bin/env bash
+#!${BASH_PATH}
 echo "$message" >&2
 exit 1
 SHIM

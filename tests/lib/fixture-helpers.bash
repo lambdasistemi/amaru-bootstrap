@@ -15,9 +15,14 @@ REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
 # contracts/smoke-test-cli.md "Pre-flight validation". Content is
 # whatever the vendored fixture already contains — we copy not
 # regenerate.
+#
+# When this helper is invoked from inside a Nix build sandbox, the
+# fixture lives in the read-only /nix/store. chmod +w makes the
+# *copy* writable so subsequent break_bundle calls work.
 make_valid_bundle() {
   local target="$1"
   cp -r "${REPO_ROOT}/specs/001-snapshot-format-smoke/fixtures/p1-config" "$target"
+  chmod -R u+w "$target"
 }
 
 # break_bundle <dir> <relpath>
