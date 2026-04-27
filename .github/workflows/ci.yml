@@ -62,9 +62,18 @@ jobs:
             echo
             echo "Report: \`${report#report: }\`"
           } >>"$GITHUB_STEP_SUMMARY"
+          # Per spec/plan: PASS and "FAIL: format mismatch" are both
+          # valid hypothesis outcomes (the test ran end-to-end and
+          # produced an answer). Tool / configuration errors mean the
+          # test never reached the hypothesis and must be fixed.
           case "$verdict" in
-            PASS) ;;
-            *) echo "::error::Phase 0 verdict: $verdict"; exit 1 ;;
+            PASS)
+              echo "::notice::Phase 0 PASS — no-fork hypothesis validated" ;;
+            "FAIL: format mismatch")
+              echo "::notice::Phase 0 FAIL: format mismatch — hypothesis falsified, pivot to standalone snapshot-emitter (still no fork)" ;;
+            *)
+              echo "::error::Phase 0 verdict not reached: $verdict"
+              exit 1 ;;
           esac
       - name: Upload verdict artefacts
         if: always()

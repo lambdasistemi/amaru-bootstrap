@@ -193,10 +193,15 @@ SNAPSHOT_SLOT="${EPOCH_LENGTH}"
 
 # Step 5: dump the ledger snapshot ─────────────────────────────────
 
+# db-analyser requires a LedgerDB backend flag. The fixture's
+# config.json sets `LedgerDB.Backend = V2InMemory`, so we pass
+# --v2-in-mem to match. If the bundle config ever switches backends
+# this flag must follow.
 DUMP_RC=0
 db-analyser \
     --db "${OUT}/chain-db" \
     --store-ledger "${SNAPSHOT_SLOT}" \
+    --v2-in-mem \
     cardano \
     --config "${CONFIGS_DIR}/config.json" \
     2>"${OUT}/dump.stderr.log" \
@@ -206,15 +211,14 @@ if [[ "${DUMP_RC}" -ne 0 ]]; then
     fail_tool "dump"
 fi
 
-# db-analyser writes the snapshot under <chain-db>/<chain-db basename>
-# /ledger/ with a slot-named filename. Locate any file whose basename
-# starts with the snapshot slot — that's our snapshot.
-SNAPSHOT_PATH="$(find "${OUT}/chain-db" -type f -name "${SNAPSHOT_SLOT}*" 2>/dev/null | head -n 1)"
-if [[ -z "${SNAPSHOT_PATH}" ]]; then
-    # Fallback: search any directory tree under OUT for a slot-named
-    # file (db-analyser write location varies between versions).
-    SNAPSHOT_PATH="$(find "${OUT}" -type f -name "${SNAPSHOT_SLOT}*" 2>/dev/null | head -n 1)"
-fi
+# db-analyser writes the snapshot to a DIRECTORY under
+# <chain-db>/ledger/<slot>_db-analyser/. The slot in the dir name may
+# not exactly match the requested SNAPSHOT_SLOT — db-analyser snaps
+# to the nearest forged block. Locate any *_db-analyser directory in
+# the ledger dir.
+SNAPSHOT_PATH="$(find "${OUT}/chain-db/ledger" \
+    -mindepth 1 -maxdepth 1 -type d -name "*_db-analyser" \
+    2>/dev/null | head -n 1)"
 if [[ -z "${SNAPSHOT_PATH}" ]]; then
     fail_tool "dump"
 fi
