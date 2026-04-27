@@ -37,6 +37,14 @@
     # own flake.
     crane.url = "github:ipetkov/crane";
 
+    # rust-overlay supplies the rustc version amaru's rust-toolchain.toml
+    # pins (currently 1.97); nixpkgs-unstable lags behind upstream Rust
+    # releases so the stock pkgs.rustc fails amaru's solver.
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # pragma-org/amaru consumed as a non-flake input; SHA pinned via
     # flake.lock per constitution Principle III.
     amaru = {
@@ -53,6 +61,7 @@
     , iohkNix
     , CHaP
     , crane
+    , rust-overlay
     , amaru
     , ...
     }:
@@ -65,6 +74,7 @@
             iohkNix.overlays.crypto
             haskellNix.overlay
             iohkNix.overlays.haskell-nix-crypto
+            (import rust-overlay)
           ];
         };
 

@@ -6,8 +6,14 @@
 # crane-built amaru binary, wrapping the pragma-org/amaru flake input.
 # amaru exposes no flake of its own. SHA pinning happens via flake.lock
 # on the `amaru` input — constitution Principle III.
+#
+# We honour amaru's own rust-toolchain.toml so the rustc version
+# matches whatever upstream is testing against; nixpkgs-unstable's
+# stock rustc lags behind by one or two minor versions.
 let
-  craneLib = crane.mkLib pkgs;
+  rustToolchain = pkgs.rust-bin.fromRustupToolchainFile
+    "${amaru}/rust-toolchain.toml";
+  craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 in
 craneLib.buildPackage {
   pname = "amaru";
