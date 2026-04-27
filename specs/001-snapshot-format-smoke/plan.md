@@ -3,18 +3,31 @@
 **Branch**: `001-snapshot-format-smoke` | **Date**: 2026-04-27 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `specs/001-snapshot-format-smoke/spec.md`
 
-## Status (2026-04-27)
+## Status (2026-04-27) — VERDICT REACHED
 
-**Phases 1–3 complete (T001–T024).** All 24 tasks have landed on branch `001-snapshot-format-smoke` in [PR #8](https://github.com/lambdasistemi/amaru-bootstrap/pull/8).
+**Phase 0 hypothesis answered: `FAIL: format mismatch` — pivot path activated.**
+
+Stock `db-analyser --store-ledger SLOT` writes the snapshot as a **directory** (`<chain-db>/ledger/<slot>_db-analyser/` containing `meta`, `state`, `tables/`). amaru's `convert-ledger-state` rejects this with `SnapshotIsNotFile` — it expects a single CBOR file. The format mismatch is **stable across `--v1-in-mem` and `--v2-in-mem`** (both emit the same directory layout).
+
+This was the spec's documented branch: see [SC-002](./spec.md#measurable-outcomes) — *"a `FAIL: format mismatch` verdict provides sufficient evidence to escalate to designing a small standalone snapshot-emitter that depends on consensus libraries (still no fork)"*.
+
+### What landed (T001–T026)
 
 - Phase 1: flake foundation (`flake.nix` + 6 `nix/*` modules) + vendored fixture; `nix flake show` resolves `amaru-0.1.2`, `db-synthesizer-0.25.1.0`, `db-analyser-0.25.1.0`
-- Phase 2: `scripts/smoke-test.sh` implements the data-model state transitions; 15/15 bats tests green in the Nix sandbox; flake exposes `nix run .#smoke-test` and three flake checks (`shellcheck`, `smoke-test-bats`, `smoke-test-integration`)
-- Phase 3: real `Build Gate` workflow + `Smoke Test (Phase 0 verdict)` job replacing the stub; verdict + report path emitted to `$GITHUB_STEP_SUMMARY`, `smoke-out/` uploaded as a 30-day artefact
-- Phase 4 (T024): `justfile` mirroring CI
+- Phase 2: `scripts/smoke-test.sh` implements the data-model state transitions; 15/15 bats unit tests green; integration test reaches the verdict
+- Phase 3: `Build Gate` + `Smoke Test (Phase 0 verdict)` workflow jobs; both `PASS` and `FAIL: format mismatch` exit 0 (= hypothesis answered) per the spec semantics; tool / configuration errors exit 1
+- Phase 4: `justfile` mirroring CI; manual validation done locally with the verdict (T025); issue [#1](https://github.com/lambdasistemi/amaru-bootstrap/issues/1) closure on the Phase 1 ticket creation (T026)
 
-**Current**: T025 (manual quickstart wall-clock validation against [SC-005](./spec.md#measurable-outcomes)) and T026 (close issue [#1](https://github.com/lambdasistemi/amaru-bootstrap/issues/1)) — both gated on the GitHub `Smoke Test` job recording the verdict.
+### What's next (Phase 1 of the project, separate ticket)
 
-**Blockers**: none. Verdict will materialise on the next CI run after PR #8's first push containing the real workflow.
+Build a **standalone `snapshot-emitter`** Haskell tool that:
+
+1. depends on `ouroboros-consensus-cardano` *as a library* (Cabal dep, not a fork)
+2. reads the `<slot>_db-analyser/{meta,state,tables/*}` directory snapshot
+3. writes the single-CBOR-file format `amaru convert-ledger-state` accepts
+4. lives in this repo under a new `app/snapshot-emitter/` cabal stanza
+
+Phase 0's smoke test then becomes: stock `db-synthesizer` -> stock `db-analyser --store-ledger` -> our `snapshot-emitter` -> `amaru convert-ledger-state` succeeds. This still satisfies all 5 constitution principles — no fork, all stock IOG dependencies consumed as libraries.
 
 ## Summary
 

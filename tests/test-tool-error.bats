@@ -69,9 +69,14 @@ while [[ \$# -gt 0 ]]; do
     *) shift ;;
   esac
 done
+# Real db-analyser writes <db>/ledger/<slot>_db-analyser/ as a
+# directory containing meta + state + tables/. The mock mirrors
+# the structure so the orchestrator's snapshot-path detection
+# (find -type d -name '*_db-analyser') succeeds.
 if [[ -n "\$db" && -n "\$slot" ]]; then
-  mkdir -p "\$db"
-  : >"\$db/\${slot}_DB-Analyser-Stub"
+  mkdir -p "\$db/ledger/\${slot}_db-analyser/tables"
+  : >"\$db/ledger/\${slot}_db-analyser/meta"
+  : >"\$db/ledger/\${slot}_db-analyser/state"
 fi
 exit 0
 SHIM
