@@ -84,8 +84,8 @@ description: "Task list for 001-snapshot-format-smoke"
 ## Phase 4: Polish & Cross-Cutting Concerns
 
 - [x] T024 [P] Create [`justfile`](../../../justfile) with: `just smoke <bundle> <out-dir>` → wraps `nix run .#smoke-test`; `just shellcheck` → wraps `nix build .#checks.<sys>.shellcheck`; `just ci` → mirrors the GitHub workflow
-- [ ] T025 Manual quickstart validation: follow [`quickstart.md`](./quickstart.md) end-to-end on a clean checkout (no `.direnv/`, no `result/`), record the wall-clock time, append the result + the verdict to the PR description. Validates [spec.md SC-005](./spec.md#measurable-outcomes)
-- [ ] T026 Update [issue #1](https://github.com/lambdasistemi/amaru-bootstrap/issues/1) with the verdict and a link to the green CI run that recorded it. Close issue if `PASS`
+- [x] T025 Manual quickstart validation: follow [`quickstart.md`](./quickstart.md) end-to-end on a clean checkout (no `.direnv/`, no `result/`), record the wall-clock time, append the result + the verdict to the PR description. Validates [spec.md SC-005](./spec.md#measurable-outcomes)
+- [x] T026 Update [issue #1](https://github.com/lambdasistemi/amaru-bootstrap/issues/1) with the verdict and a link to the green CI run that recorded it. Close issue if `PASS`
 
 ---
 
