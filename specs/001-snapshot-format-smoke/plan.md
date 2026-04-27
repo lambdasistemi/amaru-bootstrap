@@ -3,6 +3,14 @@
 **Branch**: `001-snapshot-format-smoke` | **Date**: 2026-04-27 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `specs/001-snapshot-format-smoke/spec.md`
 
+## Status (2026-04-27)
+
+**Phase 1 (Setup) complete.** T001–T009 all landed on branch `001-snapshot-format-smoke` in [PR #8](https://github.com/lambdasistemi/amaru-bootstrap/pull/8). `nix flake show` evaluates and resolves three packages: `amaru-0.1.2` (crane-built from `pragma-org/amaru@d44d84cd9c7a`), `db-synthesizer-0.25.1.0`, `db-analyser-0.25.1.0` (both from `IntersectMBO/ouroboros-consensus@8e3afe10` via haskell.nix + CHaP + iohk-nix crypto overlays). Fixture vendored at `specs/001-snapshot-format-smoke/fixtures/p1-config/` — SHA matches the `amaru` flake input, so bundle and binary come from the same upstream commit.
+
+**Current**: Phase 2 — orchestrator. Next moves are T010–T012 (bats failure-path tests, parallel) FIRST, then T013–T021 implementing `scripts/smoke-test.sh` step-by-step matching the [`data-model.md` state transitions](./data-model.md#state-transitions).
+
+**Blockers**: none. Build Gate is still the stub workflow; real flake-build CI lands in T022.
+
 ## Summary
 
 Build a single-command smoke test (`nix run .#smoke-test -- <input-bundle> <out-dir>`) that synthesises one epoch of Cardano chain history with stock `db-synthesizer`, dumps a ledger snapshot at the epoch boundary with stock `db-analyser --store-ledger`, feeds the snapshot to `amaru convert-ledger-state`, and emits one of four verdicts. The deliverable is the verdict; the deliverable validates whether the rest of the project rests on a viable foundation.
