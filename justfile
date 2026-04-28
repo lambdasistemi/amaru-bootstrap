@@ -23,6 +23,14 @@ smoke-bundle bundle out:
     rm -rf "{{ out }}"
     nix run --quiet .#smoke-test -- "{{ bundle }}" "{{ out }}"
 
+# Convert a V2InMemory directory snapshot to the legacy single-file
+# format amaru consumes. Wraps upstream snapshot-converter.
+convert slot_dir config out_file:
+    nix run --quiet .#snapshot-converter -- \
+        Mem "{{ slot_dir }}" \
+        Legacy "{{ out_file }}" \
+        cardano --config "{{ config }}"
+
 # Build all flake checks that have binary outputs. Mirrors the CI
 # Build Gate exactly.
 build-gate:
@@ -32,6 +40,7 @@ build-gate:
         .#checks.x86_64-linux.amaru \
         .#checks.x86_64-linux.db-synthesizer \
         .#checks.x86_64-linux.db-analyser \
+        .#checks.x86_64-linux.snapshot-converter \
         .#checks.x86_64-linux.shellcheck \
         .#checks.x86_64-linux.smoke-test-bats
 
