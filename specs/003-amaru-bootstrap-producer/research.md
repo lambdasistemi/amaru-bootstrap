@@ -32,16 +32,18 @@ Option 3 wins on Principle II grounds: we orchestrate, we don't extend stock too
 
 ```
 amaru import-ledger-state --network testnet_42 \
-                          --ledger-dir <bundle>/ledger.testnet_42.db \
+                          --ledger-dir <bundle>/testnet_42/ledger.testnet_42.db \
                           --snapshot-dir <bundle>/testnet_42/snapshots/
 
 amaru import-headers      --network testnet_42 \
-                          --chain-dir <bundle>/chain.testnet_42.db
+                          --chain-dir <bundle>/testnet_42/chain.testnet_42.db
 
 amaru import-nonces       --network testnet_42 \
                           --nonces-file <bundle>/testnet_42/nonces.json \
-                          --chain-dir <bundle>/chain.testnet_42.db
+                          --chain-dir <bundle>/testnet_42/chain.testnet_42.db
 ```
+
+All paths are rooted at `<bundle>/<network>/`, matching [R-005](#r-005-bundle-path-layout-carrier-between-producer-and-amaru). Operator-side, this means `/srv/amaru/<network>/...`. Per Obs#3, this is the single canonical path convention used everywhere (R-002, R-005, data-model, docker-compose contract, the orchestrator's import calls).
 
 **Rationale**: research confirmed all three commands and flags are present in amaru at our pinned SHA. No version drift since Phase 1.
 
@@ -71,7 +73,9 @@ Workflow uses default `GITHUB_TOKEN` with `permissions: { packages: write }` —
 - Layer 4: `amaru` (from `nix/amaru.nix`)
 - Layer 5: the orchestrator script (`scripts/bootstrap-producer.sh`)
 
-Entrypoint = `["/bin/sh", "/scripts/bootstrap-producer.sh"]`. Image runs as root inside the container (no user account creation needed for this single-purpose container).
+Entrypoint = `["/scripts/bootstrap-producer.sh"]`, with `pkgs.bash` included in the image's `contents` so the script's `#!/usr/bin/env bash` shebang resolves. **Do not** use `["/bin/sh", "/scripts/bootstrap-producer.sh"]` — `/bin/sh` is `dash` on Debian/Ubuntu derivatives, which silently breaks `set -euo pipefail` (no `pipefail`), `[[ … ]]`, arrays, `<<<` here-strings, and other bashisms the orchestrator uses (Obs#1). The script's executable bit must be set (chmod +x in the layer build).
+
+Image runs as root inside the container (no user account creation needed for this single-purpose container).
 
 **Rationale**: layered images cache better — when only the orchestrator script changes (the most frequent change), only the top layer rebuilds and pushes. Heavy layers (consensus-built binaries) stay cached.
 
@@ -146,17 +150,20 @@ A wait condition expressed as `tip ≥ 2 × epochLength` (chain-distance-from-ge
 - Use a `healthcheck` on the cardano-node and gate the bootstrap step on the node being "healthy" — rejected: cardano-node's healthcheck does not encode era-readiness; would require a custom healthcheck script that does the same era-aware polling work outside the bootstrap container
 - Skip the wait phase entirely and require the operator to point the bootstrap step at an already-mature chain DB — rejected: closes the antithesis cold-start scenario and makes the project's primary user (the antithesis testnet) the one that needs the most bespoke ceremony
 
-## R-007: Atomic bundle commit
+## R-007: Atomic bundle commit + concurrency-safe temp dir
 
-**Decision**: write the bundle to a sibling `<bundle>.tmp/` then `mv -T <bundle>.tmp <bundle>` at the end. Per [Phase 1 R-005](../002-snapshot-emitter/research.md#r-005-atomic-write-via-temp-then-rename), `renameFile` is atomic on POSIX; `mv -T` invokes `renameat2`. Concurrent compose-up calls or fault-killed producers cannot leave a half-written bundle the consumer mistakes for complete.
+**Decision**: write the bundle to a *unique-suffixed* temp dir `<bundle>/<network>.tmp.<pid>.<random>/` and `mv -T <unique-tmp> <bundle>/<network>` at the end. `renameFile` is atomic on POSIX; `mv -T` invokes `renameat2(NOREPLACE)`. The unique suffix per process makes concurrent compose-up calls safe (Obs#4): two bootstrap-producer instances running against the same input + same output volume each have their own temp dir; the first to finish wins via `mv -T`; the loser's `mv -T` fails with `EEXIST`, at which point the loser re-runs pre-flight, observes the now-complete bundle for the same network, and exits 0 (FR-008 idempotency path).
 
-Combined with FR-008 idempotency: pre-flight detects a complete bundle on the volume and skips. Pre-flight detects `<bundle>.tmp/` but no `<bundle>/` and treats it as crashed-prior-run — clean it up, re-run.
+Combined with FR-008 idempotency: pre-flight detects a complete `<bundle>/<network>/` on the volume and short-circuits. Stale temp dirs (`<bundle>/<network>.tmp.*`) from a fault-killed prior run can be left for inspection or pruned at orchestrator start; they cannot be confused for the canonical bundle.
 
-**Rationale**: matches Phase 1's atomic-write discipline. `depends_on: service_completed_successfully` already gives us "exit 0 ⇔ bundle is complete"; the temp-and-rename gives us "filesystem state is consistent at every moment".
+**Rationale**: a single fixed `<bundle>.tmp/` would let two concurrent bootstrap-producer processes corrupt each other's intermediate state (one rm -rf's the other's in-progress dir, the surviving `mv -T` carries half-written content). The unique-suffix pattern eliminates that race without locks. We do not use file-level locks because:
+- `flock` semantics across docker bind mounts are filesystem-dependent and brittle.
+- The unique-temp + `mv -T` race-loser-detects-winner pattern degrades cleanly to "second runner exits 0 because the first's bundle is now valid for both".
 
 **Alternatives considered**:
-- File-level locking — needless when filesystem rename suffices
-- Marker file like `_ready` — exactly what we don't want (the user explicitly observed `depends_on` makes it unnecessary)
+- File-level locking via `flock` — rejected: bind-mount semantics; an extra failure mode.
+- Marker file like `_ready` — exactly what we don't want (`depends_on: service_completed_successfully` makes it unnecessary).
+- Single fixed `<bundle>.tmp/` (the original Phase 1 pattern, applicable when there is only ever one writer) — rejected here because Phase 2's compose semantics permit, and antithesis fault injection might cause, multiple bootstrap-producer runs to overlap.
 
 ## R-008: CI workflow for image publishing
 

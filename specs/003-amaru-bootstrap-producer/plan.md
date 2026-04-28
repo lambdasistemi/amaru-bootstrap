@@ -16,8 +16,8 @@ A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>`) that **f
 - New: `pkgs.dockerTools.buildLayeredImage` for the container image
 - New: `skopeo` or `docker push` for ghcr.io distribution
 
-**Storage**: filesystem only — read cluster's chain DB, write the bundle to a docker volume. No database, no state.
-**Testing**: bats integration test extending [`tests/test-smoke-pass.bats`](../../../tests/test-smoke-pass.bats) to run the full pipeline (now including header extraction + amaru import-*) against the existing vendored fixture.
+**Storage**: filesystem only — read cardano-node's chain DB, write the bundle to a docker volume. No database, no state.
+**Testing**: bats integration tests covering each exit-code class (per [data-model.md error registry](./data-model.md#error-class-registry)) plus a live-cluster end-to-end test exercising the antithesis cold-start path. Each test is a self-contained bats file under `tests/test-bootstrap-producer-*.bats`; no dependency on artefacts from prior phases that aren't yet on `main`.
 **Target Platform**: Linux x86_64; the container runs in any docker-compose environment.
 **Project Type**: tooling/CLI + container image (single binary's worth of orchestration delivered as a docker image).
 **Performance Goals**: End-to-end wall-clock from `docker compose up` to amaru-1 reaching running phase:
@@ -81,11 +81,16 @@ amaru-bootstrap/
 │   ├── apps.nix                         # gains nix run .#bootstrap-producer (local)
 │   └── shell.nix                        # unchanged
 ├── tests/
-│   ├── test-config-error.bats           # unchanged (Phase 0)
-│   ├── test-tool-error.bats             # unchanged
-│   ├── test-smoke-integration.bats      # unchanged
-│   ├── test-smoke-pass.bats             # unchanged
-│   └── test-producer-pass.bats          # NEW: full pipeline including imports
+│   ├── test-config-error.bats                  # unchanged (Phase 0)
+│   ├── test-tool-error.bats                    # unchanged
+│   ├── test-smoke-integration.bats             # unchanged
+│   ├── test-bootstrap-producer-config.bats     # NEW: rc=3 configuration-error
+│   ├── test-bootstrap-producer-cluster.bats    # NEW: rc=1 cluster-not-ready
+│   ├── test-bootstrap-producer-chain.bats      # NEW: rc=2 chain-not-era-ready
+│   ├── test-bootstrap-producer-idempotent.bats # NEW: FR-008 short-circuit
+│   ├── test-bootstrap-producer-concurrent.bats # NEW: Obs#4 race
+│   ├── test-bootstrap-producer-live.bats       # NEW: SC-002 antithesis branch verifier
+│   └── test-header-extractor-cli.bats          # NEW: CLI surface tests
 └── .github/workflows/
     ├── ci.yml                           # unchanged
     └── publish-bootstrap-image.yml      # NEW: build + push image to ghcr.io
