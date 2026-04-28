@@ -33,7 +33,9 @@ build-gate:
         .#checks.x86_64-linux.db-synthesizer \
         .#checks.x86_64-linux.db-analyser \
         .#checks.x86_64-linux.shellcheck \
-        .#checks.x86_64-linux.smoke-test-bats
+        .#checks.x86_64-linux.smoke-test-bats \
+        .#checks.x86_64-linux.header-extractor-spec \
+        .#checks.x86_64-linux.header-extractor-cli-bats
 
 # Run the unit-style bats checks.
 bats:
