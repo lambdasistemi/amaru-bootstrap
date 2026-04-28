@@ -28,9 +28,8 @@ let
   ];
 
   # T012-T016: bats sees the orchestrator script + fixtures + tests/.
-  # The script doesn't exist yet (lands in T017); these checks fail
-  # in the meantime - that's the TDD red.
   bootstrapProducerTestTree = pkgs.linkFarm "bootstrap-producer-test-tree" [
+    { name = "scripts/bootstrap-producer.sh"; path = ../scripts/bootstrap-producer.sh; }
     { name = "tests"; path = ../tests; }
     {
       name = "specs/001-snapshot-format-smoke/fixtures";
@@ -90,6 +89,7 @@ in
       nativeBuildInputs = [ pkgs.shellcheck ];
     } ''
     shellcheck -s bash -e SC1091 ${scriptSrc}
+    shellcheck -s bash -e SC1091 ${../scripts/bootstrap-producer.sh}
     mkdir -p $out
   '';
 
@@ -165,7 +165,7 @@ in
       set -euo pipefail
       cp -rL ${bootstrapProducerTestTree}/. ./
       chmod -R u+w .
-      patchShebangs tests
+      patchShebangs scripts tests
       bats --tap \
         tests/test-bootstrap-producer-config.bats \
         tests/test-bootstrap-producer-cluster.bats
