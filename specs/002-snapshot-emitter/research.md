@@ -147,6 +147,42 @@ this constraint never bites the canonical pipeline.
 - Add `--force` flag — rejected: violates FR-001's no-flags rule.
   Revisit in a Phase 2 ticket if needed.
 
+## R-009: Config loading via `unstable-cardano-tools`, not `cardano-node`
+
+**Decision**: read `config.json` and build `ProtocolInfo (CardanoBlock
+StandardCrypto)` via `Cardano.Tools.DBAnalyser.Block.Cardano.mkProtocolInfo`
+from the `unstable-cardano-tools` sublibrary of
+`ouroboros-consensus-cardano`. From there, `pInfoConfig :: TopLevelConfig`
+yields the codec via `configCodec`.
+
+**Rationale**: `db-analyser` itself uses this exact entry point. The
+sublibrary is in upstream's `exposed-modules` and depends only on
+consensus + ledger + crypto — NOT on `cardano-node`. This means the
+emitter pulls in zero extra forks and respects the project's "no
+cardano-api" memory rule. The function handles all 5 era genesis
+files (Byron / Shelley / Alonzo / Conway / Dijkstra) automatically by
+following relative paths in the JSON config.
+
+**Trade-off**: this expands FR-001 from two positional args to three —
+the config path is now an explicit input. Updated spec.md, contracts,
+and data-model accordingly. The smoke-test orchestrator already has
+the config path as a free variable (it passes the same file to
+`db-synthesizer` and `db-analyser`), so the orchestrator change is
+still a one-line insertion.
+
+**Alternatives considered**:
+- Use `cardano-node`'s `parseNodeConfigurationFP` — heavier
+  dependency tree, transitively pulls in `cardano-api` which the
+  constitution memory specifically advises against
+  (`feedback_no_cardano_api.md`). Rejected.
+- Hand-roll a JSON parser for the config file — feasible but
+  reproduces upstream's logic, drifts on every consensus version
+  bump. Rejected as Principle II violation in spirit (we'd be
+  duplicating stock-tool behaviour).
+- Hard-code testnet params at compile time — single-purpose binary,
+  unusable for any other testnet. Rejected: the project's pivot
+  goal is a reusable bridge tool, not a one-shot.
+
 ## R-008: Determinism
 
 **Decision**: rely on `encodeL` and `encodeExtLedgerState` being

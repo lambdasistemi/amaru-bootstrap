@@ -27,6 +27,7 @@ setup() {
   # override one shim to a failing variant.
   install_passing_mock db-synthesizer
   install_passing_mock db-analyser
+  install_passing_mock snapshot-converter
   install_passing_mock amaru
   BUNDLE="$TMP_DIR/bundle"
   make_valid_bundle "$BUNDLE"
@@ -78,6 +79,17 @@ if [[ -n "\$db" && -n "\$slot" ]]; then
   : >"\$db/ledger/\${slot}_db-analyser/meta"
   : >"\$db/ledger/\${slot}_db-analyser/state"
 fi
+exit 0
+SHIM
+      ;;
+    snapshot-converter)
+      cat >"$MOCK_BIN/$tool" <<SHIM
+#!${BASH_PATH}
+# snapshot-converter signature in our orchestrator:
+#   snapshot-converter Mem <in-dir> Legacy <out-file> cardano --config <cfg>
+# Touch the out-file so the orchestrator's non-empty check passes.
+out_file="\$4"
+[[ -n "\$out_file" ]] && printf 'mock-snapshot' >"\$out_file"
 exit 0
 SHIM
       ;;
@@ -134,6 +146,16 @@ SHIM
   [[ "$(last_line "$output")" == "FAIL: tool error: dump" ]]
   [ -s "$OUT/dump.stderr.log" ]
   grep -q "analyser crashed" "$OUT/dump.stderr.log"
+}
+
+@test "snapshot-converter failure -> FAIL: tool error: emit, exit 2" {
+  install_failing_mock snapshot-converter "snapshot-converter crashed"
+
+  PATH="$MOCK_BIN:$PATH" run "$SMOKE_TEST_SCRIPT" "$BUNDLE" "$OUT"
+  [ "$status" -eq 2 ]
+  [[ "$(last_line "$output")" == "FAIL: tool error: emit" ]]
+  [ -s "$OUT/emit.stderr.log" ]
+  grep -q "snapshot-converter crashed" "$OUT/emit.stderr.log"
 }
 
 @test "amaru convert-ledger-state failure -> FAIL: format mismatch, exit 1" {

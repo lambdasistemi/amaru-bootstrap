@@ -3,11 +3,11 @@ name:               amaru-bootstrap
 version:            0.1.0.0
 synopsis:           Bootstrap data pipeline for Amaru on custom Cardano testnets
 description:
-  Provides @snapshot-emitter@: a tool that converts the V2InMemory
-  directory snapshot produced by upstream @db-analyser --store-ledger@
-  into the legacy single-CBOR-file format @amaru convert-ledger-state@
-  consumes. Implements the Phase 1 bridge for the no-fork bootstrap
-  pipeline.
+  Empty marker package. The real Phase 1 deliverable is the orchestrator
+  at @scripts\/smoke-test.sh@ wired to the upstream
+  @snapshot-converter@ executable from
+  @ouroboros-consensus-cardano@; this package exists only so
+  @cabalProject'@ has a local anchor.
 
 homepage:           https://github.com/lambdasistemi/amaru-bootstrap
 bug-reports:        https://github.com/lambdasistemi/amaru-bootstrap/issues
@@ -20,55 +20,10 @@ build-type:         Simple
 extra-doc-files:    README.md
 tested-with:        GHC ==9.6.7
 
-common warnings
-  ghc-options:
-    -Wall
-    -Wcompat
-    -Widentities
-    -Wincomplete-record-updates
-    -Wincomplete-uni-patterns
-    -Wmissing-export-lists
-    -Wpartial-fields
-    -Wredundant-constraints
-    -Wunused-packages
-
 library
-  import:           warnings
   default-language: Haskell2010
   hs-source-dirs:   lib
-  exposed-modules:
-    AmaruBootstrap
-    SnapshotEmitter
+  exposed-modules:  AmaruBootstrap
   build-depends:
     , base                          >=4.18 && <5
-    , bytestring                    >=0.11 && <0.13
-    , cardano-binary                >=1.7  && <1.8
-    , cborg                         >=0.2  && <0.3
-    , directory                     >=1.3  && <1.4
-    , filepath                      >=1.4  && <1.6
-    , ouroboros-consensus           >=0.27 && <0.28
-    , ouroboros-consensus-cardano   >=0.25 && <0.26
-
-executable snapshot-emitter
-  import:           warnings
-  default-language: Haskell2010
-  main-is:          Main.hs
-  hs-source-dirs:   app/snapshot-emitter
-  ghc-options:      -threaded -rtsopts -with-rtsopts=-N
-  build-depends:
-    , amaru-bootstrap
-    , base                          >=4.18 && <5
-
-test-suite snapshot-emitter-test
-  import:           warnings
-  default-language: Haskell2010
-  type:             exitcode-stdio-1.0
-  main-is:          SnapshotEmitterSpec.hs
-  hs-source-dirs:   test
-  build-depends:
-    , amaru-bootstrap
-    , base                          >=4.18 && <5
-    , bytestring                    >=0.11 && <0.13
-    , directory                     >=1.3  && <1.4
-    , filepath                      >=1.4  && <1.6
-    , hspec                         >=2.10 && <2.12
+    , ouroboros-consensus-cardano

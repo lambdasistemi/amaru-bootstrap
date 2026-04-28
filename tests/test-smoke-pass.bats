@@ -16,7 +16,7 @@
 load 'lib/fixture-helpers'
 
 setup() {
-  for tool in db-synthesizer db-analyser amaru snapshot-emitter; do
+  for tool in db-synthesizer db-analyser amaru snapshot-converter; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       skip "real binaries not on PATH (missing: $tool); run via nix flake check"
     fi

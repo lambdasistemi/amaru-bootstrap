@@ -30,6 +30,25 @@ A directory on disk produced by `db-analyser --store-ledger SLOT --v2-in-mem`.
 **Source**: produced by stock `db-analyser` from the pinned consensus
 release. Not constructed by this feature.
 
+### Node configuration (input)
+
+The node `config.json` that was passed to `db-synthesizer` and
+`db-analyser` when the directory snapshot was produced. Read by
+`Cardano.Tools.DBAnalyser.Block.Cardano.mkProtocolInfo` to build the
+`CodecConfig (CardanoBlock StandardCrypto)` that decodes/encodes the
+ledger state. Resolves the era-specific genesis files
+(Byron/Shelley/Alonzo/Conway/Dijkstra) by relative path.
+
+**Validation rules**:
+- the supplied path must exist and be a regular file
+- the node config loader's own validation reports any structural
+  problem (missing genesis pointers, malformed JSON, &c.) as a
+  decode-error to the operator
+
+**Source**: same `config.json` the rest of the pipeline already uses;
+in the smoke test, it lives at
+`<bundle>/configs/configs/config.json`.
+
 ### Reattached extended ledger state (intermediate)
 
 A typed in-memory value: `ExtLedgerState CardanoBlock ValuesMK`. Built by:
@@ -98,24 +117,29 @@ The emitter is a linear pipeline; failure at any step short-circuits.
                   ╚══════════════┬══════════════╝
                                  │
                   ╔══════════════▼══════════════╗
-                  ║ 3. Decode state            ║─── error  ─→ rc=3 decode-error
+                  ║ 3. Build CodecConfig from  ║─── error  ─→ rc=3 decode-error
+                  ║    <config-path>           ║
                   ╚══════════════┬══════════════╝
                                  │
                   ╔══════════════▼══════════════╗
-                  ║ 4. Decode tables/tvar      ║─── error  ─→ rc=3 decode-error
+                  ║ 4. Decode state            ║─── error  ─→ rc=3 decode-error
                   ╚══════════════┬══════════════╝
                                  │
                   ╔══════════════▼══════════════╗
-                  ║ 5. withLedgerTables merge  ║  pure, no failure path
+                  ║ 5. Decode tables/tvar      ║─── error  ─→ rc=3 decode-error
                   ╚══════════════┬══════════════╝
                                  │
                   ╔══════════════▼══════════════╗
-                  ║ 6. encodeL +               ║  pure
+                  ║ 6. withLedgerTables merge  ║  pure, no failure path
+                  ╚══════════════┬══════════════╝
+                                 │
+                  ╔══════════════▼══════════════╗
+                  ║ 7. encodeL +               ║  pure
                   ║    encodeExtLedgerState    ║
                   ╚══════════════┬══════════════╝
                                  │
                   ╔══════════════▼══════════════╗
-                  ║ 7. Atomic write            ║─── ioerr  ─→ rc=5 output-write-error
+                  ║ 8. Atomic write            ║─── ioerr  ─→ rc=5 output-write-error
                   ║    (writeFile + rename)    ║
                   ╚══════════════┬══════════════╝
                                  │

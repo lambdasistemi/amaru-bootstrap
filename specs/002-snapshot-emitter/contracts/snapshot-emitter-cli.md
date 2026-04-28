@@ -5,13 +5,13 @@ The snapshot-emitter is exposed as `nix run .#snapshot-emitter -- <slot-dir> <ou
 ## Invocation
 
 ```text
-nix run .#snapshot-emitter -- <slot-dir> <out-file>
+nix run .#snapshot-emitter -- <slot-dir> <config-path> <out-file>
 ```
 
 Or equivalently after `nix develop`:
 
 ```text
-snapshot-emitter <slot-dir> <out-file>
+snapshot-emitter <slot-dir> <config-path> <out-file>
 ```
 
 ## Arguments
@@ -19,7 +19,8 @@ snapshot-emitter <slot-dir> <out-file>
 | Position | Name | Required | Description |
 |----------|------|----------|-------------|
 | 1 | `<slot-dir>` | yes | Path to a directory snapshot produced by `db-analyser --store-ledger SLOT --v2-in-mem` (a `<slot>_db-analyser/` directory containing `meta`, `state`, `tables/tvar`) |
-| 2 | `<out-file>` | yes | Path where the single-file legacy snapshot will be written. MUST NOT exist |
+| 2 | `<config-path>` | yes | Path to the node `config.json` the snapshot was synthesised against. Reads referenced genesis files (Byron/Shelley/Alonzo/Conway/Dijkstra). Used to build the consensus codec config — without it, era-specific decoders cannot resolve |
+| 3 | `<out-file>` | yes | Path where the single-file legacy snapshot will be written. MUST NOT exist |
 
 No flags. No optional arguments. No environment variables. No interactive prompts.
 
@@ -80,7 +81,7 @@ Per FR-009, the smoke-test orchestrator change is a single new step:
    SNAPSHOT_DIR="$(find ... -type d -name '*_db-analyser' ... )"
 
 +  # Step 5.5: emitter (Phase 1)
-+  snapshot-emitter "$SNAPSHOT_DIR" "$OUT/snapshot.cbor"
++  snapshot-emitter "$SNAPSHOT_DIR" "${CONFIGS_DIR}/config.json" "$OUT/snapshot.cbor"
 +  SNAPSHOT_FILE="$OUT/snapshot.cbor"
 +
    # Step 6: convert (now reads the file, not the directory)
@@ -88,8 +89,10 @@ Per FR-009, the smoke-test orchestrator change is a single new step:
 +  amaru convert-ledger-state ... --snapshot "$SNAPSHOT_FILE" ...
 ```
 
-No other change. The smoke test's verdict-emission contract is
-untouched.
+`${CONFIGS_DIR}/config.json` is the same node config the orchestrator
+already passes to `db-analyser` and `db-synthesizer` — it's a free
+variable in the existing pipeline. No other change. The smoke test's
+verdict-emission contract is untouched.
 
 ## Versioning
 

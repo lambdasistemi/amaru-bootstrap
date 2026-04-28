@@ -35,7 +35,7 @@ An operator running the existing Phase 0 smoke test got the verdict `FAIL: forma
 
 ### Functional Requirements
 
-- **FR-001**: The snapshot-emitter MUST accept exactly two positional arguments: the path to a directory snapshot (as produced by the upstream chain analyser's snapshot-storing mode) and the path of the single output file to write.
+- **FR-001**: The snapshot-emitter MUST accept exactly three positional arguments: the path to a directory snapshot (as produced by the upstream chain analyser's snapshot-storing mode), the path to the node configuration document the snapshot was produced against (so the converter can select the matching codec), and the path of the single output file to write.
 - **FR-002**: The snapshot-emitter MUST read the directory snapshot's component files in their entirety before writing any byte to the output path.
 - **FR-003**: The snapshot-emitter MUST produce an output file that Amaru's existing snapshot-conversion command accepts as input without modification to Amaru.
 - **FR-004**: The snapshot-emitter MUST exit with status `0` on success and a documented non-zero status (one of: input-not-found, input-structurally-invalid, decode-error, output-collision, output-write-error) on every failure path.

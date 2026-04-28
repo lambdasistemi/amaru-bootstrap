@@ -12,6 +12,7 @@ A standalone Haskell executable `snapshot-emitter` that takes a V2InMemory direc
 **Language/Version**: Haskell GHC 9.6.7 via haskell.nix (same toolchain as the Phase 0 marker library)
 **Primary Dependencies**:
 - `ouroboros-consensus-cardano` (already pinned in [`cabal.project`](../../../cabal.project) at `release-ouroboros-consensus-0.27.0.0`, SHA `8e3afe10`) — provides `Ouroboros.Consensus.Storage.LedgerDB.Snapshots.{encodeL, decodeL}` and `Ouroboros.Consensus.Ledger.Extended.{encodeExtLedgerState, decodeExtLedgerState}` in `exposed-modules`
+- `ouroboros-consensus-cardano:unstable-cardano-tools` sublibrary — provides `Cardano.Tools.DBAnalyser.Block.Cardano.mkProtocolInfo :: CardanoBlockArgs -> IO (ProtocolInfo (CardanoBlock StandardCrypto))`, the same config-loader `db-analyser` itself uses. No `cardano-node` dep (verified in research R-009)
 - `cardano-binary` for raw CBOR decode/encode primitives
 - `bytestring`, `directory`, `filepath` from base
 - existing marker `amaru-bootstrap` library — Phase 1 adds an `executable` stanza alongside it

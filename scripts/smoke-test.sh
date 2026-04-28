@@ -16,7 +16,7 @@
 # Exit codes:
 #   0  PASS
 #   1  FAIL: format mismatch
-#   2  FAIL: tool error: <step>
+#   2  FAIL: tool error: <step>      (step in: synthesise, dump, emit)
 #   3  FAIL: configuration error: <reason>
 #   64+ FAIL: internal error (bash trap)
 
@@ -112,6 +112,7 @@ fi
 # regardless of which step ultimately runs.
 : >"${OUT}/synthesise.stderr.log"
 : >"${OUT}/dump.stderr.log"
+: >"${OUT}/emit.stderr.log"
 : >"${OUT}/convert.stderr.log"
 
 # Report writer ────────────────────────────────────────────────────
@@ -119,8 +120,10 @@ fi
 REPORT="${OUT}/report.txt"
 SYNTH_RC=""
 DUMP_RC=""
+EMIT_RC=""
 CONVERT_RC=""
 SNAPSHOT_PATH=""
+SNAPSHOT_FILE=""
 CONVERTED_PATH=""
 
 write_report() {
@@ -135,11 +138,13 @@ write_report() {
         printf 'step exit codes:\n'
         printf '  synthesise: %s\n' "${SYNTH_RC:-not run}"
         printf '  dump:       %s\n' "${DUMP_RC:-not run}"
+        printf '  emit:       %s\n' "${EMIT_RC:-not run}"
         printf '  convert:    %s\n' "${CONVERT_RC:-not run}"
         printf '\n'
         printf 'stderr logs:\n'
         printf '  %s\n' "${OUT}/synthesise.stderr.log"
         printf '  %s\n' "${OUT}/dump.stderr.log"
+        printf '  %s\n' "${OUT}/emit.stderr.log"
         printf '  %s\n' "${OUT}/convert.stderr.log"
         if [[ -n "${SNAPSHOT_PATH}" ]]; then
             printf '\nsnapshot: %s\n' "${SNAPSHOT_PATH}"
@@ -223,7 +228,30 @@ if [[ -z "${SNAPSHOT_PATH}" ]]; then
     fail_tool "dump"
 fi
 
-# Step 6: feed the snapshot to amaru ───────────────────────────────
+# Step 5.5: emit a single-file legacy snapshot via upstream's
+# snapshot-converter (Phase 1 bridge). The Phase 0 verdict was
+# `FAIL: format mismatch` — amaru's convert-ledger-state wants a
+# single CBOR file, not a V2InMemory directory. Upstream already
+# ships this conversion under the same SHA pin we use elsewhere.
+#
+# snapshot-converter parses the output basename as a DiskSnapshot,
+# so the basename MUST start with the slot number (a digit run).
+# Suffix after `_` is free-form; we pick `_amaru-bridge` for
+# discoverability in the report.
+EMIT_RC=0
+SNAPSHOT_FILE="${OUT}/${SNAPSHOT_SLOT}_amaru-bridge"
+snapshot-converter \
+    Mem "${SNAPSHOT_PATH}" \
+    Legacy "${SNAPSHOT_FILE}" \
+    cardano --config "${CONFIGS_DIR}/config.json" \
+    2>"${OUT}/emit.stderr.log" \
+    || EMIT_RC=$?
+
+if [[ "${EMIT_RC}" -ne 0 ]] || [[ ! -s "${SNAPSHOT_FILE}" ]]; then
+    fail_tool "emit"
+fi
+
+# Step 6: feed the file snapshot to amaru ──────────────────────────
 
 CONVERTED_PATH="${OUT}/converted"
 mkdir -p "${CONVERTED_PATH}"
@@ -231,7 +259,7 @@ mkdir -p "${CONVERTED_PATH}"
 CONVERT_RC=0
 amaru convert-ledger-state \
     --network "${NETWORK}" \
-    --snapshot "${SNAPSHOT_PATH}" \
+    --snapshot "${SNAPSHOT_FILE}" \
     --target-dir "${CONVERTED_PATH}" \
     2>"${OUT}/convert.stderr.log" \
     || CONVERT_RC=$?

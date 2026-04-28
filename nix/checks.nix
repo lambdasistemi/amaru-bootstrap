@@ -1,7 +1,6 @@
 { pkgs
 , amaruPkg
 , iogTools
-, snapshotEmitterPkg
 }:
 
 # Flake checks: a derivation per artefact. Each test check builds a
@@ -26,7 +25,7 @@ in
   amaru = amaruPkg;
   db-synthesizer = iogTools.db-synthesizer;
   db-analyser = iogTools.db-analyser;
-  snapshot-emitter = snapshotEmitterPkg;
+  snapshot-converter = iogTools.snapshot-converter;
 
   shellcheck = pkgs.runCommand "smoke-test-shellcheck"
     {
@@ -37,8 +36,6 @@ in
   '';
 
   # Unit-style bats: pure mock-based tests, no real binaries needed.
-  # Wires T010 + T011 from 001-snapshot-format-smoke and T005 from
-  # 002-snapshot-emitter (config-error tests for the emitter).
   smoke-test-bats = pkgs.runCommand "smoke-test-bats"
     {
       nativeBuildInputs = [ pkgs.bash pkgs.bats pkgs.jq ];
@@ -46,18 +43,14 @@ in
     cp -rL ${testTree}/. ./
     chmod -R u+w .
     patchShebangs scripts tests
-    bats --tap \
-      tests/test-config-error.bats \
-      tests/test-tool-error.bats \
-      ${if builtins.pathExists ../tests/test-emitter-config-error.bats
-         then "tests/test-emitter-config-error.bats"
-         else ""}
+    bats --tap tests/test-config-error.bats tests/test-tool-error.bats
     mkdir -p $out
   '';
 
   # Integration: real binaries. THIS is the Phase 0/1 deliverable.
-  # Phase 0 wires T012 (FAIL: format mismatch is acceptable). Phase 1
-  # T015 will swap the assertion to PASS-only.
+  # Phase 0 wires test-smoke-integration (FAIL: format mismatch is
+  # acceptable). Phase 1 adds test-smoke-pass (asserts PASS) once the
+  # orchestrator wires snapshot-converter in.
   smoke-test-integration = pkgs.runCommand "smoke-test-integration"
     {
       nativeBuildInputs = [
@@ -67,13 +60,32 @@ in
         amaruPkg
         iogTools.db-synthesizer
         iogTools.db-analyser
-        snapshotEmitterPkg
+        iogTools.snapshot-converter
       ];
     } ''
     cp -rL ${testTree}/. ./
     chmod -R u+w .
     patchShebangs scripts tests
     bats --tap tests/test-smoke-integration.bats
+    mkdir -p $out
+  '';
+
+  smoke-test-pass = pkgs.runCommand "smoke-test-pass"
+    {
+      nativeBuildInputs = [
+        pkgs.bash
+        pkgs.bats
+        pkgs.jq
+        amaruPkg
+        iogTools.db-synthesizer
+        iogTools.db-analyser
+        iogTools.snapshot-converter
+      ];
+    } ''
+    cp -rL ${testTree}/. ./
+    chmod -R u+w .
+    patchShebangs scripts tests
+    bats --tap tests/test-smoke-pass.bats
     mkdir -p $out
   '';
 }
