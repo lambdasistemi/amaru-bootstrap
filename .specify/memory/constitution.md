@@ -20,15 +20,31 @@ feature to IOG. Forking is not an option.
 
 ### II. Stock Tools, Custom Orchestration
 
-Every step of the bootstrap pipeline must use a stock IOG (or pragma)
-binary:
+Every step of the bootstrap pipeline must use either:
 
-- `db-synthesizer` (upstream `ouroboros-consensus`) — chain DB synthesis
-- `db-analyser --store-ledger` (upstream `ouroboros-consensus`) — ledger snapshots
-- `db-server` ([`pragma-org/db-server`](https://github.com/pragma-org/db-server)) — header extraction
-- `amaru` ([`pragma-org/amaru`](https://github.com/pragma-org/amaru)) — convert / import / run
+- **(a)** an unmodified upstream IOG/pragma binary, consumed as a SHA-pinned
+  release artifact, or
+- **(b)** a small in-repo executable that consumes upstream code purely as
+  a *library* (no patches, no vendored copies). Such tools must be
+  trivially replaceable by an upstream binary if and when one appears.
 
-This repo's job is to **orchestrate** these tools, not extend them.
+Examples currently in use:
+
+- `db-synthesizer` (upstream `ouroboros-consensus`, mode (a)) — chain DB synthesis
+- `db-analyser --store-ledger` (upstream `ouroboros-consensus`, mode (a)) — ledger snapshots
+- `snapshot-converter` (upstream `ouroboros-consensus-cardano`, mode (a)) — Mem→Legacy bridge
+- `header-extractor` (in-repo, mode (b), consumes `ouroboros-consensus` as a library) — chain DB queries
+- `amaru` ([`pragma-org/amaru`](https://github.com/pragma-org/amaru), mode (a)) — convert / import / run
+
+What is **not** permitted:
+
+- Patching, forking, or vendoring upstream source repositories
+- Maintaining feature branches against IOG/pragma codebases
+- Long-lived in-repo replacements for tools that already exist upstream
+  (mode (b) is for *missing* features, not *NIH*)
+
+This repo's job is to **orchestrate** these tools (and to fill small
+upstream gaps with library consumers), not extend them.
 
 ### III. Reproducibility By Pinning, Not By Tags
 
@@ -99,4 +115,18 @@ Amendments require a PR, a rationale in the PR description, and the
 All PRs must verify compliance with these principles. When the
 constitution and a convenience are in conflict, the constitution wins.
 
-**Version**: 1.0.0 | **Ratified**: 2026-04-27 | **Last Amended**: 2026-04-27
+**Version**: 1.1.0 | **Ratified**: 2026-04-27 | **Last Amended**: 2026-04-28
+
+### Amendment log
+
+- **1.1.0 (2026-04-28)**: Principle II — explicitly permit in-repo
+  executables that consume upstream as a library (mode (b)). Originally
+  Principle II enumerated four stock binaries including `db-server`;
+  research for Phase 2 (003-amaru-bootstrap-producer, see
+  `specs/003-amaru-bootstrap-producer/research.md` R-001) found
+  `pragma-org/db-server` pins consensus 0.21 (incompatible with our
+  0.27 chain-DB format) and that we use only ~30% of its surface. We
+  replaced it with a small in-repo `header-extractor` consuming
+  consensus 0.27 as a library. The amendment generalises Principle II
+  so that this and similar small library-consumers are explicitly
+  allowed — without weakening the no-fork rule (Principle I).
