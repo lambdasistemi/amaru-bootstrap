@@ -29,13 +29,16 @@ jobs:
           .#checks.x86_64-linux.amaru
           .#checks.x86_64-linux.db-synthesizer
           .#checks.x86_64-linux.db-analyser
+          .#checks.x86_64-linux.snapshot-converter
           .#checks.x86_64-linux.shellcheck
           .#checks.x86_64-linux.smoke-test-bats
 
-  # The Phase 0 verdict job. Runs the orchestrator end-to-end against
-  # the vendored fixture; its pass/fail answers the no-fork hypothesis.
+  # The Phase 1 verdict job. Runs the bridged orchestrator end-to-end
+  # against the vendored fixture; its pass/fail confirms the no-fork
+  # bridge closes the format gap. Phase 0's "FAIL: format mismatch is
+  # also acceptable" branch is gone — Phase 1 commits to PASS.
   smoke-test:
-    name: Smoke Test (Phase 0 verdict)
+    name: Smoke Test (Phase 1 verdict)
     needs: build-gate
     runs-on: nixos
     steps:
@@ -48,11 +51,10 @@ jobs:
         run: |
           out_dir="$RUNNER_TEMP/smoke-out"
           rm -rf "$out_dir"
-          # The orchestrator exits non-zero on FAIL: format mismatch
-          # (per contracts/smoke-test-cli.md exit-codes), so we MUST
-          # capture-and-ignore its exit code. Whether the *job*
-          # passes or fails is decided below from the verdict string,
-          # not from the orchestrator's exit code.
+          # The orchestrator exits non-zero on every FAIL: ... per
+          # contracts/smoke-test-cli.md. We capture-and-ignore that
+          # exit code; the case statement below decides the job's
+          # pass/fail from the verdict string.
           set +e
           nix run --quiet .#smoke-test -- \
             specs/001-snapshot-format-smoke/fixtures/p1-config \
@@ -62,23 +64,17 @@ jobs:
           verdict="$(tail -n 1 "$RUNNER_TEMP/verdict.log")"
           report="$(tail -n 2 "$RUNNER_TEMP/verdict.log" | head -n 1)"
           {
-            echo "## Phase 0 Verdict"
+            echo "## Phase 1 Verdict"
             echo
             echo "**\`$verdict\`**"
             echo
             echo "Report: \`${report#report: }\`"
           } >>"$GITHUB_STEP_SUMMARY"
-          # Per spec/plan: PASS and "FAIL: format mismatch" are both
-          # valid hypothesis outcomes (the test ran end-to-end and
-          # produced an answer). Tool / configuration errors mean the
-          # test never reached the hypothesis and must be fixed.
           case "$verdict" in
             PASS)
-              echo "::notice::Phase 0 PASS — no-fork hypothesis validated" ;;
-            "FAIL: format mismatch")
-              echo "::notice::Phase 0 FAIL: format mismatch — hypothesis falsified, pivot to standalone snapshot-emitter (still no fork)" ;;
+              echo "::notice::Phase 1 PASS — bridged pipeline closes the format gap, no fork required" ;;
             *)
-              echo "::error::Phase 0 verdict not reached: $verdict"
+              echo "::error::Phase 1 verdict not PASS: $verdict"
               exit 1 ;;
           esac
       - name: Upload verdict artefacts
