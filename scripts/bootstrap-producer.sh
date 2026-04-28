@@ -6,8 +6,7 @@
 # and the 8-step state diagram at
 # specs/003-amaru-bootstrap-producer/data-model.md.
 #
-# Pipeline (filled out in T018 + T019; this commit lands T017's
-# skeleton with the 8 step functions wired but empty):
+# Pipeline (data-model.md state diagram, all 8 steps wired):
 #
 #   1. Pre-flight: existing-bundle short-circuit, config validation,
 #      poll for chain DB, poll for era-readiness, tooling sanity.
@@ -31,11 +30,7 @@
 #   8    tool-error: nonces
 #   9    tool-error: import
 #   10   output-write-error
-#   ≥64  internal-error (bash trap or unimplemented phase)
-#
-# Until T018+T019 land, the unimplemented phases exit rc=64
-# (internal-error). That keeps every TDD-red spec in T012-T016
-# failing with a distinguishable signal.
+#   >=64 internal-error (bash trap)
 
 set -euo pipefail
 
@@ -58,11 +53,16 @@ AMARU_WAIT_DEADLINE_SECONDS="${AMARU_WAIT_DEADLINE_SECONDS:-5400}"
 AMARU_CLUSTER_READY_DEADLINE_SECONDS="${AMARU_CLUSTER_READY_DEADLINE_SECONDS:-300}"
 AMARU_POLL_INTERVAL_SECONDS="${AMARU_POLL_INTERVAL_SECONDS:-10}"
 
-# Globals shared across phases. T018 sets them in phase_preflight;
-# T019 reads them in the snapshot pipeline.
-# shellcheck disable=SC2034  # consumed by phase_dump (T019).
+# Globals shared across phases. phase_preflight sets TARGET_SLOT and
+# EPOCH_LENGTH; the snapshot pipeline below threads further globals
+# (UNIQUE_TMP, MEM_SNAPSHOT_DIR, ACTUAL_SLOT, SNAPSHOT_FILE) between
+# phases as each one is computed.
 TARGET_SLOT=0
 EPOCH_LENGTH=0
+UNIQUE_TMP=""
+MEM_SNAPSHOT_DIR=""
+ACTUAL_SLOT=0
+LEGACY_SNAPSHOT_FILE=""
 
 # ─── Internal-error trap ──────────────────────────────────────────
 
@@ -78,15 +78,30 @@ trap on_error ERR
 
 # log_phase <phase-name> <command...>
 # Runs <command...> with stderr redirected to <bundle>/.logs/<phase>.stderr.
-# T018+T019 wrap every tool invocation through this so the operator
-# can triage which step failed by tailing the matching .stderr file.
-# shellcheck disable=SC2329  # consumed by phase functions added in T018+T019.
+# Every tool invocation goes through this so an operator can triage a
+# non-zero exit by tailing the matching .stderr file. The .logs dir
+# lives at the bundle root (not inside <bundle>/<network>) so logs
+# survive the atomic rename in phase_commit.
 log_phase() {
     local phase="$1"
     shift
     local logdir="${BUNDLE_DIR}/.logs"
     mkdir -p "${logdir}"
     "$@" 2>"${logdir}/${phase}.stderr"
+}
+
+# tail_phase_log <phase-name>
+# Emit the last 50 lines of <bundle>/.logs/<phase>.stderr to our
+# stderr, prefixed for readability. Per the CLI contract the
+# orchestrator surfaces the failing phase's tail on its own stderr so
+# the operator does not have to fish around in the bundle volume.
+tail_phase_log() {
+    local phase="$1"
+    local f="${BUNDLE_DIR}/.logs/${phase}.stderr"
+    [[ -s "${f}" ]] || return 0
+    printf -- '--- last 50 lines of %s ---\n' "${f}" >&2
+    tail -n 50 "${f}" >&2 || true
+    printf -- '--- end %s ---\n' "${f}" >&2
 }
 
 # ─── 8-step state diagram (functions stubbed, T018+T019 fill them) ─
@@ -231,45 +246,309 @@ chain_db_alive() {
     return 0
 }
 
+# Allocate the unique-suffixed staging dir into which the bundle is
+# assembled. Per Obs#4 / R-007 the suffix combines $$ + $RANDOM so two
+# concurrent producers never share a staging path; the FIRST one to
+# `mv -T` into <final> wins, the loser short-circuits via FR-008.
+phase_stage_init() {
+    local final_bundle="${BUNDLE_DIR}/${NETWORK}"
+    UNIQUE_TMP="${final_bundle}.tmp.$$.${RANDOM}"
+    rm -rf "${UNIQUE_TMP}"
+    mkdir -p "${UNIQUE_TMP}/snapshots" "${UNIQUE_TMP}/headers"
+    printf '+ staging at %s\n' "${UNIQUE_TMP}"
+}
+
 # Step 2: db-analyser dump --v2-in-mem @ target_slot. rc=4 on failure.
+# db-analyser writes the snapshot under <chain-db>/ledger/<actual>_db-analyser/
+# where <actual> may differ from TARGET_SLOT (db-analyser snaps to the
+# nearest forged block). We locate the resulting directory and bind it
+# to MEM_SNAPSHOT_DIR + ACTUAL_SLOT for downstream phases.
 phase_dump() {
-    : "T019"
+    local cfg="${CONFIG_DIR}/config.json"
+    printf '+ db-analyser dump --store-ledger %d --v2-in-mem\n' "${TARGET_SLOT}"
+    local rc=0
+    log_phase dump db-analyser \
+        --db "${CHAIN_DB}" \
+        --store-ledger "${TARGET_SLOT}" \
+        --v2-in-mem \
+        cardano \
+        --config "${cfg}" \
+        || rc=$?
+    if (( rc != 0 )); then
+        printf 'db-analyser failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/dump.stderr" >&2
+        tail_phase_log dump
+        exit 4
+    fi
+    MEM_SNAPSHOT_DIR=$(find "${CHAIN_DB}/ledger" \
+        -mindepth 1 -maxdepth 1 -type d -name '*_db-analyser' \
+        2>/dev/null | head -n 1)
+    if [[ -z "${MEM_SNAPSHOT_DIR}" || ! -d "${MEM_SNAPSHOT_DIR}" ]]; then
+        printf 'db-analyser produced no snapshot under %s/ledger/\n' \
+               "${CHAIN_DB}" >&2
+        exit 4
+    fi
+    ACTUAL_SLOT=$(basename "${MEM_SNAPSHOT_DIR}" | cut -d_ -f1)
+    if ! [[ "${ACTUAL_SLOT}" =~ ^[0-9]+$ ]]; then
+        printf 'snapshot dir name lacks numeric slot prefix: %s\n' \
+               "${MEM_SNAPSHOT_DIR}" >&2
+        exit 4
+    fi
 }
 
 # Step 3: snapshot-converter Mem -> Legacy. rc=5 on failure.
+# snapshot-converter expects PATH-IN as <dir>/<file> where <file> is a
+# numeric-prefixed name (snapshotFromPath in the consensus source). The
+# Mem dir name `<actual>_db-analyser` satisfies that. Output is a single
+# CBOR file at <staging>/legacy-in/<actual>; we pass it as-is to amaru
+# convert-ledger-state in phase_convert.
 phase_emit() {
-    : "T019"
+    local cfg="${CONFIG_DIR}/config.json"
+    local legacy_dir="${UNIQUE_TMP}/legacy-in"
+    mkdir -p "${legacy_dir}"
+    LEGACY_SNAPSHOT_FILE="${legacy_dir}/${ACTUAL_SLOT}"
+    printf '+ snapshot-converter Mem -> Legacy @ %d\n' "${ACTUAL_SLOT}"
+    local rc=0
+    log_phase emit snapshot-converter \
+        Mem "${MEM_SNAPSHOT_DIR}" \
+        Legacy "${LEGACY_SNAPSHOT_FILE}" \
+        cardano \
+        --config "${cfg}" \
+        || rc=$?
+    if (( rc != 0 )); then
+        printf 'snapshot-converter failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/emit.stderr" >&2
+        tail_phase_log emit
+        exit 5
+    fi
+    if [[ ! -f "${LEGACY_SNAPSHOT_FILE}" ]]; then
+        printf 'snapshot-converter produced no output at %s\n' \
+               "${LEGACY_SNAPSHOT_FILE}" >&2
+        exit 5
+    fi
 }
 
 # Step 4: amaru convert-ledger-state. rc=6 on failure.
+# Writes <slot>.<hash>.cbor + nonces.<slot>.<hash>.json + history.<slot>.<hash>.json
+# into <staging>/snapshots/. amaru's import-ledger-state requires the
+# era-history file to live alongside the snapshot for testnet variants.
 phase_convert() {
-    : "T019"
+    printf '+ amaru convert-ledger-state\n'
+    local rc=0
+    log_phase convert amaru convert-ledger-state \
+        --network "${NETWORK}" \
+        --snapshot "${LEGACY_SNAPSHOT_FILE}" \
+        --target-dir "${UNIQUE_TMP}/snapshots" \
+        || rc=$?
+    if (( rc != 0 )); then
+        printf 'amaru convert-ledger-state failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/convert.stderr" >&2
+        tail_phase_log convert
+        exit 6
+    fi
+    local cbor_count
+    cbor_count=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
+        -name '*.cbor' 2>/dev/null | wc -l)
+    if (( cbor_count == 0 )); then
+        printf 'amaru convert-ledger-state produced no .cbor in %s\n' \
+               "${UNIQUE_TMP}/snapshots" >&2
+        exit 6
+    fi
 }
 
 # Step 5: header-extractor list-blocks + get-header loop. rc=7.
+# Per amaru-loader.sh's pipeline: extract two header pairs, one near
+# the snapshot slot and one near the previous-epoch boundary, so amaru
+# has the parent hashes it needs to compute the epoch's active nonce.
+# Our list-blocks returns chain-order ascending, so we take the LAST
+# two blocks of each filtered window (amaru-loader uses .[0:2] against
+# db-server which yields the same blocks under its descending order).
 phase_extract() {
-    : "T019"
+    local cfg="${CONFIG_DIR}/config.json"
+    local list_json="${UNIQUE_TMP}/blocks.json"
+    printf '+ header-extractor list-blocks\n'
+    local rc=0
+    log_phase extract-list bash -c "header-extractor list-blocks --db \"\$1\" --config \"\$2\" >\"\$3\"" \
+        _ "${CHAIN_DB}" "${cfg}" "${list_json}" \
+        || rc=$?
+    if (( rc != 0 )); then
+        printf 'header-extractor list-blocks failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/extract-list.stderr" >&2
+        exit 7
+    fi
+    local prev_boundary=$(( ACTUAL_SLOT - EPOCH_LENGTH ))
+    if (( prev_boundary < 0 )); then
+        prev_boundary=0
+    fi
+    local headers_csv="${UNIQUE_TMP}/headers.csv"
+    : >"${headers_csv}"
+    if ! jq -rc \
+        --argjson last "${ACTUAL_SLOT}" \
+        --argjson prev "${prev_boundary}" \
+        '
+          (.data | map(select(.[0] <= $last))  | .[-2:] | .[]),
+          (.data | map(select(.[0] <= $prev))  | .[-2:] | .[])
+          | @csv
+        ' \
+        "${list_json}" >"${headers_csv}" 2>"${BUNDLE_DIR}/.logs/extract-filter.stderr"
+    then
+        printf 'header filter pipeline failed; see %s\n' \
+               "${BUNDLE_DIR}/.logs/extract-filter.stderr" >&2
+        exit 7
+    fi
+    if [[ ! -s "${headers_csv}" ]]; then
+        printf 'no headers selected for slots <=%d / <=%d\n' \
+               "${ACTUAL_SLOT}" "${prev_boundary}" >&2
+        exit 7
+    fi
+    while IFS=, read -ra hdr; do
+        [[ ${#hdr[@]} -eq 2 ]] || continue
+        local slot=${hdr[0]//\"/}
+        local hash=${hdr[1]//\"/}
+        [[ -n "${slot}" && -n "${hash}" ]] || continue
+        local out="${UNIQUE_TMP}/headers/header.${slot}.${hash}.cbor"
+        printf '+ header-extractor get-header %s.%s\n' "${slot}" "${hash}"
+        rc=0
+        log_phase "extract-${slot}" bash -c "header-extractor get-header \"\$1\" --db \"\$2\" --config \"\$3\" >\"\$4\"" \
+            _ "${slot}.${hash}" "${CHAIN_DB}" "${cfg}" "${out}" \
+            || rc=$?
+        if (( rc != 0 )); then
+            printf 'header-extractor get-header %s.%s failed (rc=%d)\n' \
+                   "${slot}" "${hash}" "${rc}" >&2
+            exit 7
+        fi
+    done <"${headers_csv}"
 }
 
 # Step 6: compose nonces.json from snapshot's nonces + tail rewrite. rc=8.
+# amaru convert-ledger-state writes nonces.<slot>.<hash>.json with a
+# zero-byte `tail`. We rewrite that field to the parent hash from the
+# previous-epoch header batch (the LAST hash with slot <= prev_boundary)
+# so amaru's epoch-transition nonce computation has a real anchor.
 phase_nonces() {
-    : "T019"
+    local nonces_src
+    nonces_src=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
+        -name 'nonces.*.json' 2>/dev/null | sort | tail -n 1)
+    if [[ -z "${nonces_src}" ]]; then
+        printf 'no nonces.*.json under %s\n' \
+               "${UNIQUE_TMP}/snapshots" >&2
+        exit 8
+    fi
+    cp "${nonces_src}" "${UNIQUE_TMP}/nonces.json"
+    local prev_hash=""
+    local headers_csv="${UNIQUE_TMP}/headers.csv"
+    if [[ -s "${headers_csv}" ]]; then
+        prev_hash=$(awk -F, 'NR==3 {gsub(/"/,"",$2); print $2}' \
+                    "${headers_csv}" 2>/dev/null || true)
+        if [[ -z "${prev_hash}" ]]; then
+            prev_hash=$(awk -F, 'END {gsub(/"/,"",$2); print $2}' \
+                        "${headers_csv}" 2>/dev/null || true)
+        fi
+    fi
+    if [[ -z "${prev_hash}" ]]; then
+        printf 'no previous-epoch hash to anchor nonces.tail\n' >&2
+        exit 8
+    fi
+    printf '+ rewriting nonces.tail = %s\n' "${prev_hash}"
+    local tmp_json="${UNIQUE_TMP}/nonces.json.tmp"
+    if ! jq --arg t "${prev_hash}" '.tail = $t' \
+        "${UNIQUE_TMP}/nonces.json" \
+        >"${tmp_json}" 2>"${BUNDLE_DIR}/.logs/nonces.stderr"
+    then
+        printf 'nonces tail rewrite failed; see %s\n' \
+               "${BUNDLE_DIR}/.logs/nonces.stderr" >&2
+        exit 8
+    fi
+    mv "${tmp_json}" "${UNIQUE_TMP}/nonces.json"
 }
 
 # Step 7: three chained `amaru import-*` calls. rc=9 on failure.
+# Paths follow R-005 / Obs#3: ledger.<network>.db, chain.<network>.db,
+# headers/* all at the staging root so the final `mv -T` lands them in
+# the canonical bundle layout.
 phase_import() {
-    : "T019"
+    local ledger_dir="${UNIQUE_TMP}/ledger.${NETWORK}.db"
+    local chain_dir="${UNIQUE_TMP}/chain.${NETWORK}.db"
+    local snapshots_dir="${UNIQUE_TMP}/snapshots"
+    mkdir -p "${ledger_dir}" "${chain_dir}"
+
+    printf '+ amaru import-ledger-state\n'
+    local rc=0
+    log_phase import-ledger-state amaru import-ledger-state \
+        --network "${NETWORK}" \
+        --ledger-dir "${ledger_dir}" \
+        --snapshot-dir "${snapshots_dir}" \
+        || rc=$?
+    if (( rc != 0 )); then
+        printf 'amaru import-ledger-state failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/import-ledger-state.stderr" >&2
+        tail_phase_log import-ledger-state
+        exit 9
+    fi
+
+    printf '+ amaru import-headers\n'
+    local hdr_args=()
+    while IFS= read -r -d '' f; do
+        hdr_args+=(--header-file "${f}")
+    done < <(find "${UNIQUE_TMP}/headers" -name 'header.*.cbor' -print0 \
+                  | sort -z)
+    rc=0
+    log_phase import-headers amaru import-headers \
+        --network "${NETWORK}" \
+        --chain-dir "${chain_dir}" \
+        "${hdr_args[@]}" \
+        || rc=$?
+    if (( rc != 0 )); then
+        printf 'amaru import-headers failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/import-headers.stderr" >&2
+        tail_phase_log import-headers
+        exit 9
+    fi
+
+    printf '+ amaru import-nonces\n'
+    rc=0
+    log_phase import-nonces amaru import-nonces \
+        --network "${NETWORK}" \
+        --nonces-file "${UNIQUE_TMP}/nonces.json" \
+        --chain-dir "${chain_dir}" \
+        || rc=$?
+    if (( rc != 0 )); then
+        printf 'amaru import-nonces failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/import-nonces.stderr" >&2
+        tail_phase_log import-nonces
+        exit 9
+    fi
 }
 
 # Step 8: mv -T <unique-tmp> <final>. rc=10 on failure.
+# `mv -T` invokes renameat2(NOREPLACE) on Linux and is the atomic
+# commit per R-007. On EEXIST another producer won the race; fall back
+# to bundle_complete which short-circuits with rc=0 (FR-008).
 phase_commit() {
-    : "T019"
+    local final_bundle="${BUNDLE_DIR}/${NETWORK}"
+    rm -rf "${UNIQUE_TMP}/legacy-in" \
+           "${UNIQUE_TMP}/blocks.json" \
+           "${UNIQUE_TMP}/headers.csv"
+    if mv -T "${UNIQUE_TMP}" "${final_bundle}" 2>"${BUNDLE_DIR}/.logs/commit.stderr"
+    then
+        printf 'wrote %s\n' "${final_bundle}"
+        return 0
+    fi
+    if bundle_complete "${final_bundle}"; then
+        printf '+ lost atomic-commit race - existing complete bundle wins (rc=0)\n'
+        rm -rf "${UNIQUE_TMP}"
+        exit 0
+    fi
+    printf 'rename to %s failed; see %s\n' \
+           "${final_bundle}" "${BUNDLE_DIR}/.logs/commit.stderr" >&2
+    exit 10
 }
 
 # ─── Main orchestration (skeleton) ────────────────────────────────
 
 main() {
     phase_preflight
+    phase_stage_init
     phase_dump
     phase_emit
     phase_convert
@@ -277,11 +556,6 @@ main() {
     phase_nonces
     phase_import
     phase_commit
-    # Until T018+T019 fill in the phases, signal "not yet implemented"
-    # with rc=64 internal-error so the TDD-red bats specs surface the
-    # gap loudly (their assertions on rc=0/1/2/3 fail distinctly).
-    printf 'bootstrap-producer: T018+T019 not yet wired\n' >&2
-    exit 64
 }
 
 main

@@ -35,7 +35,8 @@ build-gate:
         .#checks.x86_64-linux.shellcheck \
         .#checks.x86_64-linux.smoke-test-bats \
         .#checks.x86_64-linux.header-extractor-spec \
-        .#checks.x86_64-linux.header-extractor-cli-bats
+        .#checks.x86_64-linux.header-extractor-cli-bats \
+        .#checks.x86_64-linux.bootstrap-producer-bats
 
 # Run the unit-style bats checks.
 bats:
