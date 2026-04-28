@@ -16,8 +16,9 @@ Each spec here is the regression test for the corresponding
 implementation task.
 
 Inputs: a synthesised chain DB whose path is in
-@HEADER_EXTRACTOR_TEST_CHAIN_DB@ and a node config dir whose path is
-in @HEADER_EXTRACTOR_TEST_CONFIG@. The Nix check
+@HEADER_EXTRACTOR_TEST_CHAIN_DB@ and a path to the cardano-node
+@config.json@ in @HEADER_EXTRACTOR_TEST_CONFIG@ (referenced genesis
+files are resolved relative to that file's directory). The Nix check
 @.\#checks.x86_64-linux.header-extractor-spec@ wires both — see
 @nix\/checks.nix@. Outside the Nix check the suite is a no-op
 because the env vars are unset.
@@ -39,7 +40,7 @@ import HeaderExtractor
     , listBlocks
     , tipInfo
     )
-import System.Directory (doesDirectoryExist)
+import System.Directory (doesDirectoryExist, doesFileExist)
 import System.Environment (lookupEnv)
 import Test.Hspec
     ( Spec
@@ -67,7 +68,7 @@ loadInputs = do
     case (mDb, mCfg) of
         (Just db, Just cfg) -> do
             dbExists <- doesDirectoryExist db
-            cfgExists <- doesDirectoryExist cfg
+            cfgExists <- doesFileExist cfg
             if dbExists && cfgExists
                 then
                     pure $
