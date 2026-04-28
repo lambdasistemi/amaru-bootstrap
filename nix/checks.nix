@@ -27,6 +27,17 @@ let
     { name = "tests"; path = ../tests; }
   ];
 
+  # T012-T016: bats sees the orchestrator script + fixtures + tests/.
+  # The script doesn't exist yet (lands in T017); these checks fail
+  # in the meantime - that's the TDD red.
+  bootstrapProducerTestTree = pkgs.linkFarm "bootstrap-producer-test-tree" [
+    { name = "tests"; path = ../tests; }
+    {
+      name = "specs/001-snapshot-format-smoke/fixtures";
+      path = ../specs/001-snapshot-format-smoke/fixtures;
+    }
+  ];
+
   fixture = ../specs/001-snapshot-format-smoke/fixtures/p1-config;
 
   # Synthesised chain DB used by both the hspec (T005) and bats
@@ -134,6 +145,30 @@ in
       export HEADER_EXTRACTOR_CHAIN_DB=$TMPDIR/chain-db
       export HEADER_EXTRACTOR_CONFIG=${fixture}/configs/configs/config.json
       bats --tap tests/test-header-extractor-cli.bats
+      mkdir -p $out
+    '';
+
+  # T012-T013: pure-mock bootstrap-producer bats (no real binaries
+  # or chain DB needed) - covers the rc=3 (config-error) and rc=1
+  # (cluster-not-ready) classes. T014-T016 add chain-DB-dependent
+  # checks alongside T019. FAILS until T017+T018 land the script.
+  bootstrap-producer-bats =
+    pkgs.runCommand "bootstrap-producer-bats"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.bats
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      } ''
+      set -euo pipefail
+      cp -rL ${bootstrapProducerTestTree}/. ./
+      chmod -R u+w .
+      patchShebangs tests
+      bats --tap \
+        tests/test-bootstrap-producer-config.bats \
+        tests/test-bootstrap-producer-cluster.bats
       mkdir -p $out
     '';
 
