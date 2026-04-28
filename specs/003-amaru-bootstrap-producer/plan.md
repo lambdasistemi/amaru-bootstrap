@@ -126,3 +126,12 @@ After writing `research.md`, `data-model.md`, `contracts/bootstrap-producer-cli.
 | V. Smallest provable step | PASS | One assertion (Amaru service reaches running phase in compose stack) |
 
 No new violations. Plan ready for `/speckit.tasks`.
+
+## Status
+
+- **Phase 1 (T001-T004) — landed 2026-04-28**:
+  - cabal: `library` exposes `HeaderExtractor` (with consensus + cardano-binary + aeson + bytestring + text + ouroboros-consensus-diffusion deps); new `executable header-extractor` stanza imports the lib.
+  - nix: `nix/header-extractor.nix` extracts the exe; `nix/bootstrap-producer-image.nix` builds a 4-binary layered image (db-analyser, snapshot-converter, header-extractor, amaru) plus bash + jq + a stub orchestrator script. `nix/iog-tools.nix` extended with `snapshot-converter` (third exe of the same already-pinned ouroboros-consensus-cardano package).
+  - flake: new packages `header-extractor`, `snapshot-converter`, `bootstrap-producer-image`; new apps `header-extractor`, `snapshot-converter`, `bootstrap-producer` (stub); new checks `header-extractor`, `snapshot-converter`, `bootstrap-producer-image`.
+  - HeaderExtractor.hs and app/header-extractor/Main.hs land as bisect-safe stubs (`exit 64`, real implementation in T007-T011). Stubs are clearly annotated and replaced in Phase 2.
+  - Validated: `nix flake show` lists all new outputs; `nix build .#checks.x86_64-linux.{header-extractor,snapshot-converter,bootstrap-producer-image}` all green; `just build-gate` passes.

@@ -1,0 +1,18 @@
+amaru-bootstrap smoke test
+timestamp: 2026-04-28T16:10:22Z
+bundle:    specs/001-snapshot-format-smoke/fixtures/p1-config
+out-dir:   ./tmp/smoke-out
+verdict:   FAIL: format mismatch
+
+step exit codes:
+  synthesise: 0
+  dump:       0
+  convert:    1
+
+stderr logs:
+  ./tmp/smoke-out/synthesise.stderr.log
+  ./tmp/smoke-out/dump.stderr.log
+  ./tmp/smoke-out/convert.stderr.log
+
+snapshot: ./tmp/smoke-out/chain-db/ledger/86354_db-analyser
+converted: ./tmp/smoke-out/converted

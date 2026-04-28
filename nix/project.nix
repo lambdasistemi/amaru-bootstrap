@@ -29,6 +29,7 @@ pkgs.haskell-nix.cabalProject' {
     filter = path: _type:
       builtins.match ".*\\.(cabal|hs|project|md)$" path != null
         || builtins.match ".*/lib(/.*)?$" path != null
+        || builtins.match ".*/app(/.*)?$" path != null
         || builtins.match ".*/cabal\\.project$" path != null
         || builtins.match ".*/LICENSE$" path != null;
   };
