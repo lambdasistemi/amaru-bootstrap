@@ -23,6 +23,10 @@ let
     }
   ];
 
+  headerExtractorTestTree = pkgs.linkFarm "header-extractor-test-tree" [
+    { name = "tests"; path = ../tests; }
+  ];
+
   fixture = ../specs/001-snapshot-format-smoke/fixtures/p1-config;
 
   # Synthesised chain DB used by both the hspec (T005) and bats
@@ -97,6 +101,29 @@ in
     header-extractor-spec
     mkdir -p $out
   '';
+
+  # T006 (failing bats) — CLI-level coverage of the header-extractor
+  # binary. Brings the real exe + a synthesised chain DB on-fixture.
+  # FAILS until T010 wires the optparse-applicative dispatch.
+  header-extractor-cli-bats =
+    pkgs.runCommand "header-extractor-cli-bats"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.bats
+          pkgs.jq
+          headerExtractorPkgs.header-extractor
+        ];
+      } ''
+      set -euo pipefail
+      cp -rL ${headerExtractorTestTree}/. ./
+      chmod -R u+w .
+      patchShebangs tests
+      export HEADER_EXTRACTOR_CHAIN_DB=${synthesizedChainDb}/chain-db
+      export HEADER_EXTRACTOR_CONFIG=${fixture}/configs/configs
+      bats --tap tests/test-header-extractor-cli.bats
+      mkdir -p $out
+    '';
 
   # Unit-style bats: pure mock-based tests, no real binaries needed.
   # Wires T010 + T011 from tasks.md.
