@@ -54,7 +54,8 @@ import Cardano.Tools.DBAnalyser.HasAnalysis
 import Control.Concurrent.STM (atomically)
 import Control.Exception (bracket)
 import Control.ResourceRegistry
-    ( runWithTempRegistry
+    ( ResourceRegistry
+    , runWithTempRegistry
     , withRegistry
     )
 import qualified Data.Aeson as Aeson
@@ -70,7 +71,9 @@ import Ouroboros.Consensus.Block
     , RealPoint (RealPoint)
     , unSlotNo
     )
-import Ouroboros.Consensus.Storage.Common (BlockComponent (GetBlock))
+import Ouroboros.Consensus.Storage.Common
+    ( BlockComponent (GetBlock, GetHash, GetSlot)
+    )
 import Ouroboros.Consensus.Cardano.Block
     ( CardanoBlock
     , HardForkBlock
@@ -122,7 +125,7 @@ instance Aeson.FromJSON TipInfo
 
 -- | Open the immutable DB read-only and return the era-tagged tip.
 tipInfo :: FilePath -> NodeConfig -> IO TipInfo
-tipInfo dbDir nc = withImmDB dbDir nc $ \(immDB, _internal) -> do
+tipInfo dbDir nc = withImmDB dbDir nc $ \_ immDB -> do
     tipPt <- atomically $ ImmutableDB.getTipPoint immDB
     case tipPt of
         GenesisPoint ->
@@ -140,13 +143,20 @@ tipInfo dbDir nc = withImmDB dbDir nc $ \(immDB, _internal) -> do
                     , blockHash = renderHeaderHash h
                     }
 
--- NOTE: stub for bisect-safety, real impl in T008.
-
 -- | Iterate the immutable DB and return @(slot, hash)@ pairs in
 -- chain order. Hashes are lower-case hex strings.
 listBlocks :: FilePath -> NodeConfig -> IO [(Integer, Text)]
-listBlocks _ _ =
-    error "HeaderExtractor.listBlocks: stub - real implementation lands in T008"
+listBlocks dbDir nc = withImmDB dbDir nc $ \registry immDB -> do
+    iter <-
+        ImmutableDB.streamAll
+            immDB
+            registry
+            ((,) <$> GetSlot <*> GetHash)
+    pairs <- ImmutableDB.iteratorToList iter
+    pure
+        [ (fromIntegral (unSlotNo s), renderHeaderHash h)
+        | (s, h) <- pairs
+        ]
 
 -- NOTE: stub for bisect-safety, real impl in T009.
 
@@ -172,9 +182,8 @@ placeholder = "header-extractor stub - real implementation in T007-T010"
 withImmDB
     :: FilePath
     -> NodeConfig
-    -> ( ( ImmutableDB.ImmutableDB IO (CardanoBlock StandardCrypto)
-         , ImmutableDB.Internal IO (CardanoBlock StandardCrypto)
-         )
+    -> ( ResourceRegistry IO
+         -> ImmutableDB.ImmutableDB IO (CardanoBlock StandardCrypto)
          -> IO a
        )
     -> IO a
@@ -208,7 +217,7 @@ withImmDB dbDir (NodeConfig configPath) action = do
         bracket
             (ImmutableDB.openDBInternal immDbArgs runWithTempRegistry)
             (ImmutableDB.closeDB . fst)
-            action
+            (\(immDB, _internal) -> action registry immDB)
 
 -- | Era label of a Cardano-block tip. Exhaustive — GHC verifies
 -- coverage via the @{-# COMPLETE #-}@ pragma in
