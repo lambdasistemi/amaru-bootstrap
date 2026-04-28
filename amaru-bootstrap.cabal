@@ -45,8 +45,9 @@ executable header-extractor
   hs-source-dirs:   app/header-extractor
   main-is:          Main.hs
   build-depends:
+    , aeson
     , amaru-bootstrap
-    , base                          >=4.18 && <5
+    , base                  >=4.18 && <5
     , bytestring
     , optparse-applicative
     , text
