@@ -31,6 +31,8 @@ jobs:
           .#checks.x86_64-linux.db-analyser
           .#checks.x86_64-linux.shellcheck
           .#checks.x86_64-linux.smoke-test-bats
+          .#checks.x86_64-linux.header-extractor-spec
+          .#checks.x86_64-linux.header-extractor-cli-bats
 
   # The Phase 0 verdict job. Runs the orchestrator end-to-end against
   # the vendored fixture; its pass/fail answers the no-fork hypothesis.

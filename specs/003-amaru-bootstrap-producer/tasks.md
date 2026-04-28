@@ -56,7 +56,7 @@ Single Haskell project at repo root. New paths:
 - [X] T008 Extend `lib/HeaderExtractor.hs` with `listBlocks :: FilePath -> NodeConfig -> IO [(SlotNo, HeaderHash)]` iterating the immutable DB chunks via `Ouroboros.Consensus.Storage.ChainDB.iterate`. Output JSON shape `{"tag": "Found", "data": [...]}` per Arnaud's db-server portability requirement. Backed by [R-001](./research.md#r-001-header-extraction-without-pragma-orgdb-server).
 - [X] T009 Extend `lib/HeaderExtractor.hs` with `getHeader :: FilePath -> NodeConfig -> SlotNo -> HeaderHash -> IO ByteString` fetching one header via `ChainDB.getBlockComponent BlockHeader` and encoding to CBOR via `cardano-binary`. Backed by [R-001](./research.md#r-001-header-extraction-without-pragma-orgdb-server) + [data-model.md Amaru bootstrap bundle headers/](./data-model.md#amaru-bootstrap-bundle-output).
 - [X] T010 Create `app/header-extractor/Main.hs` with `optparse-applicative` subcommand dispatch (`tip-info`, `list-blocks`, `get-header`); each subcommand calls into the lib and prints the documented JSON / CBOR / integer to stdout; exits with rc=7 on tool errors per the CLI contract.
-- [ ] T011 Run T005 + T006 — both must transition from FAIL to PASS. `nix build .#checks.x86_64-linux.header-extractor` green.
+- [X] T011 Run T005 + T006 — both must transition from FAIL to PASS. `nix build .#checks.x86_64-linux.header-extractor` green.
 
 **Checkpoint**: `header-extractor` is a working binary the orchestrator can shell out to. Green baseline.
 
