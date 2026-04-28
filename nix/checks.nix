@@ -39,10 +39,11 @@ let
 
   fixture = ../specs/001-snapshot-format-smoke/fixtures/p1-config;
 
-  # Synthesised chain DB used by both the hspec (T005) and bats
-  # (T006) header-extractor checks. Nix caches the derivation so
-  # the cardano synthesis runs at most once per evaluation.
-  synthesizedChainDb = pkgs.runCommand "header-extractor-fixture-chain-db"
+  # Synthesise a chain DB at <slots> slots against the Phase 0 fixture.
+  # Used by:
+  #   - synthesizedChainDb     (2 epochs - era-ready, T005/T006/T016)
+  #   - shortSynthesizedChainDb (well below 2 epochs - T014's not-era-ready)
+  mkSynthesizedChainDb = name: slots: pkgs.runCommand name
     {
       nativeBuildInputs = [
         pkgs.bash
@@ -64,8 +65,7 @@ let
         '[[ $opcert[0], $vrf[0], $kes[0] ]]' \
         >"$BULK"
 
-    EPOCH_LENGTH=$(jq -r '.epochLength' "$CONFIGS_DIR/shelley-genesis.json")
-    SLOTS=$((EPOCH_LENGTH * 2))
+    SLOTS=${toString slots}
 
     mkdir -p "$out/chain-db"
     db-synthesizer \
@@ -75,6 +75,18 @@ let
         --db "$out/chain-db" \
         -f
   '';
+
+  # ~3.5 epochs (testnet_42's epochLength = 86400). With the fixture's
+  # 5% activeSlotsCoeff the resulting tip lands well past 2*epochLength,
+  # so the era-readiness predicate (R-010) holds for T016 + T019.
+  synthesizedChainDb =
+    mkSynthesizedChainDb "header-extractor-fixture-chain-db" 300000;
+
+  # ~50000 slots - well below 2 * epochLength. Tip exists but the
+  # era-readiness predicate stays false, exercising the rc=2 branch
+  # (T014).
+  shortSynthesizedChainDb =
+    mkSynthesizedChainDb "bootstrap-producer-fixture-short-chain-db" 50000;
 in
 {
   amaru = amaruPkg;
@@ -89,10 +101,7 @@ in
       nativeBuildInputs = [ pkgs.shellcheck ];
     } ''
     shellcheck -s bash -e SC1091 ${scriptSrc}
-    # SC2034: TARGET_SLOT / EPOCH_LENGTH are written by phase_preflight
-    # (T018) and read by phase_dump + later (T019). Disable for the
-    # T018 commit; the warning auto-clears once T019 lands.
-    shellcheck -s bash -e SC1091,SC2034 ${../scripts/bootstrap-producer.sh}
+    shellcheck -s bash -e SC1091 ${../scripts/bootstrap-producer.sh}
     mkdir -p $out
   '';
 
@@ -151,10 +160,18 @@ in
       mkdir -p $out
     '';
 
-  # T012-T013: pure-mock bootstrap-producer bats (no real binaries
-  # or chain DB needed) - covers the rc=3 (config-error) and rc=1
-  # (cluster-not-ready) classes. T014-T016 add chain-DB-dependent
-  # checks alongside T019. FAILS until T017+T018 land the script.
+  # T012-T015: bootstrap-producer bats. Walks each rc class with the
+  # T019 pipeline implementation:
+  #   - config (rc=3), cluster (rc=1), idempotent (rc=0): no chain DB
+  #   - chain (rc=2): SHORT chain DB via BOOTSTRAP_PRODUCER_CHAIN_DB
+  # T016 (concurrent, full pipeline) is intentionally NOT wired here
+  # yet. Running the full T019 pipeline against a synthesised chain DB
+  # surfaced an upstream format gap: snapshot-converter's Legacy
+  # ExtLedgerState slice does not match the NewEpochState shape
+  # amaru's import-ledger-state expects (it errors with "end of input
+  # bytes" right after stake_pools). Same root cause as Phase 0's
+  # "FAIL: format mismatch" verdict. Resolving it is out of T019
+  # scope - tracked separately for Phase 4.
   bootstrap-producer-bats =
     pkgs.runCommand "bootstrap-producer-bats"
       {
@@ -163,16 +180,27 @@ in
           pkgs.bats
           pkgs.coreutils
           pkgs.jq
+          headerExtractorPkgs.header-extractor
         ];
       } ''
       set -euo pipefail
       cp -rL ${bootstrapProducerTestTree}/. ./
       chmod -R u+w .
       patchShebangs scripts tests
+
       bats --tap \
         tests/test-bootstrap-producer-config.bats \
         tests/test-bootstrap-producer-cluster.bats \
         tests/test-bootstrap-producer-idempotent.bats
+
+      # T014: short chain DB - era-readiness predicate never holds.
+      # phase_preflight runs header-extractor tip-info during the
+      # polling loop and times out at rc=2 before any T019 phase fires.
+      cp -rL ${shortSynthesizedChainDb}/chain-db $TMPDIR/short-chain-db
+      chmod -R u+w $TMPDIR/short-chain-db
+      BOOTSTRAP_PRODUCER_CHAIN_DB=$TMPDIR/short-chain-db \
+        bats --tap tests/test-bootstrap-producer-chain.bats
+
       mkdir -p $out
     '';
 
