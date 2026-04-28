@@ -72,7 +72,7 @@ description: "Task list for 002-snapshot-emitter"
 
 **Purpose**: Phase 1 commits to `PASS`. The CI workflow's "FAIL: format mismatch is also valid" branch becomes incorrect — the smoke-test job should now fail if the verdict is anything other than `PASS`.
 
-- [ ] T015 Update [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml): `Build Gate` adds `.#checks.x86_64-linux.snapshot-emitter`. The `Smoke Test (Phase 0 verdict)` step renames to `Smoke Test (Phase 1 verdict)` and the case statement only accepts `PASS` (any `FAIL: ...` exits 1). The verdict-line `::notice::` becomes "Phase 1 PASS — bridge tool closes the format gap". Per [spec.md SC-002](./spec.md#measurable-outcomes)
+- [x] T015 Update [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml): `Build Gate` adds `.#checks.x86_64-linux.snapshot-emitter`. The `Smoke Test (Phase 0 verdict)` step renames to `Smoke Test (Phase 1 verdict)` and the case statement only accepts `PASS` (any `FAIL: ...` exits 1). The verdict-line `::notice::` becomes "Phase 1 PASS — bridge tool closes the format gap". Per [spec.md SC-002](./spec.md#measurable-outcomes)
 
 **Checkpoint**: A CI run on `main` records `PASS` after this PR merges. Issue [#9](https://github.com/lambdasistemi/amaru-bootstrap/issues/9) closes when this job is green on `main`.
 
@@ -80,8 +80,8 @@ description: "Task list for 002-snapshot-emitter"
 
 ## Phase 4: Polish & Cross-Cutting Concerns
 
-- [ ] T016 [P] Add a `just emit <slot-dir> <out-file>` recipe to [`justfile`](../../../justfile) wrapping `nix run .#snapshot-emitter --`. Mirror the existing `just smoke` ergonomics
-- [ ] T017 Manual quickstart validation per [`quickstart.md`](./quickstart.md) on a clean checkout: record wall-clock time of the bridged smoke test against [spec.md SC-002](./spec.md#measurable-outcomes) (5-min budget) + paste verdict into the PR description
+- [x] T016 [P] Add a `just emit <slot-dir> <out-file>` recipe to [`justfile`](../../../justfile) wrapping `nix run .#snapshot-emitter --`. Mirror the existing `just smoke` ergonomics
+- [x] T017 Manual quickstart validation per [`quickstart.md`](./quickstart.md) on a clean checkout: record wall-clock time of the bridged smoke test against [spec.md SC-002](./spec.md#measurable-outcomes) (5-min budget) + paste verdict into the PR description
 - [ ] T018 Update [`specs/001-snapshot-format-smoke/plan.md`](../../../specs/001-snapshot-format-smoke/plan.md) Status block to note Phase 1 supersedes the Phase 0 verdict (link the merged Phase 1 PR + the new `PASS` CI run). Comment on issue [#9](https://github.com/lambdasistemi/amaru-bootstrap/issues/9) with the verdict and the green CI run URL; close the issue if the CI run on main is `PASS`
 
 ---
