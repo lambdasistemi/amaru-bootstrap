@@ -61,6 +61,7 @@ import Control.ResourceRegistry
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Short as SBS
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
@@ -72,7 +73,7 @@ import Ouroboros.Consensus.Block
     , unSlotNo
     )
 import Ouroboros.Consensus.Storage.Common
-    ( BlockComponent (GetBlock, GetHash, GetSlot)
+    ( BlockComponent (GetBlock, GetHash, GetRawHeader, GetSlot)
     )
 import Ouroboros.Consensus.Cardano.Block
     ( CardanoBlock
@@ -158,14 +159,26 @@ listBlocks dbDir nc = withImmDB dbDir nc $ \registry immDB -> do
         | (s, h) <- pairs
         ]
 
--- NOTE: stub for bisect-safety, real impl in T009.
-
 {- | Fetch a single header's CBOR bytes addressed by its
-@(slot, hash)@ pair.
+@(slot, hash)@ pair. The bytes returned are the on-disk header
+exactly as @cardano-node@ wrote them — no re-encoding.
 -}
 getHeader :: FilePath -> NodeConfig -> Integer -> Text -> IO ByteString
-getHeader _ _ _ _ =
-    error "HeaderExtractor.getHeader: stub - real implementation lands in T009"
+getHeader dbDir nc s hHex = do
+    sbs <- case B16.decode (TE.encodeUtf8 hHex) of
+        Right bs -> pure (SBS.toShort bs)
+        Left err ->
+            error $
+                "HeaderExtractor.getHeader: invalid hex hash "
+                    <> show hHex
+                    <> ": "
+                    <> err
+    withImmDB dbDir nc $ \_ immDB ->
+        LBS.toStrict
+            <$> ImmutableDB.getKnownBlockComponent
+                immDB
+                GetRawHeader
+                (RealPoint (fromIntegral s) (OneEraHash sbs))
 
 -- NOTE: stub for bisect-safety, removed in T010.
 
