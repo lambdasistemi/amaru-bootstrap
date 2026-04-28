@@ -1,6 +1,8 @@
 { pkgs
 , amaruPkg
 , iogTools
+, headerExtractorPkgs
+, bootstrapProducerImage
 }:
 
 # Flake checks: a derivation per artefact. Each test check builds a
@@ -25,6 +27,9 @@ in
   amaru = amaruPkg;
   db-synthesizer = iogTools.db-synthesizer;
   db-analyser = iogTools.db-analyser;
+  snapshot-converter = iogTools.snapshot-converter;
+  header-extractor = headerExtractorPkgs.header-extractor;
+  bootstrap-producer-image = bootstrapProducerImage;
 
   shellcheck = pkgs.runCommand "smoke-test-shellcheck"
     {
