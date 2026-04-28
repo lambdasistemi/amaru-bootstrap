@@ -92,12 +92,18 @@ in
     {
       nativeBuildInputs = [
         pkgs.bash
+        pkgs.coreutils
         headerExtractorPkgs.header-extractor-spec
       ];
     } ''
     set -euo pipefail
-    export HEADER_EXTRACTOR_TEST_CHAIN_DB=${synthesizedChainDb}/chain-db
-    export HEADER_EXTRACTOR_TEST_CONFIG=${fixture}/configs/configs
+    # ImmutableDB needs writable chunk + lock-file paths even for
+    # read-only queries. The synthesized chain DB lives in /nix/store
+    # which is read-only, so copy it into the build sandbox first.
+    cp -rL ${synthesizedChainDb}/chain-db $TMPDIR/chain-db
+    chmod -R u+w $TMPDIR/chain-db
+    export HEADER_EXTRACTOR_TEST_CHAIN_DB=$TMPDIR/chain-db
+    export HEADER_EXTRACTOR_TEST_CONFIG=${fixture}/configs/configs/config.json
     header-extractor-spec
     mkdir -p $out
   '';
@@ -120,7 +126,7 @@ in
       chmod -R u+w .
       patchShebangs tests
       export HEADER_EXTRACTOR_CHAIN_DB=${synthesizedChainDb}/chain-db
-      export HEADER_EXTRACTOR_CONFIG=${fixture}/configs/configs
+      export HEADER_EXTRACTOR_CONFIG=${fixture}/configs/configs/config.json
       bats --tap tests/test-header-extractor-cli.bats
       mkdir -p $out
     '';

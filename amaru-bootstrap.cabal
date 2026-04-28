@@ -27,12 +27,17 @@ library
 
   build-depends:
     , aeson
-    , base                          >=4.18 && <5
+    , base                                                          >=4.18 && <5
+    , base16-bytestring
     , bytestring
     , cardano-binary
+    , filepath
     , ouroboros-consensus
     , ouroboros-consensus-cardano
+    , ouroboros-consensus-cardano:unstable-cardano-tools
     , ouroboros-consensus-diffusion
+    , resource-registry
+    , stm
     , text
 
 executable header-extractor

@@ -14,7 +14,7 @@
 #   * `header-extractor` is on PATH (Nix check provides it via
 #     nativeBuildInputs)
 #   * HEADER_EXTRACTOR_CHAIN_DB points to a synthesised chain DB
-#   * HEADER_EXTRACTOR_CONFIG points to the node config dir
+#   * HEADER_EXTRACTOR_CONFIG points to the cardano-node config.json
 #     (the dir that contains config.json + the genesis files)
 # The Nix check `header-extractor-cli-bats` in nix/checks.nix wires
 # all three. Outside it the suite is skipped.
@@ -39,28 +39,28 @@ teardown() {
 @test "tip-info subcommand is recognised" {
   run header-extractor tip-info \
       --db "$HEADER_EXTRACTOR_CHAIN_DB" \
-      --config "$HEADER_EXTRACTOR_CONFIG/config.json"
+      --config "$HEADER_EXTRACTOR_CONFIG"
   [ "$status" -eq 0 ]
 }
 
 @test "list-blocks subcommand is recognised" {
   run header-extractor list-blocks \
       --db "$HEADER_EXTRACTOR_CHAIN_DB" \
-      --config "$HEADER_EXTRACTOR_CONFIG/config.json"
+      --config "$HEADER_EXTRACTOR_CONFIG"
   [ "$status" -eq 0 ]
 }
 
 @test "get-header subcommand is recognised" {
   run header-extractor list-blocks \
       --db "$HEADER_EXTRACTOR_CHAIN_DB" \
-      --config "$HEADER_EXTRACTOR_CONFIG/config.json"
+      --config "$HEADER_EXTRACTOR_CONFIG"
   [ "$status" -eq 0 ]
   first_pair="$(printf '%s\n' "$output" | jq -r '.data[0] | "\(.[0]).\(.[1])"')"
   [[ -n "$first_pair" && "$first_pair" != "null.null" ]]
 
   run header-extractor get-header "$first_pair" \
       --db "$HEADER_EXTRACTOR_CHAIN_DB" \
-      --config "$HEADER_EXTRACTOR_CONFIG/config.json"
+      --config "$HEADER_EXTRACTOR_CONFIG"
   [ "$status" -eq 0 ]
   # Output should be non-empty CBOR bytes; we don't decode, just
   # check the byte count is plausible for a header (>= 64 bytes).
@@ -70,7 +70,7 @@ teardown() {
 # ── flag parsing ─────────────────────────────────────────────────
 
 @test "tip-info rejects missing --db" {
-  run header-extractor tip-info --config "$HEADER_EXTRACTOR_CONFIG/config.json"
+  run header-extractor tip-info --config "$HEADER_EXTRACTOR_CONFIG"
   [ "$status" -ne 0 ]
 }
 
@@ -84,7 +84,7 @@ teardown() {
 @test "tip-info stdout is JSON with keys {slot, era, blockHash}" {
   run header-extractor tip-info \
       --db "$HEADER_EXTRACTOR_CHAIN_DB" \
-      --config "$HEADER_EXTRACTOR_CONFIG/config.json"
+      --config "$HEADER_EXTRACTOR_CONFIG"
   [ "$status" -eq 0 ]
 
   slot="$(printf '%s\n' "$output" | jq -r '.slot')"
@@ -99,7 +99,7 @@ teardown() {
 @test "tip-info on testnet_42 fixture reports Conway era" {
   run header-extractor tip-info \
       --db "$HEADER_EXTRACTOR_CHAIN_DB" \
-      --config "$HEADER_EXTRACTOR_CONFIG/config.json"
+      --config "$HEADER_EXTRACTOR_CONFIG"
   [ "$status" -eq 0 ]
   era="$(printf '%s\n' "$output" | jq -r '.era')"
   [ "$era" = "Conway" ]
@@ -110,7 +110,7 @@ teardown() {
 @test "rc=7 (tool-error: extract) on missing chain DB path" {
   run header-extractor tip-info \
       --db "$TMP_DIR/does-not-exist" \
-      --config "$HEADER_EXTRACTOR_CONFIG/config.json"
+      --config "$HEADER_EXTRACTOR_CONFIG"
   [ "$status" -eq 7 ]
 }
 
