@@ -117,6 +117,7 @@ in
         nativeBuildInputs = [
           pkgs.bash
           pkgs.bats
+          pkgs.coreutils
           pkgs.jq
           headerExtractorPkgs.header-extractor
         ];
@@ -125,7 +126,12 @@ in
       cp -rL ${headerExtractorTestTree}/. ./
       chmod -R u+w .
       patchShebangs tests
-      export HEADER_EXTRACTOR_CHAIN_DB=${synthesizedChainDb}/chain-db
+      # ImmutableDB needs writable chunk + lock-file paths even for
+      # read-only queries (see header-extractor-spec for the same
+      # workaround).
+      cp -rL ${synthesizedChainDb}/chain-db $TMPDIR/chain-db
+      chmod -R u+w $TMPDIR/chain-db
+      export HEADER_EXTRACTOR_CHAIN_DB=$TMPDIR/chain-db
       export HEADER_EXTRACTOR_CONFIG=${fixture}/configs/configs/config.json
       bats --tap tests/test-header-extractor-cli.bats
       mkdir -p $out

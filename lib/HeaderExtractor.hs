@@ -40,9 +40,6 @@ module HeaderExtractor
     , tipInfo
     , listBlocks
     , getHeader
-
-      -- * Stale stub (kept until T010 rewires @app\/header-extractor\/Main.hs@)
-    , placeholder
     ) where
 
 import Cardano.Tools.DBAnalyser.Block.Cardano
@@ -179,13 +176,6 @@ getHeader dbDir nc s hHex = do
                 immDB
                 GetRawHeader
                 (RealPoint (fromIntegral s) (OneEraHash sbs))
-
--- NOTE: stub for bisect-safety, removed in T010.
-
--- | Legacy placeholder consumed by the current Main.hs stub. Removed
--- once T010 rewires the CLI to dispatch over the real subcommands.
-placeholder :: String
-placeholder = "header-extractor stub - real implementation in T007-T010"
 
 -- ─── Internals ───────────────────────────────────────────────────
 
