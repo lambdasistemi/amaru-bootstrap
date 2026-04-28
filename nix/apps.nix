@@ -1,14 +1,16 @@
 { pkgs
 , amaruPkg
 , iogTools
+, snapshotEmitterPkg
 }:
 
 # Runnable wrappers exposed via `nix run .#<name>`.
 #
-# `smoke-test` is the project's primary deliverable: a single command
-# that runs the full Phase 0 pipeline and emits a verdict. It wraps
-# scripts/smoke-test.sh with a PATH that puts amaru, db-synthesizer,
-# and db-analyser ahead of any system installs.
+# `smoke-test` is the project's primary deliverable: one command that
+# runs the full Phase 0 pipeline (now Phase-1-bridged via
+# snapshot-emitter) and emits a verdict. It wraps scripts/smoke-test.sh
+# with a PATH that puts every tool the orchestrator invokes ahead of
+# any system installs.
 let
   smokeTest = pkgs.writeShellApplication {
     name = "smoke-test";
@@ -17,6 +19,7 @@ let
       amaruPkg
       iogTools.db-synthesizer
       iogTools.db-analyser
+      snapshotEmitterPkg
     ];
     text = ''
       exec ${../scripts/smoke-test.sh} "$@"
@@ -33,4 +36,5 @@ in
   amaru = mkApp amaruPkg "amaru";
   db-synthesizer = mkApp iogTools.db-synthesizer "db-synthesizer";
   db-analyser = mkApp iogTools.db-analyser "db-analyser";
+  snapshot-emitter = mkApp snapshotEmitterPkg "snapshot-emitter";
 }

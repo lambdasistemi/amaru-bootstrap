@@ -81,8 +81,14 @@
         project = import ./nix/project.nix { inherit pkgs CHaP; };
         amaruPkg = import ./nix/amaru.nix { inherit pkgs crane amaru; };
         iogTools = import ./nix/iog-tools.nix { inherit project; };
-        checks = import ./nix/checks.nix { inherit pkgs amaruPkg iogTools; };
-        apps = import ./nix/apps.nix { inherit pkgs amaruPkg iogTools; };
+        snapshotEmitterPkg =
+          import ./nix/snapshot-emitter.nix { inherit project; };
+        checks = import ./nix/checks.nix {
+          inherit pkgs amaruPkg iogTools snapshotEmitterPkg;
+        };
+        apps = import ./nix/apps.nix {
+          inherit pkgs amaruPkg iogTools snapshotEmitterPkg;
+        };
         shell = import ./nix/shell.nix { inherit pkgs project amaruPkg iogTools; };
       in
       {
@@ -90,6 +96,7 @@
           amaru = amaruPkg;
           db-synthesizer = iogTools.db-synthesizer;
           db-analyser = iogTools.db-analyser;
+          snapshot-emitter = snapshotEmitterPkg;
           default = amaruPkg;
         };
 
