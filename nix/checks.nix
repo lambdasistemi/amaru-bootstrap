@@ -22,6 +22,45 @@ let
       path = ../specs/001-snapshot-format-smoke/fixtures;
     }
   ];
+
+  fixture = ../specs/001-snapshot-format-smoke/fixtures/p1-config;
+
+  # Synthesised chain DB used by both the hspec (T005) and bats
+  # (T006) header-extractor checks. Nix caches the derivation so
+  # the cardano synthesis runs at most once per evaluation.
+  synthesizedChainDb = pkgs.runCommand "header-extractor-fixture-chain-db"
+    {
+      nativeBuildInputs = [
+        pkgs.bash
+        pkgs.jq
+        iogTools.db-synthesizer
+      ];
+    } ''
+    set -euo pipefail
+
+    fixture=${fixture}
+    CONFIGS_DIR="$fixture/configs/configs"
+    KEYS_DIR="$fixture/configs/keys"
+
+    BULK="$TMPDIR/bulk-credentials.json"
+    jq -n \
+        --slurpfile opcert "$KEYS_DIR/opcert.cert" \
+        --slurpfile vrf    "$KEYS_DIR/vrf.skey" \
+        --slurpfile kes    "$KEYS_DIR/kes.skey" \
+        '[[ $opcert[0], $vrf[0], $kes[0] ]]' \
+        >"$BULK"
+
+    EPOCH_LENGTH=$(jq -r '.epochLength' "$CONFIGS_DIR/shelley-genesis.json")
+    SLOTS=$((EPOCH_LENGTH * 2))
+
+    mkdir -p "$out/chain-db"
+    db-synthesizer \
+        --config "$CONFIGS_DIR/config.json" \
+        --bulk-credentials-file "$BULK" \
+        -s "$SLOTS" \
+        --db "$out/chain-db" \
+        -f
+  '';
 in
 {
   amaru = amaruPkg;
@@ -36,6 +75,26 @@ in
       nativeBuildInputs = [ pkgs.shellcheck ];
     } ''
     shellcheck -s bash -e SC1091 ${scriptSrc}
+    mkdir -p $out
+  '';
+
+  # T005 (failing hspec) — wires the HeaderExtractor library API
+  # tests. Reuses the shared synthesised chain DB and runs the hspec
+  # exe with env vars pointing to it. FAILS until T007-T009 replace
+  # the lib stubs (every spec exits with `error` from a stub body —
+  # that's the TDD red, the runCommand then fails which is what we
+  # want).
+  header-extractor-spec = pkgs.runCommand "header-extractor-spec"
+    {
+      nativeBuildInputs = [
+        pkgs.bash
+        headerExtractorPkgs.header-extractor-spec
+      ];
+    } ''
+    set -euo pipefail
+    export HEADER_EXTRACTOR_TEST_CHAIN_DB=${synthesizedChainDb}/chain-db
+    export HEADER_EXTRACTOR_TEST_CONFIG=${fixture}/configs/configs
+    header-extractor-spec
     mkdir -p $out
   '';
 
