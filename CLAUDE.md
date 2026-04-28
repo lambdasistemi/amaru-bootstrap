@@ -33,3 +33,10 @@ Project-specific guidance for AI agents. **Read [`.specify/memory/constitution.m
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
+
+## Active Technologies
+- Haskell GHC 9.6.7 via haskell.nix (same toolchain as the Phase 0 marker library) (002-snapshot-emitter)
+- filesystem only — read 2 files in, write 1 file out; no database, no state (002-snapshot-emitter)
+
+## Recent Changes
+- 002-snapshot-emitter: Added Haskell GHC 9.6.7 via haskell.nix (same toolchain as the Phase 0 marker library)
