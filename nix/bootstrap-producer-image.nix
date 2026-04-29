@@ -2,6 +2,7 @@
 , amaruPkg
 , iogTools
 , headerExtractor
+, ledgerStateEmitter
 }:
 
 # Layered docker image carrying the bootstrap-producer.
@@ -11,25 +12,30 @@
 # and Obs#1 (entrypoint shebang — /bin/sh is dash on most distros and
 # breaks bashisms; we use /bin/bash via the script's executable bit).
 #
-# Layered for cache-friendliness: heavy binary layers (db-analyser,
-# snapshot-converter, amaru, header-extractor) persist across builds;
-# only the orchestrator script's layer rebuilds when the orchestrator
-# changes (it changes most often).
+# Layered for cache-friendliness: heavy binary layers
+# (ledger-state-emitter, amaru, header-extractor) persist across
+# builds; only the orchestrator script's layer rebuilds when the
+# orchestrator changes (it changes most often).
 #
-# T003 ships this skeleton with a stub orchestrator so the image
-# builds; the real orchestrator script lands in T017-T019 and gets
-# wired into the image's contents in T020.
+# The image entrypoint is a small Nix wrapper that supplies PATH and
+# invokes the in-repo bash orchestrator directly with Nix's bash. This
+# avoids relying on /usr/bin/env inside the minimal dockerTools root.
 
 let
-  # NOTE: stub for bisect-safety, replaced in T020 by
-  # ${../scripts/bootstrap-producer.sh} (with chmod +x and bash
-  # shebang).
-  stubScript = pkgs.writeShellApplication {
+  bootstrapProducer = pkgs.writeShellApplication {
     name = "bootstrap-producer";
-    runtimeInputs = [ pkgs.bash pkgs.coreutils ];
+    runtimeInputs = [
+      pkgs.bash
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.gawk
+      pkgs.jq
+      ledgerStateEmitter
+      headerExtractor
+      amaruPkg
+    ];
     text = ''
-      echo "bootstrap-producer stub: real script lands in T017-T019" >&2
-      exit 64
+      exec ${pkgs.bash}/bin/bash ${../scripts/bootstrap-producer.sh} "$@"
     '';
   };
 
@@ -42,16 +48,17 @@ pkgs.dockerTools.buildLayeredImage {
     pkgs.dockerTools.binSh
     pkgs.bash
     pkgs.coreutils
+    pkgs.findutils
+    pkgs.gawk
     pkgs.jq
-    iogTools.db-analyser
-    iogTools.snapshot-converter
+    ledgerStateEmitter
     headerExtractor
     amaruPkg
-    stubScript
+    bootstrapProducer
   ];
 
   config = {
-    Entrypoint = [ "${stubScript}/bin/bootstrap-producer" ];
+    Entrypoint = [ "${bootstrapProducer}/bin/bootstrap-producer" ];
     Cmd = [ ];
   };
 }

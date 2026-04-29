@@ -17,40 +17,94 @@ produces this bundle today, but it depends on a personal fork of
 `ouroboros-consensus` (`abailly/snapshot-generator`) that is 1300+ commits
 behind upstream. That fork is unsustainable.
 
-This repo's hypothesis: **the same bundle can be produced from stock IOG tools**:
+This repo now produces the same kind of bundle without carrying a fork of
+`ouroboros-consensus`:
 
 1. [`db-synthesizer`](https://github.com/IntersectMBO/ouroboros-consensus/tree/main/ouroboros-consensus-cardano/app)
-   (upstream) — fabricate a chain DB
-2. [`db-analyser --store-ledger SLOT`](https://github.com/IntersectMBO/ouroboros-consensus/blob/main/ouroboros-consensus-cardano/app/DBAnalyser/Parsers.hs)
-   (upstream) — dump a ledger snapshot at each epoch boundary
-3. [`db-server`](https://github.com/pragma-org/db-server) — extract headers
+   (upstream) — fabricate test chain DBs for fixtures and checks
+2. `ledger-state-emitter` (in this repo) — read a cardano-node 10.7.1
+   chain DB and emit the Amaru bootstrap projection of the ledger state
+3. `header-extractor` (in this repo) — extract the headers Amaru needs
 4. `amaru convert-ledger-state` / `import-*` — load the bundle
-
-If that hypothesis holds, no fork of `ouroboros-consensus` is needed.
 
 ## Status
 
-Phase 0 — investigation. Smoke-testing whether
-`db-analyser --store-ledger` produces snapshots in the format
-`amaru convert-ledger-state` consumes.
+Phase 2 PR — bootstrap-producer implementation. The flake checks build
+the producer image and run a synthesized Conway-ready chain DB through
+emit, convert, header extraction, nonce composition, and Amaru imports.
 
-## Inputs / outputs (target contract)
+## What this PR adds
+
+- `bootstrap-producer`: a one-shot container/local app that waits until a
+  cardano-node chain DB is mature enough for Amaru, writes a complete
+  bootstrap bundle, then exits 0.
+- `header-extractor`: an in-repo Haskell executable for `tip-info`,
+  `list-blocks`, and `get-header` against a node ChainDB.
+- `ledger-state-emitter`: an in-repo Haskell executable that emits the
+  Amaru bootstrap projection of a node ledger state.
+- Nix checks for the full synthesized producer path and the concurrent
+  producer race.
+
+The architecture, state machine, release boundary, and concurrency model
+are documented with diagrams in `docs/architecture.md`.
+
+## Compatibility target
+
+This branch targets `cardano-node 10.7.1`. That is deliberate: Cardano
+ledger-state CBOR changes across node releases, so compiling against a
+random ledger package set is not enough. Retargeting this producer to a
+new node release means updating `cabal.project`, `flake.lock`, and the
+documented projection in
+`specs/003-amaru-bootstrap-producer/research.md#r-011`.
+
+`ledger-state-emitter` does not write raw node ledger CBOR. It writes
+the Amaru bootstrap projection of the node-10.7.1 state:
+
+- canonical UTxO entries instead of consensus `MemPack` ledger-table
+  entries
+- pre-Peras Shelley ledger wrapper shape for Amaru's converter
+- Conway/Dijkstra pool state projected to the fields Amaru imports
+- Conway/Dijkstra account state projected to Amaru's legacy delegation
+  wrapper
+
+## Inputs / outputs
 
 **Inputs**
 
-- a node `config.json` plus genesis files (Byron / Shelley / Alonzo / Conway)
-- pool credentials (KES / VRF / cold) or a bulk-credentials file
-- an epoch count
+- a live or mature cardano-node chain DB
+- a node config directory containing `config.json` and the genesis files
+- a target network name, for example `testnet_42` or `mainnet`
 
 **Outputs**
 
 ```
-out/
-├── chain.db/                              # populated
-├── ledger.db/                             # populated
-├── snapshots/<slot>.cbor                  # one per epoch boundary
-├── nonces.json                            # with `tail = <last-header-hash-of-prev-epoch>`
-└── headers/header.<slot>.<hash>.cbor      # a few entries
+<bundle>/<network>/
+├── chain.<network>.db/                    # populated by amaru import-headers/import-nonces
+├── ledger.<network>.db/                   # populated by amaru import-ledger-state
+├── snapshots/<slot>.<hash>.cbor           # converted snapshot consumed by import-ledger-state
+├── nonces.json                            # tail rewritten to previous-epoch header hash
+└── headers/header.<slot>.<hash>.cbor      # headers needed by Amaru
+```
+
+## Local verification
+
+```bash
+just ci
+```
+
+`just ci` mirrors the GitHub workflow: it runs the Build Gate, then runs
+the Phase 0 smoke verdict and accepts either `PASS` or the expected
+`FAIL: format mismatch` verdict. The producer-specific end-to-end check
+is `.#checks.x86_64-linux.bootstrap-producer-synthesized`.
+
+To run the producer locally against a ChainDB:
+
+```bash
+nix run .#bootstrap-producer -- \
+  /path/to/cardano-node/chain-db \
+  /path/to/cardano-node/config-dir \
+  /tmp/amaru-bundle \
+  testnet_42
 ```
 
 ## Consumers

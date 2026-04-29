@@ -2,11 +2,10 @@
 , CHaP
 }:
 
-# haskell.nix project: marker package `amaru-bootstrap` plus the
-# IntersectMBO/ouroboros-consensus source-repository-package pinned in
-# cabal.project. Provides hsPkgs for downstream consumers (most
-# importantly the db-synthesizer and db-analyser exes in
-# ouroboros-consensus-cardano).
+# haskell.nix project for the cardano-node 10.7.1-targeted
+# bootstrap producer. The local cabal.project pins the matching
+# ouroboros-consensus source tree so downstream consumers can use
+# upstream's db-synthesizer/db-analyser/snapshot-converter exes.
 let
   # cardano-crypto-praos and cardano-crypto-class declare pkg-config
   # dependencies on libsodium / secp256k1 / libblst; iohk-nix supplies
@@ -46,7 +45,9 @@ pkgs.haskell-nix.cabalProject' {
   shell = {
     withHoogle = false;
     tools = {
-      cabal = "latest";
+      cabal = {
+        version = "3.10.3.0";
+      };
     };
     buildInputs = with pkgs; [
       jq

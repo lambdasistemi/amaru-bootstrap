@@ -52,7 +52,6 @@ import Control.Concurrent.STM (atomically)
 import Control.Exception (bracket)
 import Control.ResourceRegistry
     ( ResourceRegistry
-    , runWithTempRegistry
     , withRegistry
     )
 import qualified Data.Aeson as Aeson
@@ -98,8 +97,8 @@ import qualified Ouroboros.Consensus.Storage.ChainDB as ChainDB
 import qualified Ouroboros.Consensus.Storage.ChainDB.Impl.Args as ChainDB
 import qualified Ouroboros.Consensus.Storage.ImmutableDB as ImmutableDB
 import qualified Ouroboros.Consensus.Storage.LedgerDB as LedgerDB
-import qualified Ouroboros.Consensus.Storage.LedgerDB.V2 as LedgerDB.V2
-import qualified Ouroboros.Consensus.Storage.LedgerDB.V2.Args as LedgerDB.V2
+import qualified Ouroboros.Consensus.Storage.LedgerDB.V2.Backend as V2Backend
+import qualified Ouroboros.Consensus.Storage.LedgerDB.V2.InMemory as V2InMemory
 
 -- | The path to the cardano-node @config.json@. Referenced genesis
 -- files (byron / shelley / alonzo / conway) are resolved relative to
@@ -202,8 +201,8 @@ withImmDB dbDir (NodeConfig configPath) action = do
         shfs = Node.stdMkChainDbHasFS dbDir
         chunkInfo = Node.nodeImmutableDbChunkInfo (configStorage cfg)
         flavargs =
-            LedgerDB.LedgerDbFlavorArgsV2
-                (LedgerDB.V2.V2Args LedgerDB.V2.InMemoryHandleArgs)
+            LedgerDB.LedgerDbBackendArgsV2 $
+                V2Backend.SomeBackendArgs V2InMemory.InMemArgs
     withRegistry $ \registry -> do
         let chainDbArgs =
                 ChainDB.completeChainDbArgs
@@ -218,7 +217,7 @@ withImmDB dbDir (NodeConfig configPath) action = do
                     ChainDB.defaultArgs
             immDbArgs = ChainDB.cdbImmDbArgs chainDbArgs
         bracket
-            (ImmutableDB.openDBInternal immDbArgs runWithTempRegistry)
+            (ImmutableDB.openDBInternal immDbArgs)
             (ImmutableDB.closeDB . fst)
             (\(immDB, _internal) -> action registry immDB)
 

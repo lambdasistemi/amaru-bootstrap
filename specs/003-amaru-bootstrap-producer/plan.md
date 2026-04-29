@@ -5,14 +5,15 @@
 
 ## Summary
 
-A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>`) that **follows any cardano-node's chain DB** (mainnet operator, antithesis cluster, anything in between), waits until the *immutable tip is era-ready for amaru's consumer* (Conway, with at least two preceding Conway epochs), then runs the full bootstrap pipeline as a one-shot container: pre-flight (era-readiness predicate evaluation, polling if the chain isn't yet ready), `db-analyser` dump, `snapshot-converter Mem→Legacy`, `amaru convert-ledger-state`, header extraction, nonces composition, three `amaru import-*` invocations, exit 0. On a mainnet-mature cardano-node the wait is a no-op; on an antithesis fresh cluster it's ~10-20 wall-minutes under simulator speedup. Its exit code is the synchronisation primitive — Amaru services in the same compose stack `depends_on` it via `condition: service_completed_successfully`. The bootstrap-producer itself `depends_on` the cardano-node only with `condition: service_started`. No marker file, no out-of-band signalling. Built with `nix dockerTools`, published to ghcr.io tagged by commit SHA via a new GitHub Actions workflow.
+A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>`) that **follows any cardano-node's chain DB** (mainnet operator, antithesis cluster, anything in between), waits until the *immutable tip is era-ready for amaru's consumer* (Conway, with at least two preceding Conway epochs), then runs the full bootstrap pipeline as a one-shot container: pre-flight (era-readiness predicate evaluation, polling if the chain isn't yet ready), `ledger-state-emitter` snapshot emission for the pinned cardano-node 10.7.1 ledger set, `amaru convert-ledger-state`, header extraction, nonces composition, three `amaru import-*` invocations, exit 0. On a mainnet-mature cardano-node the wait is a no-op; on an antithesis fresh cluster it's ~10-20 wall-minutes under simulator speedup. Its exit code is the synchronisation primitive — Amaru services in the same compose stack `depends_on` it via `condition: service_completed_successfully`. The bootstrap-producer itself `depends_on` the cardano-node only with `condition: service_started`. No marker file, no out-of-band signalling. Built with `nix dockerTools`, published to ghcr.io tagged by commit SHA via a new GitHub Actions workflow.
 
 ## Technical Context
 
-**Language/Version**: Bash 5.x (orchestrator script); Haskell GHC 9.6.x (existing tools, plus the small header-extractor tool from R-001)
+**Language/Version**: Bash 5.x (orchestrator script); Haskell GHC 9.6.x (header-extractor plus ledger-state-emitter)
 **Primary Dependencies**:
-- Existing: `db-analyser`, `snapshot-converter` (already in [`nix/iog-tools.nix`](../../../nix/iog-tools.nix)), `amaru` (already in [`nix/amaru.nix`](../../../nix/amaru.nix))
-- New: a header-extractor tool — see [research.md R-001](./research.md#r-001-header-extraction-without-pragma-orgdb-server) for the design choice (writing our own ~80-line tool against consensus 0.27, NOT using `pragma-org/db-server` which pins consensus 0.21 and is incompatible with our chain DB format)
+- Existing: `amaru` (already in [`nix/amaru.nix`](../../../nix/amaru.nix)); `db-analyser` and `snapshot-converter` remain available only for Phase 0 checks, not the producer runtime
+- New: `header-extractor` — see [research.md R-001](./research.md#r-001-header-extraction-without-pragma-orgdb-server) for the design choice (writing our own tool against consensus, NOT using `pragma-org/db-server` which pins an incompatible consensus revision)
+- New: `ledger-state-emitter` — see [research.md R-011](./research.md#r-011-ledger-snapshot-emitter-replaces-db-analyser--snapshot-converter) for the node-10.7.1 Amaru projection
 - New: `pkgs.dockerTools.buildLayeredImage` for the container image
 - New: `skopeo` or `docker push` for ghcr.io distribution
 
@@ -24,7 +25,7 @@ A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>`) that **f
 - **Mainnet / mature chain**: under 10 minutes, dominated by the snapshot pipeline (3-5 min); wait phase is a no-op (predicate satisfied at first poll)
 - **Antithesis fresh cluster** (Conway-genesis): under 30 minutes under the simulator's typical 100×-150× speedup; budget dominated by the wait for two Conway epochs (~10-20 wall-min) plus the snapshot pipeline.
 **Constraints**: zero forks (Principle I); pure Cabal-library / flake-input consumption; image tag = commit SHA, never `:main` (Principle III); built via Nix, never `docker build` (Principle IV).
-**Scale/Scope**: ~250-line bash orchestrator (incl. era-aware wait loop), ~120-line Haskell header-extractor (`list-blocks`, `get-header`, `tip-info`), ~30-line Cabal stanza, ~50-line Nix image module, one new GitHub Actions workflow.
+**Scale/Scope**: bash orchestrator (incl. era-aware wait loop), Haskell header-extractor (`list-blocks`, `get-header`, `tip-info`), Haskell ledger-state-emitter, Cabal/Nix wiring, one new GitHub Actions workflow.
 
 ## Constitution Check
 
@@ -33,9 +34,9 @@ A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>`) that **f
 | Principle | Verdict | Evidence |
 |-----------|---------|----------|
 | I. No forks | PASS | Header extraction does NOT use a forked tool. We write a small consumer of `ouroboros-consensus-cardano:unstable-cardano-tools` (already pulled in for Phase 1). `db-server` from `pragma-org/db-server` was considered and rejected — it pins consensus 0.21, incompatible with our 0.27 chain-DB format. See [research.md R-001](./research.md#r-001-header-extraction-without-pragma-orgdb-server) |
-| II. Stock tools, custom orchestration | PASS | Container image bundles three unmodified upstream binaries (`db-analyser`, `snapshot-converter`, `amaru` — mode (a)) plus our orchestrator script and a small in-repo `header-extractor` consuming `ouroboros-consensus` purely as a library (mode (b), explicitly permitted by [constitution v1.1.0](../../.specify/memory/constitution.md)). No upstream source extended |
+| II. Stock tools, custom orchestration | PASS | Container image bundles unmodified `amaru` plus our orchestrator script and in-repo Haskell consumers of `ouroboros-consensus`/`cardano-ledger` (`header-extractor`, `ledger-state-emitter`) purely as libraries (mode (b), explicitly permitted by [constitution v1.1.0](../../.specify/memory/constitution.md)). No upstream source extended |
 | III. Reproducibility by SHA | PASS | Image tag = commit SHA on every main merge; FR-010 makes this user-visible. `cabal.project` and `flake.lock` already SHA-pin everything else |
-| IV. Nix-first, haskell.nix | PASS | Image built via `pkgs.dockerTools.buildLayeredImage`, never `docker build`. Header-extractor adds an executable stanza to existing `amaru-bootstrap.cabal`. CI: `runs-on: nixos`, Build Gate adds the image-build check |
+| IV. Nix-first, haskell.nix | PASS | Image built via `pkgs.dockerTools.buildLayeredImage`, never `docker build`. Header-extractor and ledger-state-emitter are executable stanzas in existing `amaru-bootstrap.cabal`. CI: `runs-on: nixos`, Build Gate adds the image-build check |
 | V. Smallest provable step | PASS | Observable through one assertion: `docker compose up` on a stripped-down test stack lets the Amaru service reach its running phase |
 
 Re-check after Phase 1 design: see end of plan.
@@ -73,7 +74,7 @@ amaru-bootstrap/
 │   └── bootstrap-producer.sh            # NEW: the container's entrypoint
 ├── nix/
 │   ├── project.nix                      # adds header-extractor exposed module
-│   ├── iog-tools.nix                    # unchanged (db-analyser, snapshot-converter, db-synthesizer)
+│   ├── iog-tools.nix                    # Phase 0 tools (db-analyser, snapshot-converter, db-synthesizer)
 │   ├── amaru.nix                        # unchanged
 │   ├── header-extractor.nix             # NEW: extracts the new exe
 │   ├── bootstrap-producer-image.nix     # NEW: dockerTools.buildLayeredImage
@@ -96,7 +97,7 @@ amaru-bootstrap/
     └── publish-bootstrap-image.yml      # NEW: build + push image to ghcr.io
 ```
 
-**Structure Decision**: extend the existing single-cabal-package layout — add an `executable header-extractor` stanza, NOT a separate cabal package. Same justification as Phase 1: ~80 lines of Haskell does not earn a library/executable split. The bootstrap-producer container image is its own Nix module; its entrypoint is a bash orchestrator (matching the smoke-test pattern) that calls into the four binaries.
+**Structure Decision**: extend the existing single-cabal-package layout with executable stanzas for `header-extractor` and `ledger-state-emitter`, NOT separate cabal packages. Same justification as Phase 1: these are small tools tied to the producer contract. The bootstrap-producer container image is its own Nix module; its entrypoint is a bash orchestrator (matching the smoke-test pattern) that calls into the runtime tools.
 
 ## Open Questions Resolved
 
@@ -129,9 +130,8 @@ No new violations. Plan ready for `/speckit.tasks`.
 
 ## Status
 
-- **Phase 1 (T001-T004) — landed 2026-04-28**:
-  - cabal: `library` exposes `HeaderExtractor` (with consensus + cardano-binary + aeson + bytestring + text + ouroboros-consensus-diffusion deps); new `executable header-extractor` stanza imports the lib.
-  - nix: `nix/header-extractor.nix` extracts the exe; `nix/bootstrap-producer-image.nix` builds a 4-binary layered image (db-analyser, snapshot-converter, header-extractor, amaru) plus bash + jq + a stub orchestrator script. `nix/iog-tools.nix` extended with `snapshot-converter` (third exe of the same already-pinned ouroboros-consensus-cardano package).
-  - flake: new packages `header-extractor`, `snapshot-converter`, `bootstrap-producer-image`; new apps `header-extractor`, `snapshot-converter`, `bootstrap-producer` (stub); new checks `header-extractor`, `snapshot-converter`, `bootstrap-producer-image`.
-  - HeaderExtractor.hs and app/header-extractor/Main.hs land as bisect-safe stubs (`exit 64`, real implementation in T007-T011). Stubs are clearly annotated and replaced in Phase 2.
-  - Validated: `nix flake show` lists all new outputs; `nix build .#checks.x86_64-linux.{header-extractor,snapshot-converter,bootstrap-producer-image}` all green; `just build-gate` passes.
+- **Phase 1-3 (T001-T020) — landed on this branch**:
+  - cabal: `library` exposes `HeaderExtractor`, `AmaruBootstrap`, and `LedgerStateEmitter`; executable stanzas expose `header-extractor` and `ledger-state-emitter`.
+  - nix: `nix/header-extractor.nix` extracts both in-repo executables; `nix/bootstrap-producer-image.nix` builds a runtime image with `ledger-state-emitter`, `header-extractor`, `amaru`, bash/coreutils/findutils/gawk/jq, and the producer wrapper. `db-analyser` and `snapshot-converter` remain only for Phase 0 checks.
+  - flake: checks include the producer image, unit bats, header-extractor integration, `bootstrap-producer-bats` with the T016 concurrent race, and `bootstrap-producer-synthesized` for the full real Amaru import path.
+  - Validated locally: `nix build .#checks.x86_64-linux.bootstrap-producer-synthesized`, `nix build .#checks.x86_64-linux.bootstrap-producer-bats`, and image build all pass; `just build-gate` is the final Build Gate.

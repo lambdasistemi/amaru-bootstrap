@@ -12,22 +12,34 @@ Amaru cannot synchronise from genesis. To run on a custom (non-`mainnet` / non-`
 
 [`pragma-org/amaru/docker/testnet`](https://github.com/pragma-org/amaru/tree/main/docker/testnet) produces this bundle today, but it depends on a personal fork of `ouroboros-consensus` (`abailly/snapshot-generator`) that is 1300+ commits behind upstream. **That fork is the failure mode this project replaces.**
 
-This repo's hypothesis: **the same bundle can be produced from stock IOG tools**:
+This repo now produces the same kind of bundle without carrying a fork of `ouroboros-consensus`:
 
-1. [`db-synthesizer`](https://github.com/IntersectMBO/ouroboros-consensus/tree/main/ouroboros-consensus-cardano/app) (upstream) — fabricate a chain DB
-2. [`db-analyser --store-ledger SLOT`](https://github.com/IntersectMBO/ouroboros-consensus/blob/main/ouroboros-consensus-cardano/app/DBAnalyser/Parsers.hs) (upstream) — dump a ledger snapshot
-3. [`db-server`](https://github.com/pragma-org/db-server) — extract headers
+1. [`db-synthesizer`](https://github.com/IntersectMBO/ouroboros-consensus/tree/main/ouroboros-consensus-cardano/app) (upstream) — fabricate test chain DBs for fixtures and checks
+2. `ledger-state-emitter` (in this repo) — read a cardano-node 10.7.1 chain DB and emit the Amaru bootstrap projection of the ledger state
+3. `header-extractor` (in this repo) — extract the headers Amaru needs
 4. `amaru convert-ledger-state` / `import-*` — load the bundle
-
-If that hypothesis holds, no fork of `ouroboros-consensus` is ever needed.
 
 ## Status
 
-Phase 0 — investigation. Smoke-testing whether `db-analyser --store-ledger` produces snapshots in the format `amaru convert-ledger-state` consumes. See the active feature spec at [`specs/001-snapshot-format-smoke/`](https://github.com/lambdasistemi/amaru-bootstrap/tree/main/specs/001-snapshot-format-smoke).
+Phase 2 PR — bootstrap-producer implementation. The active spec is [`specs/003-amaru-bootstrap-producer/`](https://github.com/lambdasistemi/amaru-bootstrap/tree/main/specs/003-amaru-bootstrap-producer); the flake checks build the producer image and run a synthesized Conway-ready chain DB through emit, convert, header extraction, nonce composition, and Amaru imports.
+
+## Current implementation
+
+The producer is a one-shot container and local flake app. It waits until
+the immutable tip is in Conway with enough history for Amaru, emits a
+node-10.7.1-compatible ledger snapshot, converts it with Amaru, extracts
+headers, rewrites `nonces.json`, imports all three artifact classes into
+Amaru stores, and atomically commits the completed bundle.
+
+The current compatibility target is `cardano-node 10.7.1`. The
+`ledger-state-emitter` output is a release-specific Amaru bootstrap
+projection, not arbitrary raw node ledger CBOR.
 
 ## How to read this site
 
 - **[What Amaru needs](what-amaru-needs.md)** — reverse-engineered contract for the bootstrap bundle, drawn from Arnaud Bailly's loader scripts. Read this first if you want to understand *what* the project produces.
+- **[Architecture](architecture.md)** — diagrams for the runtime data flow, state machine, node-release boundary, ledger projection, and concurrency model.
+- **[Bootstrap producer](bootstrap-producer.md)** — current producer pipeline, node-release target, and verification commands.
 - **[Constitution](constitution.md)** — the five core principles that gate every design decision in this repo. Read this if you want to understand *why* the project is shaped the way it is.
 
 ## Consumers

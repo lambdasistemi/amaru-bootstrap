@@ -18,7 +18,7 @@ You already run a cardano-node on a host. It has been syncing or running for a w
 ```yaml
 services:
   cardano-node:                   # your existing service, unchanged
-    image: ghcr.io/intersectmbo/cardano-node:10.5.3
+    image: ghcr.io/intersectmbo/cardano-node:10.7.1
     volumes: [node-state:/state, node-configs:/configs]
     restart: always
 
@@ -52,10 +52,10 @@ services:
 ```
 + pre-flight: detected immutable tip slot=156784921 era=Conway
 + era-readiness predicate satisfied — target_slot=156784921 era=Conway
-+ db-analyser dump @ slot=156784921
-+ snapshot-converter Mem -> Legacy
++ ledger-state-emitter @ 156784921
 + amaru convert-ledger-state
 + header-extractor list-blocks
++ rewriting nonces.tail = <previous-epoch-header-hash>
 + amaru import-ledger-state
 + amaru import-headers
 + amaru import-nonces
@@ -76,7 +76,7 @@ The compose shape is identical to Scenario A; only the `AMARU_NETWORK` and the i
 + waiting for chain tip era-readiness — slot=312 era=Conway conway_first=0 (elapsed=42s)
 + waiting for chain tip era-readiness — slot=2871 era=Conway conway_first=0 (elapsed=10m12s)
 + era-readiness predicate satisfied — target_slot=172864 era=Conway
-+ db-analyser dump @ slot=172864
++ ledger-state-emitter @ 172864
 …
 wrote /srv/amaru/testnet_42
 ```
@@ -108,8 +108,8 @@ The bootstrap-producer's exit code tells you the failure class:
 | 1 | cluster-not-ready | cardano-node never created its chain DB. Did `cardano-node` start? Is the volume mount correct? |
 | 2 | chain-not-era-ready | era-readiness predicate never became true within `AMARU_WAIT_DEADLINE_SECONDS`. On antithesis: cluster stalled before forging two Conway epochs. On mainnet: shouldn't happen — if it does, your cardano-node is *behind* Conway and probably resyncing. |
 | 3 | configuration-error | config.json or genesis malformed. Fix the config volume mount. |
-| 4 | `db-analyser` failed | rare; chain DB corruption |
-| 5 | `snapshot-converter` failed | |
+| 4 | reserved | unused after the emitter collapsed the dump/emit front of the pipeline |
+| 5 | `ledger-state-emitter` failed | chain DB/config read, replay, or serialization failed |
 | 6 | `amaru convert-ledger-state` failed | |
 | 7 | `header-extractor` failed | |
 | 8 | nonces composition failed | |

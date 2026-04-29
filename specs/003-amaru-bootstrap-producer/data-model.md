@@ -12,7 +12,7 @@ A directory on the docker volume `<producer-name>-state`, owned by the cluster's
 <chain-db>/
 ├── immutable/        chain immutable DB (append-only — safe to read concurrently)
 ├── volatile/         chain volatile DB (currently-being-written — bootstrap-producer does NOT touch this)
-├── ledger/           ledger snapshots written by cardano-node (read by db-analyser via point-in-time copy)
+├── ledger/           ledger snapshots written by cardano-node (not required by the producer pipeline)
 └── …
 ```
 
@@ -37,7 +37,7 @@ The cluster's node `config.json` and the genesis files it references. Same shape
 └── (optional) dijkstra-genesis.json
 ```
 
-Mounted read-only from the cardano-node's compose-defined volume. Used by `db-analyser`, `snapshot-converter`, `header-extractor` for codec selection. `shelley-genesis.json` provides `epochLength`; the era-history (transitions to Allegra, Mary, Alonzo, Babbage, Conway) is derivable from the genesis files for known networks. Both feed the era-readiness predicate (below).
+Mounted read-only from the cardano-node's compose-defined volume. Used by `header-extractor` and `ledger-state-emitter` for codec selection and protocol parameters. `shelley-genesis.json` provides `epochLength`; the era-history (transitions to Allegra, Mary, Alonzo, Babbage, Conway) is derivable from the genesis files for known networks. Both feed the era-readiness predicate (below).
 
 ### Era-readiness predicate (derived)
 
@@ -62,7 +62,7 @@ Not a stored artefact; computed at pre-flight from the configuration and re-eval
 target_slot = tip.slot   (at the moment the era-readiness predicate first holds)
 ```
 
-Per [R-010](./research.md#r-010-era-readiness-predicate-and-snapshot-point-selection): no safety margin is subtracted because `tip.slot` is *the immutable tip slot*, by construction past the chain's volatility horizon. The snapshot pipeline runs against this slot; `db-analyser dump --slot=$target_slot` produces a snapshot that amaru's import commands then consume.
+Per [R-010](./research.md#r-010-era-readiness-predicate-and-snapshot-point-selection): no safety margin is subtracted because `tip.slot` is *the immutable tip slot*, by construction past the chain's volatility horizon. The snapshot pipeline runs against this slot; `ledger-state-emitter --target-slot=$target_slot` produces a Legacy `ExtLedgerState` CBOR snapshot that amaru's import commands consume after `amaru convert-ledger-state`.
 
 **Validation rules**: `epochLength` must be a positive integer. Any other value is a configuration-error (rc=3). The era-history derivable from genesis must contain a Conway entry; if it doesn't (operator pointed the bootstrap step at a pre-Conway-aware config), that's also rc=3.
 
@@ -111,8 +111,9 @@ The container running [`scripts/bootstrap-producer.sh`](../../../scripts/bootstr
                   ╔══════════════▼══════════════╗
                   ║ 2. ledger-state-emitter    ║──── error  ─→ rc=5 emit
                   ║    (chain DB @ slot ->     ║
-                  ║     legacy CBOR with       ║
-                  ║     amaru-shaped TxOuts;   ║
+                  ║     legacy CBOR using      ║
+                  ║     the node-10.7.1        ║
+                  ║     Amaru projection;      ║
                   ║     R-011)                 ║
                   ╚══════════════┬══════════════╝
                                  │

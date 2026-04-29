@@ -60,7 +60,7 @@ No optional positional flags. No interactive prompts.
 ## Stdout / stderr
 
 - **stdout during pre-flight**: progress lines, one per poll tick, e.g. `+ waiting for chain DB to appear (elapsed=12s)` then `+ waiting for chain tip era-readiness — slot=4567 era=Babbage conway_first=210000 (elapsed=4m32s)`. Cadence = `AMARU_POLL_INTERVAL_SECONDS`. On a mainnet-mature node the line `+ era-readiness predicate satisfied — target_slot=156784921 era=Conway` appears once and the orchestrator proceeds to the snapshot pipeline.
-- **stdout during snapshot pipeline**: progress lines, one per phase (`+ db-analyser …`, `+ snapshot-converter …`, …).
+- **stdout during snapshot pipeline**: progress lines, one per phase (`+ ledger-state-emitter …`, `+ amaru convert-ledger-state`, `+ header-extractor …`, `+ rewriting nonces.tail …`, `+ amaru import-*`).
 - **stdout final line on success**: `wrote /srv/amaru/<network>` (the bundle's absolute path).
 - **stderr**: each invoked tool's stderr is captured to a per-phase log file at `<bundle>/.logs/<phase>.stderr`. The phase name + path is also echoed to stderr for operator triage. On any non-zero exit, the orchestrator surfaces the failing phase's tail (last 50 lines) on stderr.
 
@@ -84,7 +84,7 @@ This is intentional — the bootstrap-producer is the *single waitable signal* f
 
 ## Determinism
 
-Per Phase 0 SC-005, inherited via composition: same input chain-db state at the same target slot + same network → bundle Amaru accepts identically. Internal storage details may differ (db-analyser snapshot internals can include timestamps), but Amaru's bootstrap behaviour is invariant.
+Per Phase 0 SC-005, inherited via composition: same input chain-db state at the same target slot + same network -> bundle Amaru accepts identically. Internal storage details may differ, but Amaru's bootstrap behaviour is invariant.
 
 The snapshot-point selection (R-010) is `target_slot = immutable_tip.slot at the moment era-readiness first holds`. On mainnet, where the cardano-node has been running for any non-trivial time, this is a function of the operator's local node — different operators will pick different `target_slot` values, but all of them are immutable-tips, and all of them are equally valid bootstrap points for amaru. Re-running the bootstrap step against the *same* cardano-node DB on the same machine at a later wall-clock time picks a *later* `target_slot` — that's expected, the chain has grown. Determinism in the SC-005 sense applies for runs against an unchanging input, not for runs against a chain that is still growing.
 

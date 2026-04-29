@@ -193,16 +193,14 @@ SNAPSHOT_SLOT="${EPOCH_LENGTH}"
 
 # Step 5: dump the ledger snapshot ─────────────────────────────────
 
-# db-analyser requires a LedgerDB backend flag. The fixture's
-# config.json sets `LedgerDB.Backend = V2InMemory`, so we pass
-# --v2-in-mem to match. If the bundle config ever switches backends
-# this flag must follow.
+# db-analyser requires a LedgerDB backend flag. In the cardano-node
+# 10.7.1 consensus release this flag is `--in-mem` for the V2
+# in-memory backend used by the fixture.
 DUMP_RC=0
 db-analyser \
     --db "${OUT}/chain-db" \
     --store-ledger "${SNAPSHOT_SLOT}" \
-    --v2-in-mem \
-    cardano \
+    --in-mem \
     --config "${CONFIGS_DIR}/config.json" \
     2>"${OUT}/dump.stderr.log" \
     || DUMP_RC=$?
