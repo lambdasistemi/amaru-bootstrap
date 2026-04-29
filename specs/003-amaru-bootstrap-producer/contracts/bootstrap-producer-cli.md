@@ -48,8 +48,8 @@ No optional positional flags. No interactive prompts.
 | `1` | cluster-not-ready | cardano-node's chain DB never appeared (or never had a non-empty `immutable/`) within `AMARU_CLUSTER_READY_DEADLINE_SECONDS` |
 | `2` | chain-not-era-ready | era-readiness predicate ([R-010](../research.md#r-010-era-readiness-predicate-and-snapshot-point-selection)) never became true within `AMARU_WAIT_DEADLINE_SECONDS` (chain hasn't reached two preceding epochs of the era amaru consumes) |
 | `3` | configuration-error | config.json or referenced genesis missing/unparseable, `epochLength` not a positive integer, or no Conway entry in era-history |
-| `4` | tool-error: dump | `db-analyser` failed |
-| `5` | tool-error: emit | `snapshot-converter` failed |
+| `4` | (reserved) | unused after [R-011](../research.md#r-011-ledger-snapshot-emitter-replaces-db-analyser--snapshot-converter) collapsed the snapshot-pipeline front into one step; preserved for registry stability |
+| `5` | tool-error: emit | `ledger-state-emitter` failed |
 | `6` | tool-error: convert | `amaru convert-ledger-state` failed |
 | `7` | tool-error: extract | `header-extractor` failed (including `tip-info` failures during the polling loop after the chain DB has appeared) |
 | `8` | tool-error: nonces | `jq` nonces composition failed |

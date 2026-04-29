@@ -67,11 +67,12 @@ Workflow uses default `GITHUB_TOKEN` with `permissions: { packages: write }` —
 **Decision**: `pkgs.dockerTools.buildLayeredImage` with these layers:
 
 - Base: `pkgs.dockerTools.binSh` + `pkgs.coreutils` + `pkgs.jq` + `pkgs.bash`
-- Layer 1: `db-analyser` (from `nix/iog-tools.nix`)
-- Layer 2: `snapshot-converter` (from `nix/iog-tools.nix`)
-- Layer 3: `header-extractor` (from `nix/header-extractor.nix`)
-- Layer 4: `amaru` (from `nix/amaru.nix`)
-- Layer 5: the orchestrator script (`scripts/bootstrap-producer.sh`)
+- Layer 1: `ledger-state-emitter` (from `nix/header-extractor.nix`'s sibling exe — see [R-011](#r-011-ledger-snapshot-emitter-replaces-db-analyser--snapshot-converter))
+- Layer 2: `header-extractor` (from `nix/header-extractor.nix`)
+- Layer 3: `amaru` (from `nix/amaru.nix`)
+- Layer 4: the orchestrator script (`scripts/bootstrap-producer.sh`)
+
+`db-analyser` and `snapshot-converter` are **not** in the runtime image — they are replaced by `ledger-state-emitter` per R-011. They remain in `nix/iog-tools.nix` only as build-time inputs to flake checks (the Phase 0 smoke test still uses `db-analyser`).
 
 Entrypoint = `["/scripts/bootstrap-producer.sh"]`, with `pkgs.bash` included in the image's `contents` so the script's `#!/usr/bin/env bash` shebang resolves. **Do not** use `["/bin/sh", "/scripts/bootstrap-producer.sh"]` — `/bin/sh` is `dash` on Debian/Ubuntu derivatives, which silently breaks `set -euo pipefail` (no `pipefail`), `[[ … ]]`, arrays, `<<<` here-strings, and other bashisms the orchestrator uses (Obs#1). The script's executable bit must be set (chmod +x in the layer build).
 
@@ -258,3 +259,68 @@ The snapshot point being the immutable tip means amaru receives the freshest ava
 - `target_slot = tip.slot − 1 × epochLength` for cosmetic alignment with epoch boundaries — rejected: forces an extra epoch of wait on antithesis cold-start with no consumer-side benefit.
 - Compute era boundaries online from the chain itself rather than from genesis files — rejected: requires a full ledger replay; for known networks the era-history is a constant.
 - Extend the predicate to require ≥3 or more preceding Conway epochs ("safety belt") — rejected: amaru's consumer requires 2 (one for snapshot's nonces, one for snapshot.previousEpoch.nonces); 3 is unprincipled.
+
+## R-011: Ledger-snapshot emitter (replaces db-analyser + snapshot-converter)
+
+**Decision**: build a small Haskell exe in this repo, `ledger-state-emitter`, that opens the chain DB at `target_slot` and writes a single CBOR file in the exact shape `amaru convert-ledger-state` expects to consume. This **replaces** the `db-analyser --store-ledger` + `snapshot-converter Mem -> Legacy` pair as the front of the snapshot pipeline. The orchestrator's `phase_dump` and `phase_emit` collapse into one `phase_emit` step.
+
+**Rationale**: the `db-analyser → snapshot-converter` pair produces a Legacy `ExtLedgerState` CBOR file in which the UTxO entries (`Map TxIn TxOut`) are serialised as raw CBOR byte strings via `defaultEncodeTablesWithHint`'s `MemPack` path:
+
+```haskell
+-- from Ouroboros.Consensus.Ledger.Tables
+defaultEncodeTablesWithHint _ (LedgerTables (ValuesMK tbs)) =
+  mconcat
+    [ CBOR.encodeMapLen (fromIntegral $ Map.size tbs)
+    , Map.foldMapWithKey (\k v ->
+        CBOR.encodeBytes (packByteString k) <>     -- TxIn as MemPack bytes
+        CBOR.encodeBytes (packByteString v))       -- TxOut as MemPack bytes
+        tbs
+    ]
+```
+
+`amaru convert-ledger-state` (and its consumer `amaru import-ledger-state`) expect TxOut entries in the canonical `EncCBOR (TxOut era)` shape — a CBOR map (modern, `{0:addr,1:value,2:datum,3:script}`) or array (legacy, `[addr,value,?datum]`), per `Cardano.Ledger.Babbage.TxOut.encCBOR`. amaru's `MemoizedTransactionOutput::decode` errors on a `Type::Bytes` input and the surrounding `import_utxo` loop converts that into `"end of input bytes"`. End-to-end repro under `/tmp/t019-diag/` (see PR thread).
+
+`cardano-api`'s `encodeLedgerState` reuses `Shelley.encodeShelleyLedgerState` and produces the same MemPack-bytes output, so cardano-api does not help. The de-compaction step performed by `ogmios` (which amaru's [`data/fetch.mjs`](https://github.com/pragma-org/amaru/blob/main/data/fetch.mjs) treats as the canonical snapshot source) happens on ogmios's read path: it streams the GetCBOR result, `MemPack`-decodes each TxOut, then re-encodes via `cardano-ledger`'s `EncCBOR` instance. We mirror that read-path locally.
+
+**Implementation**:
+
+```
+ledger-state-emitter \
+    --db <chain-db> \
+    --config <node-config.json> \
+    --target-slot <SLOT> \
+    --out <output.cbor>
+```
+
+1. `mkProtocolInfo` from `Cardano.Tools.DBAnalyser.Block.Cardano` (already in `cabal.project`, used by `header-extractor`'s `tipInfo`).
+2. Open the LedgerDB read-only in V2InMemory mode at `target_slot` — same code path `db-analyser --store-ledger` uses internally.
+3. Extract the in-memory `ExtLedgerState blk EmptyMK` and the `LedgerTables blk ValuesMK` (UTxO).
+4. Emit a CBOR file whose outer envelope is identical to `encodeDiskExtLedgerState` (version + ext-ledger-state telescope + tip + chain-dep-state), but where the UTxO tables go through a custom encoder:
+
+```haskell
+-- pseudocode of the only deviation from consensus's default
+encodeUtxoForAmaru utxo =
+  encodeMapLen (Map.size utxo) <>
+  Map.foldMapWithKey (\txin txout ->
+    encCBOR txin <> encCBOR txout)        -- standard cardano-ledger EncCBOR
+    utxo
+```
+
+The rest of the file (HFC telescope, `ChainDepState`, `AnnTip`, era bounds) is byte-identical to consensus's Legacy output, so amaru's existing `convert-ledger-state` parser walks it unchanged.
+
+**Where the boundary sits**: `amaru convert-ledger-state` stays in the pipeline. We deliberately do **not** absorb its work (slicing the inner ledger state + producing `nonces.<slot>.<hash>.json` + `history.<slot>.<hash>.json`). Reasons captured:
+
+- Three contracts vs. one. `import-*` consumes a CBOR snapshot AND a separate `history.json` (read by `make_era_history` for testnets) AND a separate `nonces.json`. Producing all three ourselves means owning amaru's `serde::Serialize` JSON shapes for `EraHistory`, `EraSummary`, `EraBound`, `InitialNonces`, `Point`, `Nonce`, `HeaderHash`. Keeping `convert-ledger-state` lets amaru's upstream Rust types stay the source of truth; we own one CBOR contract instead of three.
+- Failure attribution. If `import-ledger-state` errors on the converted file, the bug is upstream of our code. If we emit all three, every category of failure becomes our problem.
+- Cost. `convert-ledger-state` is a single CBOR pass over a ~16 KB file. Not a bottleneck.
+
+**Image layout impact (R-004 update)**: the runtime image drops `db-analyser` and `snapshot-converter` from its layers and adds `ledger-state-emitter`. Net layer count unchanged; net runtime image size smaller (one Haskell binary replaces two).
+
+**Test surface**: T019b adds a flake check `ledger-state-emitter-spec` (hspec) that emits a snapshot from the synthesised chain DB and decodes the result via `amaru convert-ledger-state` + `amaru import-ledger-state`, asserting both succeed. T016 (concurrent) becomes wireable once T019b is green.
+
+**Alternatives considered**:
+- **Patch consensus's `defaultEncodeTablesWithHint` to emit canonical CBOR** — violates Principle I (we'd be carrying a fork of consensus).
+- **Patch amaru's `MemoizedTransactionOutput::decode` to also accept `Type::Bytes` (MemPack form)** — clean upstream PR; we'll file it for the long term, but it can't gate this project's deliverable. Even if accepted, downstream users on older amaru versions would still hit the gap.
+- **Run `ogmios` in the bootstrap-producer image as a sidecar to the cardano-node** — Principle-II compliant but doubles the image surface (ogmios + node), requires cardano-node IPC plumbing inside the producer, and replaces a 150-line Haskell tool with a multi-process service for no semantic benefit.
+- **CBOR-to-CBOR converter as a post-process on snapshot-converter's output** — feasible but more brittle: requires byte-surgery on the embedded UTxO map mid-stream, and embeds knowledge of cardano-ledger's `MemPack` format into our orchestrator. The emitter approach goes through the typed Haskell API directly.
+- **Skip `amaru convert-ledger-state` and emit all three artifacts directly** — see "Where the boundary sits" above; rejected on contract-surface grounds.
