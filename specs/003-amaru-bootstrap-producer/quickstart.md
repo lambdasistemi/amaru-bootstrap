@@ -27,7 +27,7 @@ services:
     environment:
       AMARU_NETWORK: mainnet
     volumes:
-      - node-state:/cardano/state:ro
+      - node-state:/cardano/state
       - node-configs:/cardano/config:ro
       - amaru-bundle:/srv/amaru
     depends_on:
@@ -99,6 +99,10 @@ nix run .#bootstrap-producer -- \
 
 The pre-flight semantics are the same: zero wait on a mature DB, polling wait on a fresh one.
 
+The chain DB mount is intentionally read-write. The producer only
+queries immutable chunks, but node-10.7.1's consensus ImmutableDB opener
+validates chunk files through APIs that fail on a read-only filesystem.
+
 ## What if it fails?
 
 The bootstrap-producer's exit code tells you the failure class:
@@ -111,7 +115,7 @@ The bootstrap-producer's exit code tells you the failure class:
 | 4 | reserved | unused after the emitter collapsed the dump/emit front of the pipeline |
 | 5 | `ledger-state-emitter` failed | chain DB/config read, replay, or serialization failed |
 | 6 | `amaru convert-ledger-state` failed | |
-| 7 | `header-extractor` failed | |
+| 7 | `header-extractor` failed | If this happens during pre-flight, check that the chain DB volume is not mounted read-only. node-10.7.1 validates immutable chunks through APIs that require write permissions. |
 | 8 | nonces composition failed | |
 | 9 | `amaru import-*` failed | |
 | 10 | filesystem error during atomic commit | |

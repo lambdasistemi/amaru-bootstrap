@@ -361,25 +361,25 @@ replayLoop ::
     SlotNo ->
     IO (ExtLedgerState (CardanoBlock StandardCrypto) ValuesMK)
 replayLoop cfg registry immutableDB ledgerDB targetSlot = do
-    startPoint <- headerStatePoint . headerState <$> atomically (LedgerDB.getVolatileTip ledgerDB)
+    initialLedger <- atomically $ LedgerDB.getVolatileTip ledgerDB
+    let startPoint = headerStatePoint $ headerState initialLedger
     iterator <-
         ImmutableDB.streamAfterKnownPoint
             immutableDB
             registry
             GetBlock
             startPoint
-    go iterator
+    go initialLedger iterator
   where
     ledgerCfg = ExtLedgerCfg cfg
 
-    go iterator =
+    go oldLedger iterator =
         ImmutableDB.iteratorNext iterator >>= \case
             ImmutableDB.IteratorExhausted ->
                 fail $
                     "ledger-state-emitter: no immutable block at or after target slot "
                         <> show targetSlot
             ImmutableDB.IteratorResult block -> do
-                oldLedger <- atomically $ LedgerDB.getVolatileTip ledgerDB
                 LedgerDB.withTipForker ledgerDB $ \forker -> do
                     tables <- LedgerDB.forkerReadTables forker (getBlockKeySets block)
                     let oldLedgerWithTables =
@@ -403,7 +403,7 @@ replayLoop cfg registry immutableDB ledgerDB targetSlot = do
                                 <> show (blockSlot block)
                     if blockSlot block >= targetSlot
                         then pure newLedgerWithValues
-                        else go iterator
+                        else go (stowLedgerTables newLedgerWithValues) iterator
 
 {- | The stock extended-ledger-state envelope, but with the ledger-state
 branch using canonical UTxO encoding.

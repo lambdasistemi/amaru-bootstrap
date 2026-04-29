@@ -35,6 +35,11 @@ The current compatibility target is `cardano-node 10.7.1`. The
 `ledger-state-emitter` output is a release-specific Amaru bootstrap
 projection, not arbitrary raw node ledger CBOR.
 
+The producer's ChainDB access is immutable-only by behavior, but the
+node-10.7.1 consensus ImmutableDB opener requires a writable filesystem
+while validating chunk files. Compose integrations therefore mount the
+node state volume read-write and keep the config volume read-only.
+
 ## How to read this site
 
 - **[What Amaru needs](what-amaru-needs.md)** — reverse-engineered contract for the bootstrap bundle, drawn from Arnaud Bailly's loader scripts. Read this first if you want to understand *what* the project produces.

@@ -18,7 +18,7 @@ A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>`) that **f
 - New: `skopeo` or `docker push` for ghcr.io distribution
 
 **Storage**: filesystem only — read cardano-node's chain DB, write the bundle to a docker volume. No database, no state.
-**Testing**: bats integration tests covering each exit-code class (per [data-model.md error registry](./data-model.md#error-class-registry)) plus a live-cluster end-to-end test exercising the antithesis cold-start path. Each test is a self-contained bats file under `tests/test-bootstrap-producer-*.bats`; no dependency on artefacts from prior phases that aren't yet on `main`.
+**Testing**: bats integration tests covering each exit-code class (per [data-model.md error registry](./data-model.md#error-class-registry)) plus a Docker-level live node-10.7.1 ChainDB verifier. Each test is a self-contained bats file under `tests/test-bootstrap-producer-*.bats`; no dependency on artefacts from prior phases that aren't yet on `main`.
 **Target Platform**: Linux x86_64; the container runs in any docker-compose environment.
 **Project Type**: tooling/CLI + container image (single binary's worth of orchestration delivered as a docker image).
 **Performance Goals**: End-to-end wall-clock from `docker compose up` to amaru-1 reaching running phase:
@@ -130,8 +130,11 @@ No new violations. Plan ready for `/speckit.tasks`.
 
 ## Status
 
-- **Phase 1-3 (T001-T020) — landed on this branch**:
+- **Phase 1-3 (T001-T021) — landed on this branch**:
   - cabal: `library` exposes `HeaderExtractor`, `AmaruBootstrap`, and `LedgerStateEmitter`; executable stanzas expose `header-extractor` and `ledger-state-emitter`.
   - nix: `nix/header-extractor.nix` extracts both in-repo executables; `nix/bootstrap-producer-image.nix` builds a runtime image with `ledger-state-emitter`, `header-extractor`, `amaru`, bash/coreutils/findutils/gawk/jq, and the producer wrapper. `db-analyser` and `snapshot-converter` remain only for Phase 0 checks.
   - flake: checks include the producer image, unit bats, header-extractor integration, `bootstrap-producer-bats` with the T016 concurrent race, and `bootstrap-producer-synthesized` for the full real Amaru import path.
-  - Validated locally: `nix build .#checks.x86_64-linux.bootstrap-producer-synthesized`, `nix build .#checks.x86_64-linux.bootstrap-producer-bats`, and image build all pass; `just build-gate` is the final Build Gate.
+  - live verifier: `tests/test-bootstrap-producer-live.bats` seeds a stock `testnet_42` ChainDB with `db-synthesizer`, adds the node-10.7.1 DB marker, runs `ghcr.io/intersectmbo/cardano-node:10.7.1` against that DB, and runs the bootstrap-producer image while the official node has the DB open.
+  - design correction from T021: the ChainDB mount is read-write, not `:ro`. The producer still consults only immutable chunks; the write permission is required because node-10.7.1 consensus validation opens immutable chunk files through APIs that reject a read-only filesystem.
+  - validated locally: `nix build .#checks.x86_64-linux.ledger-state-emitter .#checks.x86_64-linux.bootstrap-producer-synthesized`, `nix build .#checks.x86_64-linux.shellcheck`, `mkdocs build --strict`, the Docker-level live verifier, and `just ci`.
+  - `just ci` reached the Phase 0 smoke verdict `FAIL: format mismatch`; this is an accepted hypothesis outcome for that legacy smoke job, not a producer failure. The producer-specific Build Gate checks and live node-10.7.1 verifier passed.

@@ -185,12 +185,14 @@ phase_preflight() {
     local era_deadline
     era_deadline=$(( $(date +%s) + AMARU_WAIT_DEADLINE_SECONDS ))
     poll_start=$(date +%s)
-    local info slot era
+    local info slot era tip_err
+    tip_err="${BUNDLE_DIR}/.logs/tip-info.stderr"
+    mkdir -p "${BUNDLE_DIR}/.logs"
     while :; do
         info=""
         if info=$(header-extractor tip-info \
                       --db "${CHAIN_DB}" \
-                      --config "${config_json}" 2>/dev/null); then
+                      --config "${config_json}" 2>"${tip_err}"); then
             slot=$(jq -r '.slot' <<<"${info}")
             era=$(jq -r '.era' <<<"${info}")
             if [[ "${era}" == "Conway" ]] \
@@ -204,6 +206,12 @@ phase_preflight() {
                    "${slot}" "${era}" "${conway_first_slot}" \
                    $(( $(date +%s) - poll_start ))
         else
+            if grep -qiE 'FsInsufficientPermissions|Read-only file system|permission denied' "${tip_err}" 2>/dev/null; then
+                printf 'header-extractor tip-info cannot open chain DB; mount the cardano-node chain DB read-write (the producer only reads immutable chunks, but consensus validation opens chunk files with write permissions). See %s\n' \
+                       "${tip_err}" >&2
+                tail_phase_log tip-info
+                exit 7
+            fi
             printf '+ waiting for chain DB tip (header-extractor pending, elapsed=%ds)\n' \
                    $(( $(date +%s) - poll_start ))
         fi
