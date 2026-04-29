@@ -45,6 +45,29 @@ build-gate:
 bats:
     nix build --quiet .#checks.x86_64-linux.smoke-test-bats
 
+# Run the Docker-level live cardano-node verifier. This is intentionally
+# outside `build-gate` because it needs a Docker daemon.
+live-bootstrap-producer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    nix build --quiet \
+        .#packages.x86_64-linux.bootstrap-producer-image \
+        -o result-bootstrap-producer-image
+    nix --quiet shell nixpkgs#docker-client \
+        -c docker load -i result-bootstrap-producer-image
+    BOOTSTRAP_PRODUCER_IMAGE=amaru-bootstrap-producer:dev \
+    CARDANO_NODE_IMAGE=ghcr.io/intersectmbo/cardano-node:10.7.1 \
+        nix --quiet shell \
+            .#checks.x86_64-linux.db-synthesizer \
+            nixpkgs#bash \
+            nixpkgs#bats \
+            nixpkgs#coreutils \
+            nixpkgs#findutils \
+            nixpkgs#gnugrep \
+            nixpkgs#jq \
+            nixpkgs#docker-client \
+            -c bats --tap tests/test-bootstrap-producer-live.bats
+
 # Lint scripts/smoke-test.sh.
 shellcheck:
     nix build --quiet .#checks.x86_64-linux.shellcheck
@@ -75,3 +98,4 @@ ci:
             exit 1
             ;;
     esac
+    just live-bootstrap-producer

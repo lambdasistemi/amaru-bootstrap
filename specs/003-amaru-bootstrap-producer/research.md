@@ -195,7 +195,9 @@ header-extractor tip-info --db <chain-db> --config <cfg>
 {"slot": 156784921, "era": "Conway", "blockHash": "abc..."}
 ```
 
-It opens the immutable DB read-only, returns the tip's slot, era, and block-hash as JSON on stdout, exits 0. Exit non-zero (with stderr message) if the immutable DB doesn't exist yet or is unreadable.
+It opens only the immutable DB, returns the tip's slot, era, and
+block-hash as JSON on stdout, exits 0. Exit non-zero (with stderr
+message) if the immutable DB doesn't exist yet or is unreadable.
 
 The orchestrator's pre-flight loop evaluates the era-readiness predicate (R-010):
 
@@ -219,7 +221,7 @@ while :; do
 done
 ```
 
-**Rationale**: simplest possible mechanism. Reading the immutable DB while another process writes to the volatile DB is safe because the immutable portion is append-only — once a chunk is finalised, it never mutates. `Ouroboros.Consensus.Storage.ImmutableDB.openDB` in read-only mode is precisely the API db-analyser uses for the same purpose. No chain-follower subscription, no consensus state-machine reasoning, no concurrent-reader contract negotiation with the writer.
+**Rationale**: simplest possible mechanism. Reading the immutable DB while another process writes to the volatile DB is safe because the immutable portion is append-only — once a chunk is finalised, it never mutates. T021 live verification against `ghcr.io/intersectmbo/cardano-node:10.7.1` showed one important filesystem constraint: the consensus ImmutableDB validation path opens chunk files through APIs that fail on a read-only mount. The bootstrap-producer therefore requires a read-write chain DB mount, while still consulting only immutable chunks and ignoring volatile state. No chain-follower subscription, no consensus state-machine reasoning, no concurrent-reader contract negotiation with the writer.
 
 Returning the tip's *era* alongside its slot is a small extension over the simpler `tip-slot` shape: the underlying `Ouroboros.Consensus.HardFork.Combinator` exposes per-block era tags, so the cost is one additional pattern-match on the tip's `EraIndex`.
 
@@ -227,6 +229,7 @@ The 10-second poll cadence is gentle on the cardano-node's I/O. The 90-minute wa
 
 **Alternatives considered**:
 - Open a full ChainDB (volatile + immutable + ledger) read-only and use `getCurrentChain` — rejected: opening a writer's volatile DB concurrently is not a contract consensus advertises as safe; we'd be in undefined-behaviour territory
+- Mount the ChainDB read-only into the bootstrap-producer — rejected by live node-10.7.1 verification: `header-extractor tip-info` fails with `FsInsufficientPermissions` while consensus validates immutable chunk files. The semantic contract is immutable-only reads, not a read-only filesystem mount.
 - Subscribe as a chain follower (`ChainDB.newFollower`) — rejected: requires the full ChainDB stack and per-block decoding of the entire chain, every poll. Massive overkill when we just need the tip slot+era.
 - Run `db-analyser --analyse-only --show-slot-block-no` and parse stdout — rejected: db-analyser opens the database in a mode that conflicts with a concurrent writer; designed for offline post-mortem analysis
 - Have the cardano-node write a `current-slot` / `current-era` marker file — violates Principle I (forks the node)

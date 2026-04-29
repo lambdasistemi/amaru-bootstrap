@@ -9,13 +9,14 @@ current branch targets `cardano-node 10.7.1`.
 
 ```mermaid
 flowchart LR
-    node["cardano-node\nchain DB + config"] --> preflight["bootstrap-producer\npre-flight"]
+    node["cardano-node\nchain DB + config"] --> mount["state mount rw\nconfig mount ro"]
+    mount --> preflight["bootstrap-producer\npre-flight"]
     preflight --> emitter["ledger-state-emitter\nnode-10.7.1 projection"]
     emitter --> legacy["Legacy ExtLedgerState CBOR"]
     legacy --> convert["amaru convert-ledger-state"]
     convert --> snapshot["snapshot CBOR\nhistory JSON\nnonces JSON"]
 
-    node --> headers["header-extractor\nlist-blocks/get-header"]
+    mount --> headers["header-extractor\nlist-blocks/get-header"]
     headers --> headerFiles["header.*.cbor files"]
 
     snapshot --> compose["nonce tail rewrite"]
@@ -27,6 +28,25 @@ flowchart LR
 The producer's exit code is the synchronization primitive for Docker
 Compose. Downstream Amaru services depend on
 `service_completed_successfully` and start only after the bundle exists.
+
+## Live ChainDB Contract
+
+```mermaid
+flowchart LR
+    writer["cardano-node\nlive writer"] --> state["state volume\nChainDB"]
+    state --> imm["immutable chunks\nappend-only"]
+    state --> vol["volatile DB\nignored"]
+    imm --> tip["header-extractor tip-info"]
+    imm --> headers["header-extractor headers"]
+    state -. "mounted read-write\nfor consensus validation" .-> tip
+```
+
+The bootstrap-producer's semantic contract is immutable-only access:
+readiness is derived from the immutable tip and header extraction walks
+immutable chunks. The Docker mount is still read-write because
+node-10.7.1's consensus ImmutableDB validation path opens chunk files
+through APIs that reject a read-only filesystem. The producer does not
+use volatile DB state as a readiness source.
 
 ## State Machine
 

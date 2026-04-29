@@ -11,7 +11,7 @@ services:
     environment:
       AMARU_NETWORK: testnet_42
     volumes:
-      - p1-state:/cardano/state:ro
+      - p1-state:/cardano/state
       - p1-configs:/cardano/config:ro
       - amaru-bundle:/srv/amaru
     depends_on:
@@ -30,7 +30,7 @@ nix run .#bootstrap-producer -- <chain-db> <config-dir> <bundle-dir> <network>
 
 | Channel | Name | Required | Description |
 |---------|------|----------|-------------|
-| arg 1 / mount | chain-db | yes | cardano-node's chain DB. read-only inside the container at `/cardano/state`. May not exist yet (cold-start) or may already be mature (mainnet operator) — both fine. |
+| arg 1 / mount | chain-db | yes | cardano-node's chain DB. Mounted read-write inside the container at `/cardano/state` because the node-10.7.1 consensus ImmutableDB opener validates chunk files with write permissions. The producer logic still reads only immutable chunks. May not exist yet (cold-start) or may already be mature (mainnet operator) — both fine. |
 | arg 2 / mount | config-dir | yes | node config.json + referenced genesis files. read-only at `/cardano/config`. `epochLength` is read from shelley-genesis; the era-history (Conway-fork slot in particular) is derived from the full genesis set. |
 | arg 3 / mount | bundle-dir | yes | output volume. writable at `/srv/amaru` |
 | arg 4 / env  | `AMARU_NETWORK` | yes | network name (e.g. `testnet_42`, `mainnet`, `preprod`); used to choose paths inside the bundle dir |

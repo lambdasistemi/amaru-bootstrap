@@ -143,7 +143,7 @@ opts =
         (cmdParser <**> helper)
         ( fullDesc
             <> progDesc
-                "Read-only chain-DB queries used by the bootstrap-producer orchestrator"
+                "Immutable chain-DB queries used by the bootstrap-producer orchestrator"
         )
 
 cmdParser :: Parser Cmd

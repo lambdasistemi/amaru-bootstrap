@@ -53,6 +53,23 @@ This matters because Cardano ledger-state CBOR drifts between node
 releases. The producer should be retargeted deliberately for each node
 release instead of treated as a generic ledger-state serializer.
 
+## ChainDB Mount Contract
+
+The producer must mount the cardano-node state volume read-write:
+
+```yaml
+volumes:
+  - node-state:/cardano/state
+  - node-configs:/cardano/config:ro
+  - amaru-bundle:/srv/amaru
+```
+
+This is not a write contract for the producer. `header-extractor` opens
+only the immutable DB and the readiness predicate is derived only from
+immutable chunks. The read-write mount is required because the
+node-10.7.1 consensus ImmutableDB opener validates chunk files through
+APIs that fail on a read-only filesystem.
+
 ## Ledger-State Projection
 
 `ledger-state-emitter` writes the Amaru bootstrap projection of the
@@ -79,14 +96,24 @@ Local CI:
 just ci
 ```
 
+`just ci` includes the Build Gate, the Phase 0 smoke verdict, and the
+Docker-level live verifier.
+
 Producer-specific checks:
 
 ```bash
 nix build .#checks.x86_64-linux.bootstrap-producer-synthesized
 nix build .#checks.x86_64-linux.bootstrap-producer-bats
 nix build .#checks.x86_64-linux.bootstrap-producer-image
+just live-bootstrap-producer
 ```
 
 `bootstrap-producer-synthesized` runs the real producer pipeline against
 a synthesized Conway-ready `testnet_42` chain DB and verifies that Amaru
 accepts the resulting ledger state, headers, and nonces.
+
+`just live-bootstrap-producer` is the Docker-level verifier. It seeds a
+stock `testnet_42` ChainDB with `db-synthesizer`, starts
+`ghcr.io/intersectmbo/cardano-node:10.7.1` on that DB, and asserts that
+the bootstrap-producer can commit a complete bundle while the official
+node has the ChainDB open.

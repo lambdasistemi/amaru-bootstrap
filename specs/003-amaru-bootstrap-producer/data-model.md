@@ -6,7 +6,7 @@ Eight entities. Same data-model discipline as Phase 0 + 1.
 
 ### Cluster chain database (live input)
 
-A directory on the docker volume `<producer-name>-state`, owned by the cluster's *producer node* — a long-running cardano-node container that forges blocks continuously. The bootstrap-producer container mounts this volume read-only and reads from it *while the producer continues to write*.
+A directory on the docker volume `<producer-name>-state`, owned by the cluster's *producer node* — a long-running cardano-node container that forges blocks continuously. The bootstrap-producer container mounts this volume read-write because node-10.7.1 consensus validation opens immutable chunk files with write permissions. The bootstrap-producer contract remains immutable-only access: it reads while the producer continues to write and never uses volatile DB state as a readiness source.
 
 ```
 <chain-db>/
@@ -21,7 +21,7 @@ A directory on the docker volume `<producer-name>-state`, owned by the cluster's
 - `immutable/` subdirectory contains at least one chunk file (a *living* signal that the producer has started forging).
 - The chain's tip slot, computed by reading the immutable DB's metadata via `header-extractor tip-slot`, is at least `2 × epochLength` (read from shelley-genesis).
 
-**Source**: the cluster's producer node (cardano-node, long-running, `restart: always`). The bootstrap-producer mounts this volume read-only via the operator's compose configuration. There is no separate `cardano-loader` step in this design — the chain is forged organically.
+**Source**: the cluster's producer node (cardano-node, long-running, `restart: always`). The bootstrap-producer mounts this volume read-write via the operator's compose configuration because the consensus ImmutableDB opener rejects a read-only filesystem. There is no separate `cardano-loader` step in this design — the chain is forged organically.
 
 ### Node configuration (input)
 
@@ -37,7 +37,7 @@ The cluster's node `config.json` and the genesis files it references. Same shape
 └── (optional) dijkstra-genesis.json
 ```
 
-Mounted read-only from the cardano-node's compose-defined volume. Used by `header-extractor` and `ledger-state-emitter` for codec selection and protocol parameters. `shelley-genesis.json` provides `epochLength`; the era-history (transitions to Allegra, Mary, Alonzo, Babbage, Conway) is derivable from the genesis files for known networks. Both feed the era-readiness predicate (below).
+Mounted read-only from the cardano-node's compose-defined config volume. Used by `header-extractor` and `ledger-state-emitter` for codec selection and protocol parameters. `shelley-genesis.json` provides `epochLength`; the era-history (transitions to Allegra, Mary, Alonzo, Babbage, Conway) is derivable from the genesis files for known networks. Both feed the era-readiness predicate (below).
 
 ### Era-readiness predicate (derived)
 

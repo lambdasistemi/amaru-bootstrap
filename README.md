@@ -32,6 +32,9 @@ This repo now produces the same kind of bundle without carrying a fork of
 Phase 2 PR — bootstrap-producer implementation. The flake checks build
 the producer image and run a synthesized Conway-ready chain DB through
 emit, convert, header extraction, nonce composition, and Amaru imports.
+A Docker-level verifier also runs the image against a `testnet_42`
+ChainDB held open by the official
+`ghcr.io/intersectmbo/cardano-node:10.7.1` image.
 
 ## What this PR adds
 
@@ -71,9 +74,15 @@ the Amaru bootstrap projection of the node-10.7.1 state:
 
 **Inputs**
 
-- a live or mature cardano-node chain DB
+- a live or mature cardano-node chain DB, mounted read-write into the
+  producer container
 - a node config directory containing `config.json` and the genesis files
 - a target network name, for example `testnet_42` or `mainnet`
+
+The read-write ChainDB mount is an API requirement of node 10.7.1's
+consensus ImmutableDB validation path. The bootstrap-producer still
+consults only immutable chunks; it does not use volatile DB state as a
+readiness source.
 
 **Outputs**
 
@@ -92,9 +101,10 @@ the Amaru bootstrap projection of the node-10.7.1 state:
 just ci
 ```
 
-`just ci` mirrors the GitHub workflow: it runs the Build Gate, then runs
-the Phase 0 smoke verdict and accepts either `PASS` or the expected
-`FAIL: format mismatch` verdict. The producer-specific end-to-end check
+`just ci` mirrors the GitHub workflow: it runs the Build Gate, runs the
+Phase 0 smoke verdict and accepts either `PASS` or the expected
+`FAIL: format mismatch` verdict, then runs the Docker-level live
+bootstrap-producer verifier. The pure producer-specific end-to-end check
 is `.#checks.x86_64-linux.bootstrap-producer-synthesized`.
 
 To run the producer locally against a ChainDB:
@@ -105,6 +115,13 @@ nix run .#bootstrap-producer -- \
   /path/to/cardano-node/config-dir \
   /tmp/amaru-bundle \
   testnet_42
+```
+
+To run the Docker-level live verifier against the official node 10.7.1
+image:
+
+```bash
+just live-bootstrap-producer
 ```
 
 ## Consumers

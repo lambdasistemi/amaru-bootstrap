@@ -21,8 +21,8 @@ and
 this module exposes the three pure-IO functions consumed by the
 @header-extractor@ executable and the orchestrator's polling loop:
 
-  * 'tipInfo' — open the immutable DB read-only and return the tip's
-    slot, era and block hash.
+  * 'tipInfo' — open only the immutable DB and return the tip's slot,
+    era and block hash.
   * 'listBlocks' — iterate the immutable DB chunks and return
     @(slot, hash)@ pairs in chain order.
   * 'getHeader' — fetch one header's CBOR bytes by @slot.hash@.
@@ -120,7 +120,7 @@ instance Aeson.ToJSON TipInfo
 
 instance Aeson.FromJSON TipInfo
 
--- | Open the immutable DB read-only and return the era-tagged tip.
+-- | Open only the immutable DB and return the era-tagged tip.
 tipInfo :: FilePath -> NodeConfig -> IO TipInfo
 tipInfo dbDir nc = withImmDB dbDir nc $ \_ immDB -> do
     tipPt <- atomically $ ImmutableDB.getTipPoint immDB
@@ -178,9 +178,13 @@ getHeader dbDir nc s hHex = do
 
 -- ─── Internals ───────────────────────────────────────────────────
 
--- | Bracket-open the immutable DB read-only. Reuses the ChainDB
--- args path (db-analyser's recipe) and projects out @cdbImmDbArgs@ —
--- we never touch the LedgerDB.
+-- | Bracket-open only the immutable DB. Reuses the ChainDB args path
+-- (db-analyser's recipe) and projects out @cdbImmDbArgs@ — we never
+-- touch the LedgerDB.
+--
+-- The access pattern is immutable-only, but node-10.7.1 consensus
+-- validation opens chunk files through APIs that require a writable
+-- filesystem. The Docker mount therefore must not be @:ro@.
 withImmDB
     :: FilePath
     -> NodeConfig
