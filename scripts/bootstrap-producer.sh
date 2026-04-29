@@ -3,27 +3,26 @@
 # Phase 2 bootstrap-producer orchestrator. Implements the contract
 # at
 # specs/003-amaru-bootstrap-producer/contracts/bootstrap-producer-cli.md
-# and the 8-step state diagram at
+# and the state diagram at
 # specs/003-amaru-bootstrap-producer/data-model.md.
 #
-# Pipeline (data-model.md state diagram, all 8 steps wired):
+# Pipeline (data-model.md state diagram, post-R-011 collapsed emit):
 #
 #   1. Pre-flight: existing-bundle short-circuit, config validation,
 #      poll for chain DB, poll for era-readiness, tooling sanity.
-#   2. db-analyser dump --v2-in-mem @ target_slot
-#   3. snapshot-converter Mem -> Legacy
-#   4. amaru convert-ledger-state
-#   5. header-extractor list-blocks + get-header loop
-#   6. compose nonces.json (jq tail rewrite)
-#   7. amaru import-{ledger-state,headers,nonces}
-#   8. mv -T <unique-tmp> <final> (atomic commit)
+#   2. ledger-state-emitter @ target_slot
+#   3. amaru convert-ledger-state
+#   4. header-extractor list-blocks + get-header loop
+#   5. compose nonces.json (jq tail rewrite)
+#   6. amaru import-{ledger-state,headers,nonces}
+#   7. mv -T <unique-tmp> <final> (atomic commit)
 #
 # Exit-code classes (data-model.md "Error class registry"):
 #   0    success
 #   1    cluster-not-ready
 #   2    chain-not-era-ready
 #   3    configuration-error
-#   4    tool-error: dump
+#   4    reserved
 #   5    tool-error: emit
 #   6    tool-error: convert
 #   7    tool-error: extract
@@ -55,12 +54,11 @@ AMARU_POLL_INTERVAL_SECONDS="${AMARU_POLL_INTERVAL_SECONDS:-10}"
 
 # Globals shared across phases. phase_preflight sets TARGET_SLOT and
 # EPOCH_LENGTH; the snapshot pipeline below threads further globals
-# (UNIQUE_TMP, MEM_SNAPSHOT_DIR, ACTUAL_SLOT, SNAPSHOT_FILE) between
-# phases as each one is computed.
+# (UNIQUE_TMP, ACTUAL_SLOT, LEGACY_SNAPSHOT_FILE) between phases as
+# each one is computed.
 TARGET_SLOT=0
 EPOCH_LENGTH=0
 UNIQUE_TMP=""
-MEM_SNAPSHOT_DIR=""
 ACTUAL_SLOT=0
 LEGACY_SNAPSHOT_FILE=""
 
@@ -258,77 +256,35 @@ phase_stage_init() {
     printf '+ staging at %s\n' "${UNIQUE_TMP}"
 }
 
-# Step 2: db-analyser dump --v2-in-mem @ target_slot. rc=4 on failure.
-# db-analyser writes the snapshot under <chain-db>/ledger/<actual>_db-analyser/
-# where <actual> may differ from TARGET_SLOT (db-analyser snaps to the
-# nearest forged block). We locate the resulting directory and bind it
-# to MEM_SNAPSHOT_DIR + ACTUAL_SLOT for downstream phases.
-phase_dump() {
-    local cfg="${CONFIG_DIR}/config.json"
-    printf '+ db-analyser dump --store-ledger %d --v2-in-mem\n' "${TARGET_SLOT}"
-    local rc=0
-    log_phase dump db-analyser \
-        --db "${CHAIN_DB}" \
-        --store-ledger "${TARGET_SLOT}" \
-        --v2-in-mem \
-        cardano \
-        --config "${cfg}" \
-        || rc=$?
-    if (( rc != 0 )); then
-        printf 'db-analyser failed (rc=%d); see %s\n' \
-               "${rc}" "${BUNDLE_DIR}/.logs/dump.stderr" >&2
-        tail_phase_log dump
-        exit 4
-    fi
-    MEM_SNAPSHOT_DIR=$(find "${CHAIN_DB}/ledger" \
-        -mindepth 1 -maxdepth 1 -type d -name '*_db-analyser' \
-        2>/dev/null | head -n 1)
-    if [[ -z "${MEM_SNAPSHOT_DIR}" || ! -d "${MEM_SNAPSHOT_DIR}" ]]; then
-        printf 'db-analyser produced no snapshot under %s/ledger/\n' \
-               "${CHAIN_DB}" >&2
-        exit 4
-    fi
-    ACTUAL_SLOT=$(basename "${MEM_SNAPSHOT_DIR}" | cut -d_ -f1)
-    if ! [[ "${ACTUAL_SLOT}" =~ ^[0-9]+$ ]]; then
-        printf 'snapshot dir name lacks numeric slot prefix: %s\n' \
-               "${MEM_SNAPSHOT_DIR}" >&2
-        exit 4
-    fi
-}
-
-# Step 3: snapshot-converter Mem -> Legacy. rc=5 on failure.
-# snapshot-converter expects PATH-IN as <dir>/<file> where <file> is a
-# numeric-prefixed name (snapshotFromPath in the consensus source). The
-# Mem dir name `<actual>_db-analyser` satisfies that. Output is a single
-# CBOR file at <staging>/legacy-in/<actual>; we pass it as-is to amaru
-# convert-ledger-state in phase_convert.
+# Step 2: ledger-state-emitter writes a Legacy ExtLedgerState CBOR file
+# with canonical UTxO entries. rc=5 on failure.
 phase_emit() {
     local cfg="${CONFIG_DIR}/config.json"
     local legacy_dir="${UNIQUE_TMP}/legacy-in"
     mkdir -p "${legacy_dir}"
-    LEGACY_SNAPSHOT_FILE="${legacy_dir}/${ACTUAL_SLOT}"
-    printf '+ snapshot-converter Mem -> Legacy @ %d\n' "${ACTUAL_SLOT}"
+    LEGACY_SNAPSHOT_FILE="${legacy_dir}/${TARGET_SLOT}.cbor"
+    printf '+ ledger-state-emitter @ %d\n' "${TARGET_SLOT}"
     local rc=0
-    log_phase emit snapshot-converter \
-        Mem "${MEM_SNAPSHOT_DIR}" \
-        Legacy "${LEGACY_SNAPSHOT_FILE}" \
-        cardano \
+    log_phase emit ledger-state-emitter \
+        --db "${CHAIN_DB}" \
         --config "${cfg}" \
+        --target-slot "${TARGET_SLOT}" \
+        --out "${LEGACY_SNAPSHOT_FILE}" \
         || rc=$?
     if (( rc != 0 )); then
-        printf 'snapshot-converter failed (rc=%d); see %s\n' \
+        printf 'ledger-state-emitter failed (rc=%d); see %s\n' \
                "${rc}" "${BUNDLE_DIR}/.logs/emit.stderr" >&2
         tail_phase_log emit
         exit 5
     fi
     if [[ ! -f "${LEGACY_SNAPSHOT_FILE}" ]]; then
-        printf 'snapshot-converter produced no output at %s\n' \
+        printf 'ledger-state-emitter produced no output at %s\n' \
                "${LEGACY_SNAPSHOT_FILE}" >&2
         exit 5
     fi
 }
 
-# Step 4: amaru convert-ledger-state. rc=6 on failure.
+# Step 3: amaru convert-ledger-state. rc=6 on failure.
 # Writes <slot>.<hash>.cbor + nonces.<slot>.<hash>.json + history.<slot>.<hash>.json
 # into <staging>/snapshots/. amaru's import-ledger-state requires the
 # era-history file to live alongside the snapshot for testnet variants.
@@ -354,9 +310,19 @@ phase_convert() {
                "${UNIQUE_TMP}/snapshots" >&2
         exit 6
     fi
+    local snapshot_file snapshot_base
+    snapshot_file=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
+        -name '*.cbor' 2>/dev/null | sort | tail -n 1)
+    snapshot_base=$(basename "${snapshot_file}")
+    ACTUAL_SLOT="${snapshot_base%%.*}"
+    if ! [[ "${ACTUAL_SLOT}" =~ ^[0-9]+$ ]]; then
+        printf 'converted snapshot filename lacks numeric slot prefix: %s\n' \
+               "${snapshot_base}" >&2
+        exit 6
+    fi
 }
 
-# Step 5: header-extractor list-blocks + get-header loop. rc=7.
+# Step 4: header-extractor list-blocks + get-header loop. rc=7.
 # Per amaru-loader.sh's pipeline: extract two header pairs, one near
 # the snapshot slot and one near the previous-epoch boundary, so amaru
 # has the parent hashes it needs to compute the epoch's active nonce.
@@ -420,7 +386,7 @@ phase_extract() {
     done <"${headers_csv}"
 }
 
-# Step 6: compose nonces.json from snapshot's nonces + tail rewrite. rc=8.
+# Step 5: compose nonces.json from snapshot's nonces + tail rewrite. rc=8.
 # amaru convert-ledger-state writes nonces.<slot>.<hash>.json with a
 # zero-byte `tail`. We rewrite that field to the parent hash from the
 # previous-epoch header batch (the LAST hash with slot <= prev_boundary)
@@ -462,7 +428,7 @@ phase_nonces() {
     mv "${tmp_json}" "${UNIQUE_TMP}/nonces.json"
 }
 
-# Step 7: three chained `amaru import-*` calls. rc=9 on failure.
+# Step 6: three chained `amaru import-*` calls. rc=9 on failure.
 # Paths follow R-005 / Obs#3: ledger.<network>.db, chain.<network>.db,
 # headers/* all at the staging root so the final `mv -T` lands them in
 # the canonical bundle layout.
@@ -520,7 +486,7 @@ phase_import() {
     fi
 }
 
-# Step 8: mv -T <unique-tmp> <final>. rc=10 on failure.
+# Step 7: mv -T <unique-tmp> <final>. rc=10 on failure.
 # `mv -T` invokes renameat2(NOREPLACE) on Linux and is the atomic
 # commit per R-007. On EEXIST another producer won the race; fall back
 # to bundle_complete which short-circuits with rc=0 (FR-008).
@@ -549,7 +515,6 @@ phase_commit() {
 main() {
     phase_preflight
     phase_stage_init
-    phase_dump
     phase_emit
     phase_convert
     phase_extract

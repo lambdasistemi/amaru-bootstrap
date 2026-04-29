@@ -30,11 +30,14 @@ Every step of the bootstrap pipeline must use either:
 
 Examples currently in use:
 
-- `db-synthesizer` (upstream `ouroboros-consensus`, mode (a)) — chain DB synthesis
-- `db-analyser --store-ledger` (upstream `ouroboros-consensus`, mode (a)) — ledger snapshots
-- `snapshot-converter` (upstream `ouroboros-consensus-cardano`, mode (a)) — Mem→Legacy bridge
+- `db-synthesizer` (upstream `ouroboros-consensus`, mode (a)) — fixture chain DB synthesis
 - `header-extractor` (in-repo, mode (b), consumes `ouroboros-consensus` as a library) — chain DB queries
+- `ledger-state-emitter` (in-repo, mode (b), consumes `ouroboros-consensus` and `cardano-ledger` as libraries) — Amaru-compatible ledger-state emission for the pinned node release
 - `amaru` ([`pragma-org/amaru`](https://github.com/pragma-org/amaru), mode (a)) — convert / import / run
+
+`db-analyser` and `snapshot-converter` remain available for historical
+Phase 0 checks, but they are not in the bootstrap-producer runtime
+image after the R-011 pivot.
 
 What is **not** permitted:
 
@@ -115,10 +118,16 @@ Amendments require a PR, a rationale in the PR description, and the
 All PRs must verify compliance with these principles. When the
 constitution and a convenience are in conflict, the constitution wins.
 
-**Version**: 1.1.0 | **Ratified**: 2026-04-27 | **Last Amended**: 2026-04-28
+**Version**: 1.2.0 | **Ratified**: 2026-04-27 | **Last Amended**: 2026-04-29
 
 ### Amendment log
 
+- **1.2.0 (2026-04-29)**: Principle II examples updated after the
+  Phase 2 R-011 pivot. `ledger-state-emitter` is now the runtime
+  ledger-state producer, consuming `ouroboros-consensus` and
+  `cardano-ledger` as libraries. `db-analyser` and `snapshot-converter`
+  remain useful Phase 0 tools but are no longer in the
+  bootstrap-producer runtime image.
 - **1.1.0 (2026-04-28)**: Principle II — explicitly permit in-repo
   executables that consume upstream as a library (mode (b)). Originally
   Principle II enumerated four stock binaries including `db-server`;

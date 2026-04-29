@@ -85,6 +85,7 @@
         bootstrapProducerImage = import ./nix/bootstrap-producer-image.nix {
           inherit pkgs amaruPkg iogTools;
           headerExtractor = headerExtractorPkgs.header-extractor;
+          ledgerStateEmitter = headerExtractorPkgs.ledger-state-emitter;
         };
         checks = import ./nix/checks.nix {
           inherit pkgs amaruPkg iogTools headerExtractorPkgs bootstrapProducerImage;
@@ -103,6 +104,7 @@
           db-analyser = iogTools.db-analyser;
           snapshot-converter = iogTools.snapshot-converter;
           header-extractor = headerExtractorPkgs.header-extractor;
+          ledger-state-emitter = headerExtractorPkgs.ledger-state-emitter;
           bootstrap-producer-image = bootstrapProducerImage;
           default = amaruPkg;
         };

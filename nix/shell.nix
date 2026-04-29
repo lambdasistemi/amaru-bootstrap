@@ -10,7 +10,9 @@
 project.shellFor {
   withHoogle = false;
   tools = {
-    cabal = "latest";
+    cabal = {
+      version = "3.10.3.0";
+    };
   };
   buildInputs = with pkgs; [
     just

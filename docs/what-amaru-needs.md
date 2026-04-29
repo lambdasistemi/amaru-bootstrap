@@ -59,21 +59,25 @@ Step 1 pre-condition is "snapshots already exist on disk". Stock
 adds 4 commits to wire snapshot-at-epoch-boundary writing into
 `db-synthesizer`'s main loop.
 
-## The no-fork hypothesis
+## The no-fork implementation
 
-Replace step (1) pre-condition with a separate `db-analyser` invocation per
-epoch boundary:
+Phase 0 proved stock `db-analyser --store-ledger` does not emit the exact
+snapshot shape Amaru imports. The producer therefore replaces Arnaud's
+forked snapshot writer with two in-repo Haskell tools that consume the
+stock node libraries:
 
 ```
-db-analyser --db <chain-db> --store-ledger <slot-of-epoch-boundary>
+ledger-state-emitter \
+  --db <chain-db> \
+  --config <config.json> \
+  --target-slot <slot> \
+  --out <legacy-ext-ledger-state.cbor>
+
+header-extractor tip-info|list-blocks|get-header ...
 ```
 
-Then `amaru convert-ledger-state` consumes the resulting on-disk file.
-
-**Open question — to verify in Phase 0 smoke test:**
-Does `db-analyser --store-ledger SLOT` write a file in the same on-disk
-format that `amaru convert-ledger-state --snapshot <file>` expects?
-
-If yes: no fork.
-If no: write a small standalone `snapshot-emitter` that depends on
-`ouroboros-consensus-cardano` as a *library*, not a fork. Still no fork.
+`ledger-state-emitter` targets the repository's pinned cardano-node 10.7.1
+dependency set and emits the Amaru bootstrap projection documented in
+`specs/003-amaru-bootstrap-producer/research.md#r-011`. `amaru
+convert-ledger-state` still owns the final snapshot slicing, history JSON,
+and nonce JSON formats.

@@ -27,6 +27,17 @@ let
     { name = "tests"; path = ../tests; }
   ];
 
+  producerRuntimePath = pkgs.lib.makeBinPath [
+    pkgs.bash
+    pkgs.coreutils
+    pkgs.findutils
+    pkgs.gawk
+    pkgs.jq
+    amaruPkg
+    headerExtractorPkgs.header-extractor
+    headerExtractorPkgs.ledger-state-emitter
+  ];
+
   # T012-T016: bats sees the orchestrator script + fixtures + tests/.
   bootstrapProducerTestTree = pkgs.linkFarm "bootstrap-producer-test-tree" [
     { name = "scripts/bootstrap-producer.sh"; path = ../scripts/bootstrap-producer.sh; }
@@ -94,6 +105,7 @@ in
   db-analyser = iogTools.db-analyser;
   snapshot-converter = iogTools.snapshot-converter;
   header-extractor = headerExtractorPkgs.header-extractor;
+  ledger-state-emitter = headerExtractorPkgs.ledger-state-emitter;
   bootstrap-producer-image = bootstrapProducerImage;
 
   shellcheck = pkgs.runCommand "smoke-test-shellcheck"
@@ -105,12 +117,9 @@ in
     mkdir -p $out
   '';
 
-  # T005 (failing hspec) — wires the HeaderExtractor library API
-  # tests. Reuses the shared synthesised chain DB and runs the hspec
-  # exe with env vars pointing to it. FAILS until T007-T009 replace
-  # the lib stubs (every spec exits with `error` from a stub body —
-  # that's the TDD red, the runCommand then fails which is what we
-  # want).
+  # T005: HeaderExtractor library API tests. Reuses the shared
+  # synthesized chain DB and runs the hspec exe with env vars pointing
+  # to it.
   header-extractor-spec = pkgs.runCommand "header-extractor-spec"
     {
       nativeBuildInputs = [
@@ -131,9 +140,8 @@ in
     mkdir -p $out
   '';
 
-  # T006 (failing bats) — CLI-level coverage of the header-extractor
-  # binary. Brings the real exe + a synthesised chain DB on-fixture.
-  # FAILS until T010 wires the optparse-applicative dispatch.
+  # T006: CLI-level coverage of the header-extractor binary. Brings the
+  # real exe plus a synthesized chain DB on-fixture.
   header-extractor-cli-bats =
     pkgs.runCommand "header-extractor-cli-bats"
       {
@@ -141,8 +149,12 @@ in
           pkgs.bash
           pkgs.bats
           pkgs.coreutils
+          pkgs.findutils
+          pkgs.gawk
           pkgs.jq
+          amaruPkg
           headerExtractorPkgs.header-extractor
+          headerExtractorPkgs.ledger-state-emitter
         ];
       } ''
       set -euo pipefail
@@ -164,14 +176,8 @@ in
   # T019 pipeline implementation:
   #   - config (rc=3), cluster (rc=1), idempotent (rc=0): no chain DB
   #   - chain (rc=2): SHORT chain DB via BOOTSTRAP_PRODUCER_CHAIN_DB
-  # T016 (concurrent, full pipeline) is intentionally NOT wired here
-  # yet. Running the full T019 pipeline against a synthesised chain DB
-  # surfaced an upstream format gap: snapshot-converter's Legacy
-  # ExtLedgerState slice does not match the NewEpochState shape
-  # amaru's import-ledger-state expects (it errors with "end of input
-  # bytes" right after stake_pools). Same root cause as Phase 0's
-  # "FAIL: format mismatch" verdict. Resolving it is out of T019
-  # scope - tracked separately for Phase 4.
+  # The full synthesized end-to-end producer path is checked separately
+  # below because it builds and imports a real bundle.
   bootstrap-producer-bats =
     pkgs.runCommand "bootstrap-producer-bats"
       {
@@ -187,6 +193,7 @@ in
       cp -rL ${bootstrapProducerTestTree}/. ./
       chmod -R u+w .
       patchShebangs scripts tests
+      export PATH="${producerRuntimePath}:$PATH"
 
       bats --tap \
         tests/test-bootstrap-producer-config.bats \
@@ -200,6 +207,57 @@ in
       chmod -R u+w $TMPDIR/short-chain-db
       BOOTSTRAP_PRODUCER_CHAIN_DB=$TMPDIR/short-chain-db \
         bats --tap tests/test-bootstrap-producer-chain.bats
+
+      # T016: two real producers race against the same era-ready
+      # chain DB and must converge on one complete bundle.
+      cp -rL ${synthesizedChainDb}/chain-db $TMPDIR/chain-db
+      chmod -R u+w $TMPDIR/chain-db
+      BOOTSTRAP_PRODUCER_CHAIN_DB=$TMPDIR/chain-db \
+        bats --tap tests/test-bootstrap-producer-concurrent.bats
+
+      mkdir -p $out
+    '';
+
+  # T019b end-to-end: run the real producer pipeline against the
+  # synthesized Conway-ready chain DB and assert that Amaru accepts the
+  # resulting bundle. This is the regression check for the node-10.7.1
+  # ledger-state projection in ledger-state-emitter.
+  bootstrap-producer-synthesized =
+    pkgs.runCommand "bootstrap-producer-synthesized"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.findutils
+          pkgs.gawk
+          pkgs.jq
+          amaruPkg
+          headerExtractorPkgs.header-extractor
+          headerExtractorPkgs.ledger-state-emitter
+        ];
+      } ''
+      set -euo pipefail
+
+      cp -rL ${synthesizedChainDb}/chain-db $TMPDIR/chain-db
+      chmod -R u+w $TMPDIR/chain-db
+
+      export PATH="${producerRuntimePath}:$PATH"
+      AMARU_NETWORK=testnet_42 \
+      AMARU_CLUSTER_READY_DEADLINE_SECONDS=10 \
+      AMARU_WAIT_DEADLINE_SECONDS=10 \
+      AMARU_POLL_INTERVAL_SECONDS=1 \
+        ${pkgs.bash}/bin/bash ${../scripts/bootstrap-producer.sh} \
+          $TMPDIR/chain-db \
+          ${fixture}/configs/configs \
+          $TMPDIR/bundle \
+          testnet_42
+
+      final=$TMPDIR/bundle/testnet_42
+      test -d "$final/ledger.testnet_42.db"
+      test -d "$final/chain.testnet_42.db"
+      test -f "$final/nonces.json"
+      test -n "$(find "$final/headers" -name 'header.*.cbor' -print -quit)"
+      test -n "$(find "$final/snapshots" -name '*.cbor' -print -quit)"
 
       mkdir -p $out
     '';

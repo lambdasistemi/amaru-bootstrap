@@ -17,5 +17,6 @@ let
 in
 {
   header-extractor = components.exes.header-extractor;
+  ledger-state-emitter = components.exes.ledger-state-emitter;
   header-extractor-spec = components.tests.header-extractor-spec;
 }

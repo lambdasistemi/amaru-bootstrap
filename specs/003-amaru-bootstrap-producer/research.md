@@ -134,7 +134,7 @@ Image runs as root inside the container (no user account creation needed for thi
      exits within milliseconds.
 
 4. Tooling sanity (one-shot, fail-fast)
-   - All four binaries on PATH (catch image-corruption early).
+   - Runtime tools on PATH (catch image-corruption early).
 ```
 
 Each pre-flight failure exits with a class-specific code per [the CLI contract](./contracts/bootstrap-producer-cli.md#exit-codes).
@@ -264,6 +264,8 @@ The snapshot point being the immutable tip means amaru receives the freshest ava
 
 **Decision**: build a small Haskell exe in this repo, `ledger-state-emitter`, that opens the chain DB at `target_slot` and writes a single CBOR file in the exact shape `amaru convert-ledger-state` expects to consume. This **replaces** the `db-analyser --store-ledger` + `snapshot-converter Mem -> Legacy` pair as the front of the snapshot pipeline. The orchestrator's `phase_dump` and `phase_emit` collapse into one `phase_emit` step.
 
+**Release target**: the emitter is intentionally pinned to the `cardano-node 10.7.1` dependency set. `cabal.project` freezes the node-release-compatible CHaP and source-repository-package revisions, including `ouroboros-consensus` `release-ouroboros-consensus-3.0.1.0`. A successful compile against a random ledger dependency set is not sufficient: this producer emits the bootstrap projection for the node release named by the repository pins.
+
 **Rationale**: the `db-analyser → snapshot-converter` pair produces a Legacy `ExtLedgerState` CBOR file in which the UTxO entries (`Map TxIn TxOut`) are serialised as raw CBOR byte strings via `defaultEncodeTablesWithHint`'s `MemPack` path:
 
 ```haskell
@@ -308,6 +310,13 @@ encodeUtxoForAmaru utxo =
 
 The rest of the file (HFC telescope, `ChainDepState`, `AnnTip`, era bounds) is byte-identical to consensus's Legacy output, so amaru's existing `convert-ledger-state` parser walks it unchanged.
 
+**Amaru bootstrap projection for node 10.7.1**:
+
+- `UTxOState` uses canonical `EncCBOR` for `TxIn` and `TxOut` entries instead of the consensus ledger-table `MemPack` shortcut.
+- The Shelley ledger wrapper omits the node-10.7.1 Peras certificate field because Amaru's converter slices the ledger state through the pre-Peras wrapper shape.
+- Conway/Dijkstra `PState` is projected from the node-10.7.1 four-field shape to Amaru's imported three-field shape: current pool parameters, future pool parameters, retirements. The node-side VRF-key index is an internal acceleration structure.
+- Conway/Dijkstra `DState` is projected from the node-10.7.1 account-state map into Amaru's legacy delegation-state wrapper. Balance, deposit, stake-pool delegation, and DRep delegation are preserved; pointer indexes and the intermediate deposits accumulator are placeholders because Amaru skips those fields during bootstrap.
+
 **Where the boundary sits**: `amaru convert-ledger-state` stays in the pipeline. We deliberately do **not** absorb its work (slicing the inner ledger state + producing `nonces.<slot>.<hash>.json` + `history.<slot>.<hash>.json`). Reasons captured:
 
 - Three contracts vs. one. `import-*` consumes a CBOR snapshot AND a separate `history.json` (read by `make_era_history` for testnets) AND a separate `nonces.json`. Producing all three ourselves means owning amaru's `serde::Serialize` JSON shapes for `EraHistory`, `EraSummary`, `EraBound`, `InitialNonces`, `Point`, `Nonce`, `HeaderHash`. Keeping `convert-ledger-state` lets amaru's upstream Rust types stay the source of truth; we own one CBOR contract instead of three.
@@ -316,7 +325,7 @@ The rest of the file (HFC telescope, `ChainDepState`, `AnnTip`, era bounds) is b
 
 **Image layout impact (R-004 update)**: the runtime image drops `db-analyser` and `snapshot-converter` from its layers and adds `ledger-state-emitter`. Net layer count unchanged; net runtime image size smaller (one Haskell binary replaces two).
 
-**Test surface**: T019b adds a flake check `ledger-state-emitter-spec` (hspec) that emits a snapshot from the synthesised chain DB and decodes the result via `amaru convert-ledger-state` + `amaru import-ledger-state`, asserting both succeed. T016 (concurrent) becomes wireable once T019b is green.
+**Test surface**: T019b adds the flake check `bootstrap-producer-synthesized`, which runs the real producer pipeline against the synthesized Conway-ready chain DB and asserts that `amaru convert-ledger-state`, `amaru import-ledger-state`, `amaru import-headers`, and `amaru import-nonces` all succeed.
 
 **Alternatives considered**:
 - **Patch consensus's `defaultEncodeTablesWithHint` to emit canonical CBOR** — violates Principle I (we'd be carrying a fork of consensus).

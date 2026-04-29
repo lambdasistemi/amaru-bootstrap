@@ -1,14 +1,13 @@
 { project }:
 
-# Extract the three stock IOG executables we orchestrate from the
-# pinned ouroboros-consensus source-repository-package. These are
-# upstream, unmodified — constitution Principle II mode (a).
+# Extract the stock IOG executables we orchestrate from the
+# cardano-node 10.7.1-aligned ouroboros-consensus source pin. These
+# are upstream, unmodified — constitution Principle II mode (a).
 #
-# All three exes live in the ouroboros-consensus-cardano package;
-# targets verified at
-# https://github.com/IntersectMBO/ouroboros-consensus/blob/release-ouroboros-consensus-0.27.0.0/ouroboros-consensus-cardano/ouroboros-consensus-cardano.cabal
+# In ouroboros-consensus 3.0.1.0 the former multi-package layout is a
+# single package with sublibraries; the exes live under that package.
 let
-  exes = project.hsPkgs.ouroboros-consensus-cardano.components.exes;
+  exes = project.hsPkgs.ouroboros-consensus.components.exes;
 in
 {
   db-synthesizer = exes.db-synthesizer;

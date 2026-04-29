@@ -12,32 +12,75 @@ repository cardano-haskell-packages
     c00aae8461a256275598500ea0e187588c35a5d5d7454fb57eac18d9edb86a56
     d4a35cd3121aa00d18544bb0ac01c3e1691d618f462c46129271bccf39f7e8ee
 
--- Index states copied verbatim from
--- https://github.com/IntersectMBO/ouroboros-consensus/blob/release-ouroboros-consensus-0.27.0.0/cabal.project
--- Bump only when the SRP below is bumped.
+-- This project targets one cardano-node release at a time because
+-- ledger and consensus serialisation APIs drift laterally across node
+-- releases. These index states and constraints are derived from
+-- cardano-node 10.7.1:
+--   tag: 10.7.1
+--   commit: 045bc187a36ef0cbd236db902b85dd8f202fb059
+--   cabal.project.freeze generated with cabal-install 3.10.3.0
 index-state:
-  , hackage.haskell.org 2025-05-15T07:59:00Z
-  , cardano-haskell-packages 2025-05-15T08:36:14Z
+  , hackage.haskell.org 2026-03-26T20:21:33Z
+  , cardano-haskell-packages 2026-04-14T21:25:56Z
+
+active-repositories:
+  , :rest
+  , cardano-haskell-packages:override
+
+constraints:
+  -- From cardano-node 10.7.1 cabal.project.
+  , any.crypton-x509-system < 1.6.8
+  , any.proto-lens >= 0.7.1.6
+
+  -- Critical ledger/consensus package versions from the node 10.7.1
+  -- freeze. Keep these exact when retargeting this producer.
+  , any.cardano-api == 10.26.0.0
+  , any.cardano-base == 0.1.3.0
+  , any.cardano-binary == 1.8.0.0
+  , any.cardano-crypto-class == 2.3.2.0
+  , any.cardano-crypto-praos == 2.2.2.0
+  , any.cardano-data == 1.3.0.0
+  , any.cardano-diffusion == 1.0.0.0
+  , any.cardano-ledger-allegra == 1.9.0.0
+  , any.cardano-ledger-alonzo == 1.15.0.1
+  , any.cardano-ledger-api == 1.13.0.0
+  , any.cardano-ledger-babbage == 1.13.0.0
+  , any.cardano-ledger-binary == 1.8.1.0
+  , any.cardano-ledger-byron == 1.3.0.0
+  , any.cardano-ledger-conway == 1.22.0.0
+  , any.cardano-ledger-core == 1.20.0.0
+  , any.cardano-ledger-dijkstra == 0.2.0.1
+  , any.cardano-ledger-mary == 1.10.0.0
+  , any.cardano-ledger-shelley == 1.18.1.0
+  , any.cardano-protocol-tpraos == 1.5.0.0
+  , any.cardano-slotting == 0.2.1.0
+  , any.cardano-strict-containers == 0.1.6.0
+  , any.io-classes == 1.8.0.1
+  , any.io-sim == 1.8.0.1
+  , any.network-mux == 0.10.1.0
+  , any.ouroboros-consensus == 3.0.1.0
+  , any.ouroboros-network == 1.1.0.0
+  , any.plutus-core == 1.61.0.0
+  , any.plutus-ledger-api == 1.61.0.0
+  , any.sop-core == 0.5.0.2
+  , any.sop-extras == 0.4.1.0
+  , any.strict-sop-core == 0.1.3.0
+  , any.typed-protocols == 1.2.0.0
+
+package acts
+  flags: -finitary
 
 packages: .
 
--- IntersectMBO/ouroboros-consensus pinned at the
--- release-ouroboros-consensus-0.27.0.0 tag, contemporaneous with
--- cardano-node 10.5.3 (the version Arnaud's testnet fixture is
--- configured for). Provides db-synthesizer and db-analyser exes in
--- the ouroboros-consensus-cardano package; --store-ledger SLOT
--- verified present in this release.
+-- cardano-node 10.7.1 gets ouroboros-consensus from CHaP, but this
+-- repository also needs upstream's db-synthesizer/db-analyser and
+-- snapshot-converter executables. Those live in the consensus source
+-- tree, so we pin the matching release-ouroboros-consensus-3.0.1.0
+-- tag instead of using the old 10.5.3-era source package.
 --
 -- Constitution Principle III: --sha256 is in nix32 format (NOT SRI).
 source-repository-package
   type: git
   location: https://github.com/IntersectMBO/ouroboros-consensus
-  tag: 8e3afe103e49c0b1ba66ce0ece5a24dc87e34e26
-  --sha256: 15jh9nzp0d9fbdxvwy6k27zzqch6xq08nh1d3xylgd5fkz3ws5vb
-  subdir:
-    ouroboros-consensus
-    ouroboros-consensus-cardano
-    ouroboros-consensus-protocol
-    ouroboros-consensus-diffusion
-    sop-extras
-    strict-sop-core
+  tag: c87aa760001e60f0f0d3353f793eb089adb917e7
+  --sha256: 1hxmmhci120krklnx4dy5jbw5dwjwyvmfqns6frci6fw2qbsr7d7

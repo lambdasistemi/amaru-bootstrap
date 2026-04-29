@@ -32,11 +32,14 @@ build-gate:
         .#checks.x86_64-linux.amaru \
         .#checks.x86_64-linux.db-synthesizer \
         .#checks.x86_64-linux.db-analyser \
+        .#checks.x86_64-linux.ledger-state-emitter \
         .#checks.x86_64-linux.shellcheck \
         .#checks.x86_64-linux.smoke-test-bats \
         .#checks.x86_64-linux.header-extractor-spec \
         .#checks.x86_64-linux.header-extractor-cli-bats \
-        .#checks.x86_64-linux.bootstrap-producer-bats
+        .#checks.x86_64-linux.bootstrap-producer-bats \
+        .#checks.x86_64-linux.bootstrap-producer-synthesized \
+        .#checks.x86_64-linux.bootstrap-producer-image
 
 # Run the unit-style bats checks.
 bats:
@@ -51,4 +54,24 @@ ci:
     #!/usr/bin/env bash
     set -euo pipefail
     just build-gate
-    just smoke
+    out_dir="./tmp/smoke-out"
+    verdict_log="./tmp/smoke-verdict.log"
+    rm -rf "$out_dir" "$verdict_log"
+    mkdir -p ./tmp
+    set +e
+    nix run --quiet .#smoke-test -- \
+        specs/001-snapshot-format-smoke/fixtures/p1-config \
+        "$out_dir" \
+        2>&1 | tee "$verdict_log"
+    smoke_rc=${PIPESTATUS[0]}
+    set -e
+    verdict="$(tail -n 1 "$verdict_log")"
+    printf 'smoke rc=%s verdict=%s\n' "$smoke_rc" "$verdict"
+    case "$verdict" in
+        PASS|"FAIL: format mismatch")
+            ;;
+        *)
+            printf 'Phase 0 verdict not reached: %s\n' "$verdict" >&2
+            exit 1
+            ;;
+    esac
