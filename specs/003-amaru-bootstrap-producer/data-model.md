@@ -109,17 +109,15 @@ The container running [`scripts/bootstrap-producer.sh`](../../../scripts/bootstr
                   ╚══════════════┬══════════════╝
                                  │
                   ╔══════════════▼══════════════╗
-                  ║ 2. db-analyser dump        ║──── error  ─→ rc=4 dump
-                  ║    (V2InMemory @ tip)      ║
+                  ║ 2. ledger-state-emitter    ║──── error  ─→ rc=5 emit
+                  ║    (chain DB @ slot ->     ║
+                  ║     legacy CBOR with       ║
+                  ║     amaru-shaped TxOuts;   ║
+                  ║     R-011)                 ║
                   ╚══════════════┬══════════════╝
                                  │
                   ╔══════════════▼══════════════╗
-                  ║ 3. snapshot-converter      ║──── error  ─→ rc=5 emit
-                  ║    (Mem -> Legacy)         ║
-                  ╚══════════════┬══════════════╝
-                                 │
-                  ╔══════════════▼══════════════╗
-                  ║ 4. amaru convert-          ║──── error  ─→ rc=6 convert
+                  ║ 3. amaru convert-          ║──── error  ─→ rc=6 convert
                   ║      ledger-state          ║
                   ╚══════════════┬══════════════╝
                                  │
@@ -186,8 +184,8 @@ A single docker image at `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<commit
 | 1 | cluster-not-ready | cardano-node's chain DB never appeared within wait budget |
 | 2 | chain-not-era-ready | era-readiness predicate (R-010) never became true within wait budget |
 | 3 | configuration-error | config.json or genesis file missing / unparseable / `epochLength` invalid / no Conway entry in era-history |
-| 4 | tool-error: dump | db-analyser failed |
-| 5 | tool-error: emit | snapshot-converter failed |
+| 4 | (reserved) | unused after R-011 collapsed dump+emit into a single phase; preserved for backwards-compatibility of the rc registry |
+| 5 | tool-error: emit | `ledger-state-emitter` failed (R-011) |
 | 6 | tool-error: convert | amaru convert-ledger-state failed |
 | 7 | tool-error: extract | header-extractor failed (including `tip-slot`) |
 | 8 | tool-error: nonces | jq nonces composition failed |

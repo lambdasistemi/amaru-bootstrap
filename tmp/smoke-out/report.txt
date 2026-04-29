@@ -1,5 +1,5 @@
 amaru-bootstrap smoke test
-timestamp: 2026-04-28T16:10:22Z
+timestamp: 2026-04-28T20:52:27Z
 bundle:    specs/001-snapshot-format-smoke/fixtures/p1-config
 out-dir:   ./tmp/smoke-out
 verdict:   FAIL: format mismatch
