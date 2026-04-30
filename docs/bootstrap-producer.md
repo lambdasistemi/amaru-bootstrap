@@ -53,6 +53,19 @@ This matters because Cardano ledger-state CBOR drifts between node
 releases. The producer should be retargeted deliberately for each node
 release instead of treated as a generic ledger-state serializer.
 
+## Published Image
+
+After the full CI workflow succeeds on `main`, the publish workflow
+builds the Nix docker image, loads it into Docker, and pushes:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
+```
+
+The full commit SHA is the runtime integration contract. Downstream
+compose files should pin the exact SHA they tested. The project does not
+publish moving runtime tags such as `latest` for the producer.
+
 ## ChainDB Mount Contract
 
 The producer must mount the cardano-node state volume read-write:

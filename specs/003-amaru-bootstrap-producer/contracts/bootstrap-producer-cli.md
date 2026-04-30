@@ -7,7 +7,7 @@ The bootstrap-producer is delivered as a docker image. Inside, the entrypoint is
 ```yaml
 services:
   bootstrap-producer:
-    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>
+    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
     environment:
       AMARU_NETWORK: testnet_42
     volumes:
@@ -90,4 +90,8 @@ The snapshot-point selection (R-010) is `target_slot = immutable_tip.slot at the
 
 ## Versioning
 
-Image tag = `${{ github.sha }}` of the source revision. Operators in production-facing manifests pin a specific SHA. This contract document is versioned implicitly via git history; if the contract changes between Phase 2 and Phase 3, the image gains a `--version` flag and a stable migration document.
+Image tag = the full commit SHA of the source revision. Operators in
+production-facing manifests pin that exact SHA. This contract document
+is versioned implicitly via git history; if the contract changes between
+Phase 2 and Phase 3, the image gains a `--version` flag and a stable
+migration document.

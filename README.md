@@ -29,12 +29,22 @@ This repo now produces the same kind of bundle without carrying a fork of
 
 ## Status
 
-Phase 2 PR — bootstrap-producer implementation. The flake checks build
-the producer image and run a synthesized Conway-ready chain DB through
-emit, convert, header extraction, nonce composition, and Amaru imports.
-A Docker-level verifier also runs the image against a `testnet_42`
-ChainDB held open by the official
-`ghcr.io/intersectmbo/cardano-node:10.7.1` image.
+Phase 2 implementation. The flake checks build the producer image and
+run a synthesized Conway-ready chain DB through emit, convert, header
+extraction, nonce composition, and Amaru imports. A Docker-level
+verifier also runs the image against a `testnet_42` ChainDB held open by
+the official `ghcr.io/intersectmbo/cardano-node:10.7.1` image.
+
+After CI succeeds on `main`, GitHub Actions publishes the producer image
+as:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
+```
+
+Downstream compose files should pin that full commit-SHA tag. The
+project does not publish moving runtime tags as the integration
+contract.
 
 ## What this PR adds
 
@@ -127,8 +137,8 @@ just live-bootstrap-producer
 ## Consumers
 
 - [`cardano-foundation/cardano-node-antithesis`](https://github.com/cardano-foundation/cardano-node-antithesis)
-  testnets/cardano_amaru — replaces the vendored loader image once this
-  pipeline lands
+  testnets/cardano_amaru — consumes the commit-SHA-tagged producer image
+  in the follow-up integration ticket
 
 ## License
 

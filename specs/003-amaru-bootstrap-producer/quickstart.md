@@ -7,7 +7,7 @@
 - Linux x86_64
 - docker / docker-compose
 - A running cardano-node container (mainnet, preprod, preview, or the antithesis testnet's producer node — any of these)
-- The image at `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>` is reachable (public registry)
+- The image at `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>` is reachable (public registry)
 
 No nix, no cabal, no per-host Cardano toolchain.
 
@@ -23,7 +23,7 @@ services:
     restart: always
 
   bootstrap-producer:
-    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>
+    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
     environment:
       AMARU_NETWORK: mainnet
     volumes:
@@ -134,15 +134,23 @@ The defaults are sized for the antithesis simulator's typical 100×-150× wall-c
 
 Mainnet operators don't need to touch any of these — the wait phase exits on the first poll.
 
-## Updating the image
+## Image pinning
 
-The image's tag is the source repo's commit SHA. To pick up a fix:
+The producer image is published after `main` CI succeeds:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
+```
+
+Use the full commit-SHA tag in downstream compose files. Do not consume
+moving tags as the integration contract; the tested SHA is what matters.
+To pick up a fix:
 
 ```yaml
 services:
   bootstrap-producer:
--   image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:abc1234
-+   image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:def5678
+-   image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:8e42d41ad8a3a507ba82e98bdaa520c2278ae046
++   image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:29167cb38ebda74e960a15d7263202d6f7b69c6c
 ```
 
 Then `docker compose pull bootstrap-producer && docker compose up -d`.

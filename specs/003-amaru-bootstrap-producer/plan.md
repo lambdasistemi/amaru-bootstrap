@@ -3,9 +3,31 @@
 **Branch**: `003-amaru-bootstrap-producer` | **Date**: 2026-04-28 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `specs/003-amaru-bootstrap-producer/spec.md`
 
+## Status
+
+**Completed**:
+- T022 / issue #14: added a GHCR publish workflow for the
+  bootstrap-producer image. The workflow runs after the `CI` workflow
+  succeeds on `main`, builds the Nix docker image, loads it into Docker,
+  tags it as
+  `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>`,
+  and pushes it with the repository `GITHUB_TOKEN`.
+- Documentation now states the commit-SHA pinning policy for downstream
+  compose files and avoids moving runtime tags as the integration
+  contract.
+
+**Current**:
+- Next production integration step is T023/T024 locally and issue #15
+  downstream: consume the published SHA-tagged image from the Antithesis
+  compose stack.
+
+**Blockers**:
+- None for image publication. Mainnet-mature manual timing remains T024
+  and should not be inferred from the image publish alone.
+
 ## Summary
 
-A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>`) that **follows any cardano-node's chain DB** (mainnet operator, antithesis cluster, anything in between), waits until the *immutable tip is era-ready for amaru's consumer* (Conway, with at least two preceding Conway epochs), then runs the full bootstrap pipeline as a one-shot container: pre-flight (era-readiness predicate evaluation, polling if the chain isn't yet ready), `ledger-state-emitter` snapshot emission for the pinned cardano-node 10.7.1 ledger set, `amaru convert-ledger-state`, header extraction, nonces composition, three `amaru import-*` invocations, exit 0. On a mainnet-mature cardano-node the wait is a no-op; on an antithesis fresh cluster it's ~10-20 wall-minutes under simulator speedup. Its exit code is the synchronisation primitive — Amaru services in the same compose stack `depends_on` it via `condition: service_completed_successfully`. The bootstrap-producer itself `depends_on` the cardano-node only with `condition: service_started`. No marker file, no out-of-band signalling. Built with `nix dockerTools`, published to ghcr.io tagged by commit SHA via a new GitHub Actions workflow.
+A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>`) that **follows any cardano-node's chain DB** (mainnet operator, antithesis cluster, anything in between), waits until the *immutable tip is era-ready for amaru's consumer* (Conway, with at least two preceding Conway epochs), then runs the full bootstrap pipeline as a one-shot container: pre-flight (era-readiness predicate evaluation, polling if the chain isn't yet ready), `ledger-state-emitter` snapshot emission for the pinned cardano-node 10.7.1 ledger set, `amaru convert-ledger-state`, header extraction, nonces composition, three `amaru import-*` invocations, exit 0. On a mainnet-mature cardano-node the wait is a no-op; on an antithesis fresh cluster it's ~10-20 wall-minutes under simulator speedup. Its exit code is the synchronisation primitive — Amaru services in the same compose stack `depends_on` it via `condition: service_completed_successfully`. The bootstrap-producer itself `depends_on` the cardano-node only with `condition: service_started`. No marker file, no out-of-band signalling. Built with `nix dockerTools`, published to ghcr.io tagged by commit SHA via a new GitHub Actions workflow.
 
 ## Technical Context
 
