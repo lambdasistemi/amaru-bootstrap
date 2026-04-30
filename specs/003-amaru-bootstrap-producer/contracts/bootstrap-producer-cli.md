@@ -8,6 +8,11 @@ The bootstrap-producer is delivered as a docker image. Inside, the entrypoint is
 services:
   bootstrap-producer:
     image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
+    command:
+      - /cardano/state/db
+      - /cardano/config
+      - /srv/amaru
+      - testnet_42
     environment:
       AMARU_NETWORK: testnet_42
     volumes:

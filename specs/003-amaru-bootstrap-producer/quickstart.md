@@ -24,6 +24,11 @@ services:
 
   bootstrap-producer:
     image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
+    command:
+      - /cardano/state/db
+      - /cardano/config
+      - /srv/amaru
+      - mainnet
     environment:
       AMARU_NETWORK: mainnet
     volumes:
@@ -68,7 +73,9 @@ No wait phase. Total wall-clock: ~3-5 minutes (the snapshot pipeline). Amaru sta
 
 The antithesis testnet starts the producer node from a Conway-genesis configuration. The chain begins at slot 0. Amaru cannot consume the bundle until two epochs of Conway are forged.
 
-The compose shape is identical to Scenario A; only the `AMARU_NETWORK` and the input genesis differ. The bootstrap-producer's stdout shows:
+The compose shape is identical to Scenario A; only `AMARU_NETWORK`, the
+fourth producer command argument, and the input genesis differ. The
+bootstrap-producer's stdout shows:
 
 ```
 + pre-flight: chain DB not yet present

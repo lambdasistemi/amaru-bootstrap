@@ -29,12 +29,12 @@ This repo now produces the same kind of bundle without carrying a fork of
 
 ## Status
 
-Phase 2 implementation. The flake checks build the producer image and
-run a synthesized Conway-ready chain DB through emit, convert, header
-extraction, nonce composition, Amaru imports, and an `amaru run`
-startup proof from the produced bundle. A Docker-level verifier also
-runs the image against a `testnet_42` ChainDB held open by the official
-`ghcr.io/intersectmbo/cardano-node:10.7.1` image.
+The current `main` branch builds the producer image and verifies the
+full bootstrap path. CI runs a synthesized Conway-ready chain DB through
+emit, convert, header extraction, nonce composition, Amaru imports, and
+an `amaru run` startup proof from the produced bundle. A Docker-level
+verifier also runs the image against a `testnet_42` ChainDB held open by
+the official `ghcr.io/intersectmbo/cardano-node:10.7.1` image.
 
 After CI succeeds on `main`, GitHub Actions publishes the producer image
 as:
@@ -47,7 +47,38 @@ Downstream compose files should pin that full commit-SHA tag. The
 project does not publish moving runtime tags as the integration
 contract.
 
-## What this PR adds
+Current CI-proven baseline:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:d33836055256e9c4eac933f6f67902620be8b99f
+```
+
+## Build artifacts
+
+The producer image is intentionally available in four places:
+
+| Surface | Name | Use |
+|---------|------|-----|
+| Flake package | `.#packages.x86_64-linux.bootstrap-producer-image` | Build the Docker image tarball locally. |
+| Flake check | `.#checks.x86_64-linux.bootstrap-producer-image` | Prove the image still builds in CI's Build Gate. |
+| GitHub Actions artifact | `bootstrap-producer-image-<github-sha>` | Download the CI-built tarball from a PR or `main` CI run. |
+| GHCR image | `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>` | Runtime image for downstream Compose stacks after `main` CI passes. |
+
+Local build:
+
+```bash
+nix build .#packages.x86_64-linux.bootstrap-producer-image \
+  -o result-bootstrap-producer-image
+docker load -i result-bootstrap-producer-image
+```
+
+In GitHub Actions, the uploaded artifact contains:
+
+```text
+amaru-bootstrap-producer-<github-sha>.tar.gz
+```
+
+## What this provides
 
 - `bootstrap-producer`: a one-shot container/local app that waits until a
   cardano-node chain DB is mature enough for Amaru, writes a complete
@@ -64,13 +95,35 @@ contract.
 The architecture, state machine, release boundary, and concurrency model
 are documented with diagrams in `docs/architecture.md`.
 
+## Tutorial
+
+The operator tutorial is in [`docs/tutorial.md`](docs/tutorial.md). It
+covers:
+
+- using the published Docker image from Compose
+- the required four producer arguments
+- read-write ChainDB mount requirements
+- local runs with `nix run .#bootstrap-producer`
+- failure diagnosis and CI evidence
+
+The image entrypoint is `bootstrap-producer`; it does not infer paths
+from environment alone. A Compose service must pass:
+
+```yaml
+command:
+  - /cardano/state/db
+  - /cardano/config
+  - /srv/amaru
+  - testnet_42
+```
+
 ## Compatibility target
 
-This branch targets `cardano-node 10.7.1`. That is deliberate: Cardano
-ledger-state CBOR changes across node releases, so compiling against a
-random ledger package set is not enough. Retargeting this producer to a
-new node release means updating `cabal.project`, `flake.lock`, and the
-documented projection in
+This repository currently targets `cardano-node 10.7.1`. That is
+deliberate: Cardano ledger-state CBOR changes across node releases, so
+compiling against a random ledger package set is not enough. Retargeting
+this producer to a new node release means updating `cabal.project`,
+`flake.lock`, and the documented projection in
 `specs/003-amaru-bootstrap-producer/research.md#r-011`.
 
 `ledger-state-emitter` does not write raw node ledger CBOR. It writes
@@ -155,4 +208,4 @@ just live-bootstrap-producer
 
 ## License
 
-TBD — likely Apache-2.0 to match Amaru.
+Apache-2.0. See [`LICENSE`](LICENSE).

@@ -38,6 +38,21 @@ jobs:
           .#checks.x86_64-linux.bootstrap-producer-synthesized
           .#checks.x86_64-linux.amaru-run-bootstrap
           .#checks.x86_64-linux.bootstrap-producer-image
+      - name: Materialize bootstrap-producer image artifact
+        run: |
+          nix build --quiet \
+            .#packages.x86_64-linux.bootstrap-producer-image \
+            -o result-bootstrap-producer-image
+          cp -L result-bootstrap-producer-image \
+            "$RUNNER_TEMP/amaru-bootstrap-producer-${GITHUB_SHA}.tar.gz"
+      - name: Upload bootstrap-producer image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-producer-image-${{ github.sha }}
+          path: ${{ runner.temp }}/amaru-bootstrap-producer-${{ github.sha }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
 
   # The Phase 0 verdict job. Runs the orchestrator end-to-end against
   # the vendored fixture; its pass/fail answers the no-fork hypothesis.

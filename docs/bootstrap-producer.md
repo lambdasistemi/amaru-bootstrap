@@ -11,6 +11,36 @@ nix run .#bootstrap-producer -- \
   <network>
 ```
 
+## Invocation
+
+The Docker image entrypoint is `bootstrap-producer`. The image does not
+have a default `Cmd`, so Compose files must pass the four required
+arguments:
+
+```yaml
+services:
+  bootstrap-producer:
+    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
+    command:
+      - /cardano/state/db
+      - /cardano/config
+      - /srv/amaru
+      - testnet_42
+    environment:
+      AMARU_NETWORK: testnet_42
+    volumes:
+      - node-state:/cardano/state
+      - node-configs:/cardano/config:ro
+      - amaru-bundle:/srv/amaru
+    restart: "no"
+```
+
+Argument 1 must be the actual cardano-node ChainDB directory as seen
+inside the producer container. If the node stores its database at
+`/state/db` and the state volume is mounted at `/cardano/state`, pass
+`/cardano/state/db`. If the mounted path already is the database
+directory, pass that path directly.
+
 ## Pipeline
 
 The producer runs once and exits. Its exit code is the synchronization
@@ -79,6 +109,18 @@ ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
 The full commit SHA is the runtime integration contract. Downstream
 compose files should pin the exact SHA they tested. The project does not
 publish moving runtime tags such as `latest` for the producer.
+
+Current CI-proven example:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:d33836055256e9c4eac933f6f67902620be8b99f
+```
+
+The same tarball is available as the flake package
+`.#packages.x86_64-linux.bootstrap-producer-image`. CI uploads it from
+the Build Gate as an artifact named
+`bootstrap-producer-image-<github-sha>`, containing
+`amaru-bootstrap-producer-<github-sha>.tar.gz`.
 
 ## ChainDB Mount Contract
 
