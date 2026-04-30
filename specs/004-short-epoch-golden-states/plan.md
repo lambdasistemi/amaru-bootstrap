@@ -11,15 +11,19 @@
 - Created issue #29 and moved it to WIP.
 - Reproduced the local import failure with generated short-epoch states:
   `unexpected type map at position 2: expected u32`.
+- Fixed the reward-update projection mismatch by emitting a completed
+  zero reward update when the node ledger state carries `SNothing`.
+- Fixed the short-epoch era-history mismatch by rewriting converted
+  current-era history sidecars from the node genesis `epochLength`.
+- Local `just build-gate` passes with the short-epoch checks included.
 
 **Current**:
 
-- Add generated sample and golden checks to Nix/CI.
+- Push the passing PR and let GitHub CI re-run the same Build Gate.
 
 **Blockers**:
 
-- The golden check is expected to fail until the Haskell projection or
-  Amaru importer contract is fixed.
+- None known locally.
 
 ## Technical Context
 
@@ -39,6 +43,11 @@ The repository should not grow committed ChainDB artifacts.
   chain is dense enough to expose immutable blocks in a small CI budget.
 - Sample slots `9`, `129`, and `249`, matching the observed early
   bootstrap emission points.
+- Project empty reward-update state as `Complete emptyRewardUpdate`
+  because Amaru's CLI imports snapshots with `has_rewards=true`.
+- Correct the converted open-ended current era history sidecar to the
+  Shelley genesis `epochLength`; Amaru's converter currently uses the
+  network default there, which is wrong for 120-slot custom testnets.
 - Split conversion and import:
   - `antithesis-short-epoch-samples` proves sample generation and
     conversion.
@@ -52,5 +61,5 @@ nix build .#checks.x86_64-linux.antithesis-short-epoch-samples
 nix build .#checks.x86_64-linux.antithesis-short-epoch-golden
 ```
 
-Before the fix, the second command is expected to fail at
-`amaru import-ledger-state` with the current CBOR/import mismatch.
+After the fix, both commands pass locally. `just build-gate` also passes
+with both short-epoch checks included in the gate.

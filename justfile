@@ -40,6 +40,8 @@ build-gate:
         .#checks.x86_64-linux.bootstrap-producer-bats \
         .#checks.x86_64-linux.bootstrap-producer-synthesized \
         .#checks.x86_64-linux.amaru-run-bootstrap \
+        .#checks.x86_64-linux.antithesis-short-epoch-samples \
+        .#checks.x86_64-linux.antithesis-short-epoch-golden \
         .#checks.x86_64-linux.bootstrap-producer-image
 
 # Run the unit-style bats checks.

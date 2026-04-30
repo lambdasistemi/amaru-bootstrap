@@ -54,13 +54,15 @@ signal for downstream Amaru services.
 4. Run `ledger-state-emitter` at the selected target slot and the two
    preceding epoch slots.
 5. Run `amaru convert-ledger-state` for all emitted ledger states.
-6. Run `header-extractor list-blocks` and `get-header` to collect the
+6. Correct the converted current-era history sidecars from the node
+   genesis `epochLength`.
+7. Run `header-extractor list-blocks` and `get-header` to collect the
    headers Amaru needs.
-7. Rewrite `nonces.json` so `tail` points at the previous-epoch header
+8. Rewrite `nonces.json` so `tail` points at the previous-epoch header
    hash.
-8. Run `amaru import-ledger-state`, `amaru import-headers`, and
+9. Run `amaru import-ledger-state`, `amaru import-headers`, and
    `amaru import-nonces`.
-9. Atomically rename the unique temp directory into the final bundle
+10. Atomically rename the unique temp directory into the final bundle
    path.
 
 The final layout is:
@@ -86,6 +88,14 @@ If the latest converted snapshot is
 `headers/header.<slot>.<hash>.cbor` and import it into
 `chain.<network>.db/`; otherwise `amaru run` fails during startup with
 `ledger tip header not found`.
+
+For custom testnets, `amaru import-ledger-state` reads
+`snapshots/history.<slot>.<hash>.json` next to each snapshot. Amaru's
+converter currently fills the open-ended current era with the network
+default epoch size, so the producer rewrites that sidecar to the
+`epochLength` from the mounted Shelley genesis before import. Without
+that correction a 120-slot Antithesis testnet imports slot 9, then fails
+at slot 129 because the sidecar still maps slot 129 to epoch 0.
 
 ## Node-Release Target
 
@@ -154,6 +164,9 @@ node-10.7.1 ledger state:
 - Conway/Dijkstra account state is projected into Amaru's legacy
   delegation-state wrapper while preserving rewards, deposits,
   stake-pool delegation, and DRep delegation.
+- Empty reward-update state is projected as a completed zero reward
+  update because Amaru's import command decodes snapshots with
+  `has_rewards=true`.
 
 The detailed contract is in
 `specs/003-amaru-bootstrap-producer/research.md#r-011`.
@@ -200,7 +213,9 @@ shape a long-running public network can contain.
 `antithesis-short-epoch-samples` generates a deterministic short-epoch
 ChainDB corpus from the pinned node 10.7.1 tooling, emits the observed
 early bootstrap slots `9`, `129`, and `249`, and converts them through
-`amaru convert-ledger-state`. The source ChainDB is generated during the
+`amaru convert-ledger-state`. The check also rewrites the current-era
+history sidecars to the generated Shelley genesis `epochLength`, matching
+the production producer path. The source ChainDB is generated during the
 Nix build; the repository does not commit bulky database artifacts.
 
 `antithesis-short-epoch-golden` imports those converted snapshots into

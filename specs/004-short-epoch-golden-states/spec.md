@@ -35,6 +35,9 @@ fail before the projection/import mismatch is fixed and pass afterwards.
   immutable blocks for `header-extractor` and `ledger-state-emitter`.
 - A check that only proves conversion is insufficient; the import step is
   the failing boundary.
+- Converted testnet history sidecars must agree with the node genesis
+  epoch length; otherwise Amaru maps slot 129 to epoch 0 while the
+  ledger snapshot declares epoch 1.
 - The corpus must remain pinned to the node 10.7.1 dependency set.
 
 ## Requirements
@@ -51,13 +54,16 @@ fail before the projection/import mismatch is fixed and pass afterwards.
   `amaru import-ledger-state`.
 - **FR-005**: The repository MUST document the generated corpus profile
   and explain why the database is not committed.
+- **FR-006**: The converted current-era history sidecars MUST use the
+  Shelley genesis `epochLength` before Amaru import on custom testnets.
 
 ### Key Entities
 
 - **Short-epoch ChainDB corpus**: Generated Cardano ChainDB configured to
   exercise the early Conway-from-genesis bootstrap state family.
 - **Golden snapshots**: Converted Amaru snapshots derived from the
-  sampled ledger states.
+  sampled ledger states, with history sidecars corrected to the sampled
+  genesis epoch length.
 - **Import gate**: CI check that requires Amaru to consume the snapshots.
 
 ## Success Criteria

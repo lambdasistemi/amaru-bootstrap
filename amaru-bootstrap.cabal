@@ -40,6 +40,7 @@ library
     , cardano-ledger-shelley
     , cardano-binary
     , cardano-slotting
+    , cardano-strict-containers
     , cborg
     , containers
     , directory

@@ -11,6 +11,7 @@ Reverse-engineered from
 ├── chain.<network>.db/                    # amaru's chain store, prepopulated
 ├── ledger.<network>.db/                   # amaru's ledger store, prepopulated
 ├── snapshots/<slot>.<hash>.cbor           # target plus two prior epoch boundaries
+├── snapshots/history.<slot>.<hash>.json   # testnet era history sidecar
 ├── nonces.json                            # tail points to previous-epoch header hash
 └── headers/header.<slot>.<hash>.cbor      # includes the latest snapshot header
 ```
@@ -94,3 +95,9 @@ dependency set and emits the Amaru bootstrap projection documented in
 it three times: `target_slot`, `target_slot - epochLength`, and
 `target_slot - 2 * epochLength`. `amaru convert-ledger-state` still owns
 the final snapshot slicing, history JSON, and nonce JSON formats.
+
+For custom testnets, the producer corrects the converted
+`history.<slot>.<hash>.json` files before import: the open-ended current
+era's `epoch_size_slots` is set to the mounted Shelley genesis
+`epochLength`. This keeps short-epoch networks consistent with the
+ledger snapshot epoch number that Amaru checks during import.
