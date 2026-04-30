@@ -130,6 +130,112 @@ let
   # (T014).
   shortSynthesizedChainDb =
     mkSynthesizedChainDb "bootstrap-producer-fixture-short-chain-db" 50000;
+
+  # Issue #29: deterministic short-epoch ChainDB corpus for the
+  # Antithesis cold-start family. The observed cluster failure emitted
+  # snapshots at slots 9, 129, and 249 with a 120-slot epoch. Stock
+  # db-synthesizer rejects the exact Antithesis k/f tuple as too short
+  # and, with sparse blocks, may leave no immutable tip to sample. This
+  # corpus therefore keeps epochLength=120 but uses securityParam=8 and
+  # activeSlotsCoeff=1.0 so the same early-slot window is dense enough
+  # for immutable-DB based tools.
+  antithesisShortEpochChainDb =
+    pkgs.runCommand "antithesis-short-epoch-chain-db"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.jq
+          iogTools.db-synthesizer
+        ];
+      } ''
+      set -euo pipefail
+
+      fixture=${fixture}
+      mkdir -p "$out/config" "$out/keys" "$out/chain-db"
+      cp -rL "$fixture/configs/configs/." "$out/config/"
+      cp -rL "$fixture/configs/keys/." "$out/keys/"
+      chmod -R u+w "$out/config" "$out/keys"
+
+      jq '
+        .epochLength = 120
+        | .securityParam = 8
+        | .activeSlotsCoeff = 1.0
+      ' "$out/config/shelley-genesis.json" \
+        >"$out/config/shelley-genesis.json.tmp"
+      mv "$out/config/shelley-genesis.json.tmp" \
+        "$out/config/shelley-genesis.json"
+
+      bulk="$TMPDIR/bulk-credentials.json"
+      jq -n \
+        --slurpfile opcert "$out/keys/opcert.cert" \
+        --slurpfile vrf    "$out/keys/vrf.skey" \
+        --slurpfile kes    "$out/keys/kes.skey" \
+        '[[ $opcert[0], $vrf[0], $kes[0] ]]' \
+        >"$bulk"
+
+      db-synthesizer \
+        --config "$out/config/config.json" \
+        --bulk-credentials-file "$bulk" \
+        -s 720 \
+        --db "$out/chain-db" \
+        -f
+
+      printf '%s\n' \
+        "# Antithesis short-epoch ChainDB corpus" \
+        "" \
+        "- source fixture: specs/001-snapshot-format-smoke/fixtures/p1-config" \
+        "- epochLength: 120 slots" \
+        "- securityParam: 8" \
+        "- activeSlotsCoeff: 1.0" \
+        "- synthesized slots: 720" \
+        "- sampled ledger-state slots: 9, 129, 249" \
+        "" \
+        "The exact Antithesis profile uses a sparser active slot coefficient." \
+        "This generated profile keeps the observed short epoch and snapshot" \
+        "slot window while forcing enough blocks for immutable-DB sampling." \
+        >"$out/METADATA.md"
+    '';
+
+  antithesisShortEpochSamples =
+    pkgs.runCommand "antithesis-short-epoch-golden-samples"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.findutils
+          amaruPkg
+          headerExtractorPkgs.ledger-state-emitter
+        ];
+      } ''
+      set -euo pipefail
+
+      mkdir -p "$out/legacy" "$out/snapshots"
+      cp ${antithesisShortEpochChainDb}/METADATA.md "$out/METADATA.md"
+      cp -rL ${antithesisShortEpochChainDb}/chain-db "$TMPDIR/chain-db"
+      cp -rL ${antithesisShortEpochChainDb}/config "$TMPDIR/config"
+      chmod -R u+w "$TMPDIR/chain-db" "$TMPDIR/config"
+
+      for slot in 9 129 249; do
+        ledger-state-emitter \
+          --db "$TMPDIR/chain-db" \
+          --config "$TMPDIR/config/config.json" \
+          --target-slot "$slot" \
+          --out "$out/legacy/$slot.cbor"
+
+        amaru convert-ledger-state \
+          --network testnet_42 \
+          --snapshot "$out/legacy/$slot.cbor" \
+          --target-dir "$out/snapshots"
+      done
+
+      cbor_count=$(find "$out/snapshots" -maxdepth 1 \
+        -name '*.cbor' | wc -l)
+      if [ "$cbor_count" -ne 3 ]; then
+        echo "expected 3 converted short-epoch snapshots, got $cbor_count" >&2
+        exit 1
+      fi
+    '';
 in
 {
   amaru = amaruPkg;
@@ -139,6 +245,7 @@ in
   header-extractor = headerExtractorPkgs.header-extractor;
   ledger-state-emitter = headerExtractorPkgs.ledger-state-emitter;
   bootstrap-producer-image = bootstrapProducerImage;
+  antithesis-short-epoch-samples = antithesisShortEpochSamples;
 
   shellcheck = pkgs.runCommand "smoke-test-shellcheck"
     {
@@ -341,6 +448,34 @@ in
       fi
 
       mkdir -p $out
+    '';
+
+  # Issue #29 regression gate. This intentionally exercises the exact
+  # failure boundary seen in the Antithesis short-epoch experiment:
+  # convert succeeds, then `amaru import-ledger-state` must be able to
+  # consume the generated snapshots. On the current projection this
+  # fails with "unexpected type map at position 2: expected u32".
+  antithesis-short-epoch-golden =
+    pkgs.runCommand "antithesis-short-epoch-golden"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          amaruPkg
+        ];
+      } ''
+      set -euo pipefail
+
+      ledger_dir="$TMPDIR/ledger.testnet_42.db"
+      mkdir -p "$ledger_dir"
+
+      amaru import-ledger-state \
+        --network testnet_42 \
+        --ledger-dir "$ledger_dir" \
+        --snapshot-dir ${antithesisShortEpochSamples}/snapshots
+
+      test -d "$ledger_dir/live"
+      mkdir -p "$out"
     '';
 
   # Unit-style bats: pure mock-based tests, no real binaries needed.

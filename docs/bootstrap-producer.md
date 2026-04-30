@@ -174,6 +174,8 @@ Producer-specific checks:
 ```bash
 nix build .#checks.x86_64-linux.bootstrap-producer-synthesized
 nix build .#checks.x86_64-linux.amaru-run-bootstrap
+nix build .#checks.x86_64-linux.antithesis-short-epoch-samples
+nix build .#checks.x86_64-linux.antithesis-short-epoch-golden
 nix build .#checks.x86_64-linux.bootstrap-producer-bats
 nix build .#checks.x86_64-linux.bootstrap-producer-image
 just live-bootstrap-producer
@@ -194,6 +196,17 @@ It proves the release-pinned CBOR projection can populate Amaru's stores
 and that those stores are self-consistent at startup. It does not claim
 to exercise every transaction, script, UTxO, stake, governance, or reward
 shape a long-running public network can contain.
+
+`antithesis-short-epoch-samples` generates a deterministic short-epoch
+ChainDB corpus from the pinned node 10.7.1 tooling, emits the observed
+early bootstrap slots `9`, `129`, and `249`, and converts them through
+`amaru convert-ledger-state`. The source ChainDB is generated during the
+Nix build; the repository does not commit bulky database artifacts.
+
+`antithesis-short-epoch-golden` imports those converted snapshots into
+Amaru's ledger store. It is the regression gate for the Antithesis
+cold-start ledger-state family: convert success alone is not enough, the
+same sampled states must also pass `amaru import-ledger-state`.
 
 `just live-bootstrap-producer` is the Docker-level verifier. It seeds a
 stock `testnet_42` ChainDB with `db-synthesizer`, starts
