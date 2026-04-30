@@ -21,7 +21,12 @@ This repo now produces the same kind of bundle without carrying a fork of `ourob
 
 ## Status
 
-Phase 2 PR — bootstrap-producer implementation. The active spec is [`specs/003-amaru-bootstrap-producer/`](https://github.com/lambdasistemi/amaru-bootstrap/tree/main/specs/003-amaru-bootstrap-producer); the flake checks build the producer image and run a synthesized Conway-ready chain DB through emit, convert, header extraction, nonce composition, Amaru imports, and an `amaru run` startup proof.
+The current `main` branch contains the bootstrap-producer
+implementation. The active spec is
+[`specs/003-amaru-bootstrap-producer/`](https://github.com/lambdasistemi/amaru-bootstrap/tree/main/specs/003-amaru-bootstrap-producer);
+the flake checks build the producer image and run a synthesized
+Conway-ready chain DB through emit, convert, header extraction, nonce
+composition, Amaru imports, and an `amaru run` startup proof.
 
 ## Current implementation
 
@@ -43,6 +48,8 @@ node state volume read-write and keep the config volume read-only.
 
 ## How to read this site
 
+- **[Tutorial](tutorial.md)** - start here if you want to wire the
+  producer into a Compose stack or run it locally against a ChainDB.
 - **[What Amaru needs](what-amaru-needs.md)** — reverse-engineered contract for the bootstrap bundle, drawn from Arnaud Bailly's loader scripts. Read this first if you want to understand *what* the project produces.
 - **[Architecture](architecture.md)** — diagrams for the runtime data flow, state machine, node-release boundary, ledger projection, and concurrency model.
 - **[Bootstrap producer](bootstrap-producer.md)** — current producer pipeline, node-release target, and verification commands.
@@ -50,4 +57,4 @@ node state volume read-write and keep the config volume read-only.
 
 ## Consumers
 
-- [`cardano-foundation/cardano-node-antithesis`](https://github.com/cardano-foundation/cardano-node-antithesis) `testnets/cardano_amaru/` — the docker-compose stack that will consume the loader image this project produces, replacing the vendored copy of Arnaud's setup.
+- [`cardano-foundation/cardano-node-antithesis`](https://github.com/cardano-foundation/cardano-node-antithesis) `testnets/cardano_amaru/` - the downstream docker-compose stack tracked by the follow-up integration issue.

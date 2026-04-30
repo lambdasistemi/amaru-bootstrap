@@ -14,6 +14,11 @@ services:
 
   bootstrap-producer:
     image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
+    command:
+      - /cardano/state/db
+      - /cardano/config
+      - /srv/amaru
+      - testnet_42
     environment:
       AMARU_NETWORK: testnet_42
     volumes:
@@ -46,9 +51,10 @@ services:
 1. **`bootstrap-producer.depends_on.p1.condition: service_started`** — the bootstrap-producer container can start as soon as the producer node *container* is up. The producer's chain DB does not need to exist yet (the producer creates it on its own startup); the bootstrap-producer's pre-flight loop polls for it to appear, then polls for the chain to mature.
 2. **`amaru-1.depends_on.bootstrap-producer.condition: service_completed_successfully`** — Amaru does not start until the bundle is complete on the shared volume. The bootstrap-producer's exit IS the signal; there is no marker file.
 3. **`bootstrap-producer.restart: "no"`** — the producer runs once per compose-up. It exits on completion or failure and does not respawn. This is what makes the `service_completed_successfully` semantic work.
-4. **`bootstrap-producer.volumes`**: read-write mount for the cluster's state and read-only mount for config. The state mount cannot be `:ro`: the node-10.7.1 consensus ImmutableDB opener validates immutable chunk files through APIs that require write permissions. The bootstrap-producer still consults only the immutable, append-only portion; read-write here is an API/filesystem requirement, not a semantic write contract. The bundle volume is read-write and shared with all consuming amaru services.
-5. **Bundle volume name** (`amaru-bundle` in the example) is the operator's choice — must match between producer and consumers.
-6. **`p1.restart: always`** — the producer node is long-running. It does NOT exit. The bootstrap-producer is a *concurrent reader* of its chain DB.
+4. **`bootstrap-producer.command`**: the image entrypoint requires four arguments: ChainDB path, config directory, bundle directory, and network. The first argument must be the actual ChainDB directory as mounted inside the producer container.
+5. **`bootstrap-producer.volumes`**: read-write mount for the cluster's state and read-only mount for config. The state mount cannot be `:ro`: the node-10.7.1 consensus ImmutableDB opener validates immutable chunk files through APIs that require write permissions. The bootstrap-producer still consults only the immutable, append-only portion; read-write here is an API/filesystem requirement, not a semantic write contract. The bundle volume is read-write and shared with all consuming amaru services.
+6. **Bundle volume name** (`amaru-bundle` in the example) is the operator's choice — must match between producer and consumers.
+7. **`p1.restart: always`** — the producer node is long-running. It does NOT exit. The bootstrap-producer is a *concurrent reader* of its chain DB.
 
 ## Behaviour matrix
 

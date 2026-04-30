@@ -59,6 +59,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Tutorial: tutorial.md
   - Concepts:
       - What Amaru needs: what-amaru-needs.md
       - Architecture: architecture.md
