@@ -56,8 +56,9 @@ live-bootstrap-producer:
         -o result-bootstrap-producer-image
     nix --quiet shell nixpkgs#docker-client \
         -c docker load -i result-bootstrap-producer-image
+    : "${CARDANO_NODE_IMAGE:=ghcr.io/intersectmbo/cardano-node:10.7.1-amd64}"
+    export CARDANO_NODE_IMAGE
     BOOTSTRAP_PRODUCER_IMAGE=amaru-bootstrap-producer:dev \
-    CARDANO_NODE_IMAGE=ghcr.io/intersectmbo/cardano-node:10.7.1 \
         nix --quiet shell \
             .#checks.x86_64-linux.db-synthesizer \
             nixpkgs#bash \

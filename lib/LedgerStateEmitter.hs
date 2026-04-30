@@ -394,7 +394,8 @@ replayLoop cfg registry immutableDB ledgerDB targetSlot = do
                             applyDiffs oldLedgerWithTables newLedger
                     LedgerDB.forkerPush forker newLedger
                     join $ atomically $ LedgerDB.forkerCommit forker
-                    LedgerDB.tryFlush ledgerDB
+                    -- Keep replay in-memory. Flushing here can prune
+                    -- snapshots from a live cardano-node LedgerDB.
                     when ((unBlockNo $ blockNo block) `mod` 1000 == 0) $
                         putStrLn $
                             "ledger-state-emitter: replayed block "

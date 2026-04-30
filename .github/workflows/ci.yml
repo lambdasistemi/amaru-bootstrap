@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  packages: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -132,14 +136,35 @@ jobs:
             -o result-bootstrap-producer-image
           nix --quiet shell nixpkgs#docker-client \
             -c docker load -i result-bootstrap-producer-image
+      - name: Log in to GHCR for external image pulls
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" \
+            | nix --quiet shell nixpkgs#docker-client \
+                -c docker login ghcr.io \
+                  -u "$GITHUB_ACTOR" \
+                  --password-stdin
       - name: Pull cardano-node 10.7.1 image
-        run: >-
-          nix --quiet shell nixpkgs#docker-client
-          -c docker pull ghcr.io/intersectmbo/cardano-node:10.7.1
+        env:
+          CARDANO_NODE_IMAGE: ghcr.io/intersectmbo/cardano-node:10.7.1-amd64
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if nix --quiet shell nixpkgs#docker-client \
+                -c docker pull "$CARDANO_NODE_IMAGE"
+            then
+              exit 0
+            fi
+            delay=$((attempt * 15))
+            echo "cardano-node image pull failed on attempt ${attempt}; retrying in ${delay}s" >&2
+            sleep "$delay"
+          done
+          nix --quiet shell nixpkgs#docker-client \
+            -c docker pull "$CARDANO_NODE_IMAGE"
       - name: Run live ChainDB verifier
         env:
           BOOTSTRAP_PRODUCER_IMAGE: amaru-bootstrap-producer:dev
-          CARDANO_NODE_IMAGE: ghcr.io/intersectmbo/cardano-node:10.7.1
+          CARDANO_NODE_IMAGE: ghcr.io/intersectmbo/cardano-node:10.7.1-amd64
         run: >-
           nix --quiet shell
           .#checks.x86_64-linux.db-synthesizer
