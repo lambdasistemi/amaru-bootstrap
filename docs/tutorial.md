@@ -15,17 +15,13 @@ semantics.
 - A cardano-node 10.7.1 ChainDB and matching node config directory.
 - A writable bundle volume shared between `bootstrap-producer` and
   Amaru.
-- A published producer image pinned by full commit SHA.
-
-Current CI-proven image:
-
-```text
-ghcr.io/lambdasistemi/amaru-bootstrap-producer:d33836055256e9c4eac933f6f67902620be8b99f
-```
+- A published producer image pinned by full commit SHA:
+  `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>`.
 
 Do not use a moving tag as the integration contract. Pick the commit SHA
 that passed this repository's CI and pin that exact image in the
-downstream stack.
+downstream stack. The matching `Publish bootstrap-producer image`
+workflow run pushes the GHCR tag after `main` CI succeeds.
 
 The same image tarball is also exposed as the flake package
 `.#packages.x86_64-linux.bootstrap-producer-image` and uploaded by CI as
@@ -47,14 +43,14 @@ Example service:
 ```yaml
 services:
   cardano-node:
-    image: ghcr.io/intersectmbo/cardano-node:10.7.1
+    image: ghcr.io/intersectmbo/cardano-node:10.7.1-amd64
     volumes:
       - node-state:/state
       - node-configs:/config:ro
     restart: always
 
   bootstrap-producer:
-    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:d33836055256e9c4eac933f6f67902620be8b99f
+    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
     command:
       - /cardano/state/db
       - /cardano/config

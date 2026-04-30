@@ -26,7 +26,9 @@ implementation. The active spec is
 [`specs/003-amaru-bootstrap-producer/`](https://github.com/lambdasistemi/amaru-bootstrap/tree/main/specs/003-amaru-bootstrap-producer);
 the flake checks build the producer image and run a synthesized
 Conway-ready chain DB through emit, convert, header extraction, nonce
-composition, Amaru imports, and an `amaru run` startup proof.
+composition, Amaru imports, and an `amaru run` startup proof. CI also
+runs a Docker-level live verifier against a `testnet_42` ChainDB held
+open by `ghcr.io/intersectmbo/cardano-node:10.7.1-amd64`.
 
 ## Current implementation
 
@@ -44,7 +46,9 @@ projection, not arbitrary raw node ledger CBOR.
 The producer's ChainDB access is immutable-only by behavior, but the
 node-10.7.1 consensus ImmutableDB opener requires a writable filesystem
 while validating chunk files. Compose integrations therefore mount the
-node state volume read-write and keep the config volume read-only.
+node state volume read-write and keep the config volume read-only. The
+ledger replay uses an in-memory LedgerDB backend and does not flush into
+the node-owned LedgerDB.
 
 ## How to read this site
 

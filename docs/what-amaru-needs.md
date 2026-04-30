@@ -7,19 +7,24 @@ Reverse-engineered from
 ## Bundle layout
 
 ```
-<bundle>/
-├── chain.db/                              # amaru's chain store, prepopulated
-├── ledger.db/                             # amaru's ledger store, prepopulated
-├── snapshots/<slot>.cbor                  # target plus two prior epoch boundaries
-├── nonces.json
-└── headers/header.<slot>.<hash>.cbor      # at least 4 entries
+<bundle>/<network>/
+├── chain.<network>.db/                    # amaru's chain store, prepopulated
+├── ledger.<network>.db/                   # amaru's ledger store, prepopulated
+├── snapshots/<slot>.<hash>.cbor           # target plus two prior epoch boundaries
+├── nonces.json                            # tail points to previous-epoch header hash
+└── headers/header.<slot>.<hash>.cbor      # includes the latest snapshot header
 ```
+
+The latest snapshot's `<slot>.<hash>` must have an exact matching header
+file. Amaru uses that header to align the chain store to the ledger tip
+when `amaru run` opens the produced stores.
 
 ## Pipeline as Arnaud built it
 
 Steps in `amaru-loader.sh`:
 
-1. **Convert ledger states** (one per epoch already dumped by db-synthesizer fork)
+1. **Convert ledger states** (one per epoch already dumped by the forked
+   db-synthesizer)
 
    ```
    amaru convert-ledger-state \
@@ -29,9 +34,9 @@ Steps in `amaru-loader.sh`:
    ```
 
    For startup, Amaru needs the target epoch snapshot and the two prior
-   epoch snapshots. The live ledger opens from `ledger.db/live`, then
-   historical stores are consulted for the rewards and leader-schedule
-   stake distributions.
+   epoch snapshots. The live ledger opens from
+   `ledger.<network>.db/live`, then historical stores are consulted for
+   the rewards and leader-schedule stake distributions.
 
 2. **Compose `nonces.json`** by copying the last snapshot's nonces file and
    patching the `tail` field with the last header hash of the previous epoch.
