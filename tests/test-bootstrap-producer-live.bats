@@ -32,7 +32,7 @@ setup() {
     skip "BOOTSTRAP_PRODUCER_IMAGE unset; load/build the image first"
   fi
 
-  CARDANO_NODE_IMAGE="${CARDANO_NODE_IMAGE:-ghcr.io/intersectmbo/cardano-node:10.7.1}"
+  CARDANO_NODE_IMAGE="${CARDANO_NODE_IMAGE:-ghcr.io/intersectmbo/cardano-node:10.7.1-amd64}"
   TMP_PARENT="${BOOTSTRAP_LIVE_TMPDIR:-${RUNNER_TEMP:-}}"
   if [[ -n "$TMP_PARENT" ]]; then
     mkdir -p "$TMP_PARENT"
