@@ -91,7 +91,7 @@ Single Haskell project at repo root. New paths:
 
 ### End-to-end live-cluster test
 
-- [X] T021 [US1] Write `tests/test-bootstrap-producer-live.bats`: seed an era-ready `testnet_42` ChainDB with stock `db-synthesizer`, run the official `ghcr.io/intersectmbo/cardano-node:10.7.1` image against that DB, point the bootstrap-producer at the node-held ChainDB via volume mount, assert exit 0 within `AMARU_WAIT_DEADLINE_SECONDS`, assert bundle is complete on the output volume (chain.db, ledger.db, nonces.json, headers/* — minimum 4 header files per R-005). Run it — must pass. This verifies the live node-10.7.1 ChainDB mount/open contract without altering `testnet_42` genesis parameters that Amaru's importer treats as fixed. Backed by [SC-002](./spec.md#measurable-outcomes) + [Acceptance Scenario 1](./spec.md#user-scenarios--testing-mandatory).
+- [X] T021 [US1] Write `tests/test-bootstrap-producer-live.bats`: seed an era-ready `testnet_42` ChainDB with stock `db-synthesizer`, run the official `ghcr.io/intersectmbo/cardano-node:10.7.1-amd64` image against that DB, point the bootstrap-producer at the node-held ChainDB via volume mount, assert exit 0 within `AMARU_WAIT_DEADLINE_SECONDS`, assert bundle is complete on the output volume (chain.db, ledger.db, nonces.json, headers/* — minimum 4 header files per R-005). Run it — must pass. This verifies the live node-10.7.1 ChainDB mount/open contract without altering `testnet_42` genesis parameters that Amaru's importer treats as fixed. Backed by [SC-002](./spec.md#measurable-outcomes) + [Acceptance Scenario 1](./spec.md#user-scenarios--testing-mandatory).
 
 > Note: the mainnet-mature branch of SC-002 is verified by T024 (manual quickstart) — it requires a real synced cardano-node which is impractical in CI.
 

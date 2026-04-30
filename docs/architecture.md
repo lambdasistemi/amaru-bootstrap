@@ -46,7 +46,10 @@ readiness is derived from the immutable tip and header extraction walks
 immutable chunks. The Docker mount is still read-write because
 node-10.7.1's consensus ImmutableDB validation path opens chunk files
 through APIs that reject a read-only filesystem. The producer does not
-use volatile DB state as a readiness source.
+use volatile DB state as a readiness source. The ledger replay opens a
+V2 LedgerDB with an in-memory backend and does not flush replayed state
+back into the node-owned LedgerDB; flushing there can prune snapshots
+from a live node database.
 
 ## State Machine
 
@@ -155,9 +158,9 @@ sequenceDiagram
     Check->>Bundle: copy to writable test directory
     Check->>Amaru: run with ledger-dir and chain-dir
     Amaru-->>Check: build_ledger trace
-    Check-->>Check: timeout is expected; early bootstrap failure is not
+    Check-->>Check: timeout is expected, early bootstrap failure is not
 ```
 
-The CI proof is deliberately peerless: it does not prove live chain
+The CI proof is deliberately peer-free: it does not prove live chain
 synchronisation. It proves the produced stores are sufficient for Amaru
 to open its ledger and chain state and enter node startup.

@@ -18,7 +18,7 @@ You already run a cardano-node on a host. It has been syncing or running for a w
 ```yaml
 services:
   cardano-node:                   # your existing service, unchanged
-    image: ghcr.io/intersectmbo/cardano-node:10.7.1
+    image: ghcr.io/intersectmbo/cardano-node:10.7.1-amd64
     volumes: [node-state:/state, node-configs:/configs]
     restart: always
 
@@ -107,7 +107,8 @@ nix run .#bootstrap-producer -- \
 The pre-flight semantics are the same: zero wait on a mature DB, polling wait on a fresh one.
 
 The chain DB mount is intentionally read-write. The producer only
-queries immutable chunks, but node-10.7.1's consensus ImmutableDB opener
+queries immutable chunks for readiness/header extraction and keeps
+ledger replay in memory, but node-10.7.1's consensus ImmutableDB opener
 validates chunk files through APIs that fail on a read-only filesystem.
 
 ## What if it fails?

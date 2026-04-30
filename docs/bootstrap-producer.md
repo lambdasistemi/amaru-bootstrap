@@ -110,17 +110,16 @@ The full commit SHA is the runtime integration contract. Downstream
 compose files should pin the exact SHA they tested. The project does not
 publish moving runtime tags such as `latest` for the producer.
 
-Current CI-proven example:
-
-```text
-ghcr.io/lambdasistemi/amaru-bootstrap-producer:d33836055256e9c4eac933f6f67902620be8b99f
-```
-
 The same tarball is available as the flake package
 `.#packages.x86_64-linux.bootstrap-producer-image`. CI uploads it from
 the Build Gate as an artifact named
 `bootstrap-producer-image-<github-sha>`, containing
 `amaru-bootstrap-producer-<github-sha>.tar.gz`.
+
+To choose a concrete image, open the successful `main` CI run for the
+commit you want, copy its full head SHA, then use the matching successful
+`Publish bootstrap-producer image` workflow run. The GHCR image tag and
+the uploaded artifact name both contain that same SHA.
 
 ## ChainDB Mount Contract
 
@@ -135,9 +134,11 @@ volumes:
 
 This is not a write contract for the producer. `header-extractor` opens
 only the immutable DB and the readiness predicate is derived only from
-immutable chunks. The read-write mount is required because the
-node-10.7.1 consensus ImmutableDB opener validates chunk files through
-APIs that fail on a read-only filesystem.
+immutable chunks. `ledger-state-emitter` opens the LedgerDB with an
+in-memory backend and does not flush replayed state into the node-owned
+LedgerDB. The read-write mount is required because the node-10.7.1
+consensus ImmutableDB opener validates chunk files through APIs that
+fail on a read-only filesystem.
 
 ## Ledger-State Projection
 
@@ -196,6 +197,6 @@ shape a long-running public network can contain.
 
 `just live-bootstrap-producer` is the Docker-level verifier. It seeds a
 stock `testnet_42` ChainDB with `db-synthesizer`, starts
-`ghcr.io/intersectmbo/cardano-node:10.7.1` on that DB, and asserts that
-the bootstrap-producer can commit a complete bundle while the official
-node has the ChainDB open.
+`ghcr.io/intersectmbo/cardano-node:10.7.1-amd64` on that DB, and
+asserts that the bootstrap-producer can commit a complete bundle while
+the official node has the ChainDB open.

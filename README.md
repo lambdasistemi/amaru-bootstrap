@@ -34,7 +34,8 @@ full bootstrap path. CI runs a synthesized Conway-ready chain DB through
 emit, convert, header extraction, nonce composition, Amaru imports, and
 an `amaru run` startup proof from the produced bundle. A Docker-level
 verifier also runs the image against a `testnet_42` ChainDB held open by
-the official `ghcr.io/intersectmbo/cardano-node:10.7.1` image.
+the official `ghcr.io/intersectmbo/cardano-node:10.7.1-amd64` image on
+the x86_64 runner.
 
 After CI succeeds on `main`, GitHub Actions publishes the producer image
 as:
@@ -47,11 +48,10 @@ Downstream compose files should pin that full commit-SHA tag. The
 project does not publish moving runtime tags as the integration
 contract.
 
-Current CI-proven baseline:
-
-```text
-ghcr.io/lambdasistemi/amaru-bootstrap-producer:d33836055256e9c4eac933f6f67902620be8b99f
-```
+To select a runtime image, use the full commit SHA from the successful
+`main` CI run you want to consume. The matching publish workflow pushes
+that same SHA as the GHCR tag, and the Build Gate uploads
+`bootstrap-producer-image-<github-sha>` for the same commit.
 
 ## Build artifacts
 
@@ -148,7 +148,10 @@ the Amaru bootstrap projection of the node-10.7.1 state:
 The read-write ChainDB mount is an API requirement of node 10.7.1's
 consensus ImmutableDB validation path. The bootstrap-producer still
 consults only immutable chunks; it does not use volatile DB state as a
-readiness source.
+readiness source. `ledger-state-emitter` replays with an in-memory
+LedgerDB backend and deliberately does not flush into the node-owned
+LedgerDB, so it does not prune or mutate snapshots while cardano-node is
+running.
 
 **Outputs**
 
@@ -194,7 +197,7 @@ nix run .#bootstrap-producer -- \
 ```
 
 To run the Docker-level live verifier against the official node 10.7.1
-image:
+amd64 image:
 
 ```bash
 just live-bootstrap-producer

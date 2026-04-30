@@ -7,7 +7,7 @@ How an operator wires the bootstrap-producer into an existing compose stack. The
 ```yaml
 services:
   p1:
-    image: ghcr.io/intersectmbo/cardano-node:10.7.1
+    image: ghcr.io/intersectmbo/cardano-node:10.7.1-amd64
     volumes: [p1-state:/state, p1-configs:/configs]
     restart: always
     # the producer node forges blocks continuously; no pre-loading step
@@ -52,7 +52,7 @@ services:
 2. **`amaru-1.depends_on.bootstrap-producer.condition: service_completed_successfully`** — Amaru does not start until the bundle is complete on the shared volume. The bootstrap-producer's exit IS the signal; there is no marker file.
 3. **`bootstrap-producer.restart: "no"`** — the producer runs once per compose-up. It exits on completion or failure and does not respawn. This is what makes the `service_completed_successfully` semantic work.
 4. **`bootstrap-producer.command`**: the image entrypoint requires four arguments: ChainDB path, config directory, bundle directory, and network. The first argument must be the actual ChainDB directory as mounted inside the producer container.
-5. **`bootstrap-producer.volumes`**: read-write mount for the cluster's state and read-only mount for config. The state mount cannot be `:ro`: the node-10.7.1 consensus ImmutableDB opener validates immutable chunk files through APIs that require write permissions. The bootstrap-producer still consults only the immutable, append-only portion; read-write here is an API/filesystem requirement, not a semantic write contract. The bundle volume is read-write and shared with all consuming amaru services.
+5. **`bootstrap-producer.volumes`**: read-write mount for the cluster's state and read-only mount for config. The state mount cannot be `:ro`: the node-10.7.1 consensus ImmutableDB opener validates immutable chunk files through APIs that require write permissions. The bootstrap-producer still consults only the immutable, append-only portion for readiness/header extraction and keeps ledger replay in memory; read-write here is an API/filesystem requirement, not a semantic write contract. The bundle volume is read-write and shared with all consuming amaru services.
 6. **Bundle volume name** (`amaru-bundle` in the example) is the operator's choice — must match between producer and consumers.
 7. **`p1.restart: always`** — the producer node is long-running. It does NOT exit. The bootstrap-producer is a *concurrent reader* of its chain DB.
 
