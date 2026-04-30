@@ -62,7 +62,7 @@ Not a stored artefact; computed at pre-flight from the configuration and re-eval
 target_slot = tip.slot   (at the moment the era-readiness predicate first holds)
 ```
 
-Per [R-010](./research.md#r-010-era-readiness-predicate-and-snapshot-point-selection): no safety margin is subtracted because `tip.slot` is *the immutable tip slot*, by construction past the chain's volatility horizon. The snapshot pipeline runs against this slot; `ledger-state-emitter --target-slot=$target_slot` produces a Legacy `ExtLedgerState` CBOR snapshot that amaru's import commands consume after `amaru convert-ledger-state`.
+Per [R-010](./research.md#r-010-era-readiness-predicate-and-snapshot-point-selection): no safety margin is subtracted because `tip.slot` is *the immutable tip slot*, by construction past the chain's volatility horizon. The snapshot pipeline runs against this slot and the two preceding epoch slots. `ledger-state-emitter --target-slot=$slot` produces Legacy `ExtLedgerState` CBOR snapshots that amaru's import commands consume after `amaru convert-ledger-state`.
 
 **Validation rules**: `epochLength` must be a positive integer. Any other value is a configuration-error (rc=3). The era-history derivable from genesis must contain a Conway entry; if it doesn't (operator pointed the bootstrap step at a pre-Conway-aware config), that's also rc=3.
 
@@ -73,12 +73,17 @@ Per [R-005](./research.md#r-005-bundle-path-layout-carrier-between-producer-and-
 ```
 /srv/amaru/<network>/
 ├── chain.<network>.db/                  amaru chain store (populated by amaru import-headers/-nonces)
-├── ledger.<network>.db/                 amaru ledger store (populated by amaru import-ledger-state)
+├── ledger.<network>.db/                 amaru ledger store (live/ plus >=3 historical epoch dirs)
 ├── nonces.json                          composed by orchestrator (snapshot's nonces, tail rewritten)
-├── snapshots/<slot>.cbor                amaru convert-ledger-state output (intermediate)
+├── snapshots/<slot>.cbor                target plus two prior converted snapshots (intermediate)
 ├── snapshots/nonces.<slot>.json         intermediate; source for nonces.json
 └── headers/header.<slot>.<hash>.cbor    multiple files; minimum 4 (per Arnaud's amaru-loader.sh — 2 for last snapshot, 2 for second-to-last for epoch-transition nonce computation)
 ```
+
+The header set must include `header.<slot>.<hash>.cbor` for the latest
+converted snapshot's filename. Amaru derives its ledger tip from the
+ledger store and then loads the same hash from the chain store during
+startup; missing that exact header produces `ledger tip header not found`.
 
 **Lifecycle**: written via temp-and-rename ([R-007](./research.md#r-007-atomic-bundle-commit)). Either the entire bundle is on disk and consumable by amaru, or it isn't. No half-states.
 

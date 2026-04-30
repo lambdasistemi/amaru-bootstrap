@@ -93,6 +93,38 @@ let
   synthesizedChainDb =
     mkSynthesizedChainDb "header-extractor-fixture-chain-db" 300000;
 
+  synthesizedBootstrapBundle =
+    pkgs.runCommand "bootstrap-producer-synthesized-bundle"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.findutils
+          pkgs.gawk
+          pkgs.jq
+          amaruPkg
+          headerExtractorPkgs.header-extractor
+          headerExtractorPkgs.ledger-state-emitter
+        ];
+      } ''
+      set -euo pipefail
+
+      cp -rL ${synthesizedChainDb}/chain-db $TMPDIR/chain-db
+      chmod -R u+w $TMPDIR/chain-db
+      mkdir -p $out
+
+      export PATH="${producerRuntimePath}:$PATH"
+      AMARU_NETWORK=testnet_42 \
+      AMARU_CLUSTER_READY_DEADLINE_SECONDS=10 \
+      AMARU_WAIT_DEADLINE_SECONDS=10 \
+      AMARU_POLL_INTERVAL_SECONDS=1 \
+        ${pkgs.bash}/bin/bash ${../scripts/bootstrap-producer.sh} \
+          $TMPDIR/chain-db \
+          ${fixture}/configs/configs \
+          $out \
+          testnet_42
+    '';
+
   # ~50000 slots - well below 2 * epochLength. Tip exists but the
   # era-readiness predicate stays false, exercising the rc=2 branch
   # (T014).
@@ -218,9 +250,9 @@ in
       mkdir -p $out
     '';
 
-  # T019b end-to-end: run the real producer pipeline against the
-  # synthesized Conway-ready chain DB and assert that Amaru accepts the
-  # resulting bundle. This is the regression check for the node-10.7.1
+  # T019b end-to-end: assert the real producer pipeline, run in
+  # synthesizedBootstrapBundle above, leaves the canonical Amaru bundle
+  # layout. This is the regression check for the node-10.7.1
   # ledger-state projection in ledger-state-emitter.
   bootstrap-producer-synthesized =
     pkgs.runCommand "bootstrap-producer-synthesized"
@@ -229,35 +261,84 @@ in
           pkgs.bash
           pkgs.coreutils
           pkgs.findutils
-          pkgs.gawk
-          pkgs.jq
-          amaruPkg
-          headerExtractorPkgs.header-extractor
-          headerExtractorPkgs.ledger-state-emitter
         ];
       } ''
       set -euo pipefail
 
-      cp -rL ${synthesizedChainDb}/chain-db $TMPDIR/chain-db
-      chmod -R u+w $TMPDIR/chain-db
-
-      export PATH="${producerRuntimePath}:$PATH"
-      AMARU_NETWORK=testnet_42 \
-      AMARU_CLUSTER_READY_DEADLINE_SECONDS=10 \
-      AMARU_WAIT_DEADLINE_SECONDS=10 \
-      AMARU_POLL_INTERVAL_SECONDS=1 \
-        ${pkgs.bash}/bin/bash ${../scripts/bootstrap-producer.sh} \
-          $TMPDIR/chain-db \
-          ${fixture}/configs/configs \
-          $TMPDIR/bundle \
-          testnet_42
-
-      final=$TMPDIR/bundle/testnet_42
+      final=${synthesizedBootstrapBundle}/testnet_42
       test -d "$final/ledger.testnet_42.db"
       test -d "$final/chain.testnet_42.db"
       test -f "$final/nonces.json"
-      test -n "$(find "$final/headers" -name 'header.*.cbor' -print -quit)"
       test -n "$(find "$final/snapshots" -name '*.cbor' -print -quit)"
+      header_count=$(find "$final/headers" -name 'header.*.cbor' | wc -l)
+      if [ "$header_count" -lt 4 ]; then
+        echo "expected at least 4 imported headers, found $header_count" >&2
+        exit 1
+      fi
+      test -d "$final/ledger.testnet_42.db/live"
+      snapshot_count=0
+      for d in "$final"/ledger.testnet_42.db/*; do
+        if [ -d "$d" ] && [[ "$(basename "$d")" =~ ^[0-9]+$ ]]; then
+          snapshot_count=$(( snapshot_count + 1 ))
+        fi
+      done
+      if [ "$snapshot_count" -lt 3 ]; then
+        echo "expected at least 3 historical ledger snapshots, found $snapshot_count" >&2
+        exit 1
+      fi
+
+      mkdir -p $out
+    '';
+
+  # Prove that the produced bootstrap bundle is not only importable but
+  # usable as Amaru startup state. The command is intentionally run
+  # without a live upstream peer; success means Amaru opened the ledger
+  # and chain stores, logged build_ledger, and stayed alive until the
+  # timeout instead of failing during bootstrap.
+  amaru-run-bootstrap =
+    pkgs.runCommand "amaru-run-bootstrap"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.gnugrep
+          amaruPkg
+        ];
+      } ''
+      set -euo pipefail
+
+      cp -rL ${synthesizedBootstrapBundle}/testnet_42 $TMPDIR/testnet_42
+      chmod -R u+w $TMPDIR/testnet_42
+
+      log=$TMPDIR/amaru-run.log
+      set +e
+      timeout 30s amaru --with-json-traces run \
+        --network testnet_42 \
+        --ledger-dir $TMPDIR/testnet_42/ledger.testnet_42.db \
+        --chain-dir $TMPDIR/testnet_42/chain.testnet_42.db \
+        --listen-address 127.0.0.1:0 \
+        --peer-address 127.0.0.1:9 \
+        >"$log" 2>&1
+      rc=$?
+      set -e
+
+      cat "$log"
+      if [ "$rc" -ne 124 ]; then
+        echo "expected amaru run to stay alive until timeout, got rc=$rc" >&2
+        exit 1
+      fi
+      if grep -q 'Failed to create ledger' "$log"; then
+        echo "amaru failed to create the bootstrapped ledger" >&2
+        exit 1
+      fi
+      if grep -q 'ledger tip header not found' "$log"; then
+        echo "amaru opened the ledger but could not align the chain store" >&2
+        exit 1
+      fi
+      if ! grep -q 'build_ledger' "$log"; then
+        echo "amaru did not reach ledger startup from the bootstrap bundle" >&2
+        exit 1
+      fi
 
       mkdir -p $out
     '';

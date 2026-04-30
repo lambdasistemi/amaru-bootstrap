@@ -21,8 +21,9 @@ signal for downstream Amaru services.
 2. Validate the node config and wait for the chain DB to appear.
 3. Poll `header-extractor tip-info` until the immutable tip is in
    Conway and at least two Conway epochs are available.
-4. Run `ledger-state-emitter` at the selected target slot.
-5. Run `amaru convert-ledger-state`.
+4. Run `ledger-state-emitter` at the selected target slot and the two
+   preceding epoch slots.
+5. Run `amaru convert-ledger-state` for all emitted ledger states.
 6. Run `header-extractor list-blocks` and `get-header` to collect the
    headers Amaru needs.
 7. Rewrite `nonces.json` so `tail` points at the previous-epoch header
@@ -42,6 +43,19 @@ The final layout is:
 ├── nonces.json
 └── headers/
 ```
+
+The ledger store must contain `live/` plus at least three numeric
+historical epoch directories. `amaru run` opens the live ledger and then
+loads the two prior historical snapshots for rewards and leader-schedule
+stake distribution. A bundle with only the latest imported snapshot can
+pass `amaru import-ledger-state` and still fail to start.
+
+The chain store must also contain the exact header for the ledger tip.
+If the latest converted snapshot is
+`snapshots/<slot>.<hash>.cbor`, the bundle must include
+`headers/header.<slot>.<hash>.cbor` and import it into
+`chain.<network>.db/`; otherwise `amaru run` fails during startup with
+`ledger tip header not found`.
 
 ## Node-Release Target
 
@@ -116,6 +130,7 @@ Producer-specific checks:
 
 ```bash
 nix build .#checks.x86_64-linux.bootstrap-producer-synthesized
+nix build .#checks.x86_64-linux.amaru-run-bootstrap
 nix build .#checks.x86_64-linux.bootstrap-producer-bats
 nix build .#checks.x86_64-linux.bootstrap-producer-image
 just live-bootstrap-producer
@@ -124,6 +139,18 @@ just live-bootstrap-producer
 `bootstrap-producer-synthesized` runs the real producer pipeline against
 a synthesized Conway-ready `testnet_42` chain DB and verifies that Amaru
 accepts the resulting ledger state, headers, and nonces.
+
+`amaru-run-bootstrap` copies that produced bundle into a writable test
+directory, starts `amaru run` without a live peer, and requires Amaru to
+reach its `build_ledger` startup trace and remain alive until the test
+timeout. This is the CI proof that the bundle is usable as Amaru startup
+state, not only accepted by the import commands.
+
+The synthesized fixture is not a mainnet ledger-content coverage test.
+It proves the release-pinned CBOR projection can populate Amaru's stores
+and that those stores are self-consistent at startup. It does not claim
+to exercise every transaction, script, UTxO, stake, governance, or reward
+shape a long-running public network can contain.
 
 `just live-bootstrap-producer` is the Docker-level verifier. It seeds a
 stock `testnet_42` ChainDB with `db-synthesizer`, starts

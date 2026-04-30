@@ -31,9 +31,10 @@ This repo now produces the same kind of bundle without carrying a fork of
 
 Phase 2 implementation. The flake checks build the producer image and
 run a synthesized Conway-ready chain DB through emit, convert, header
-extraction, nonce composition, and Amaru imports. A Docker-level
-verifier also runs the image against a `testnet_42` ChainDB held open by
-the official `ghcr.io/intersectmbo/cardano-node:10.7.1` image.
+extraction, nonce composition, Amaru imports, and an `amaru run`
+startup proof from the produced bundle. A Docker-level verifier also
+runs the image against a `testnet_42` ChainDB held open by the official
+`ghcr.io/intersectmbo/cardano-node:10.7.1` image.
 
 After CI succeeds on `main`, GitHub Actions publishes the producer image
 as:
@@ -57,6 +58,8 @@ contract.
   Amaru bootstrap projection of a node ledger state.
 - Nix checks for the full synthesized producer path and the concurrent
   producer race.
+- A CI-gated `amaru-run-bootstrap` proof that Amaru can open the
+  produced ledger/chain stores and reach ledger startup.
 
 The architecture, state machine, release boundary, and concurrency model
 are documented with diagrams in `docs/architecture.md`.
@@ -100,10 +103,14 @@ readiness source.
 <bundle>/<network>/
 ├── chain.<network>.db/                    # populated by amaru import-headers/import-nonces
 ├── ledger.<network>.db/                   # populated by amaru import-ledger-state
-├── snapshots/<slot>.<hash>.cbor           # converted snapshot consumed by import-ledger-state
+├── snapshots/<slot>.<hash>.cbor           # target plus two prior epoch snapshots
 ├── nonces.json                            # tail rewritten to previous-epoch header hash
 └── headers/header.<slot>.<hash>.cbor      # headers needed by Amaru
 ```
+
+The latest snapshot's `<slot>.<hash>` must have a matching
+`headers/header.<slot>.<hash>.cbor`; Amaru uses that exact header when
+aligning its chain store to the ledger tip at startup.
 
 ## Local verification
 
@@ -115,7 +122,13 @@ just ci
 Phase 0 smoke verdict and accepts either `PASS` or the expected
 `FAIL: format mismatch` verdict, then runs the Docker-level live
 bootstrap-producer verifier. The pure producer-specific end-to-end check
-is `.#checks.x86_64-linux.bootstrap-producer-synthesized`.
+is `.#checks.x86_64-linux.bootstrap-producer-synthesized`; the startup
+proof is `.#checks.x86_64-linux.amaru-run-bootstrap`.
+
+These checks prove bundle production, Amaru import, and Amaru startup
+alignment. They are not a full mainnet ledger-content coverage suite for
+every possible transaction, UTxO, script, stake, governance, or reward
+shape.
 
 To run the producer locally against a ChainDB:
 

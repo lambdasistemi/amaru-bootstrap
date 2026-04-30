@@ -21,15 +21,16 @@ This repo now produces the same kind of bundle without carrying a fork of `ourob
 
 ## Status
 
-Phase 2 PR — bootstrap-producer implementation. The active spec is [`specs/003-amaru-bootstrap-producer/`](https://github.com/lambdasistemi/amaru-bootstrap/tree/main/specs/003-amaru-bootstrap-producer); the flake checks build the producer image and run a synthesized Conway-ready chain DB through emit, convert, header extraction, nonce composition, and Amaru imports.
+Phase 2 PR — bootstrap-producer implementation. The active spec is [`specs/003-amaru-bootstrap-producer/`](https://github.com/lambdasistemi/amaru-bootstrap/tree/main/specs/003-amaru-bootstrap-producer); the flake checks build the producer image and run a synthesized Conway-ready chain DB through emit, convert, header extraction, nonce composition, Amaru imports, and an `amaru run` startup proof.
 
 ## Current implementation
 
 The producer is a one-shot container and local flake app. It waits until
 the immutable tip is in Conway with enough history for Amaru, emits a
-node-10.7.1-compatible ledger snapshot, converts it with Amaru, extracts
-headers, rewrites `nonces.json`, imports all three artifact classes into
-Amaru stores, and atomically commits the completed bundle.
+node-10.7.1-compatible three-snapshot ledger window, converts it with
+Amaru, extracts headers, rewrites `nonces.json`, imports all three
+artifact classes into Amaru stores, and atomically commits the completed
+bundle.
 
 The current compatibility target is `cardano-node 10.7.1`. The
 `ledger-state-emitter` output is a release-specific Amaru bootstrap
