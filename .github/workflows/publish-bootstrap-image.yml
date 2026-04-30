@@ -1,0 +1,81 @@
+name: Publish bootstrap-producer image
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-bootstrap-image-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/lambdasistemi/amaru-bootstrap-producer
+  SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  publish:
+    name: Publish bootstrap-producer image
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main')
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: paolino
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Check Docker daemon
+        run: nix --quiet shell nixpkgs#docker-client -c docker info
+
+      - name: Build bootstrap-producer image
+        run: >-
+          nix build --quiet
+          .#packages.x86_64-linux.bootstrap-producer-image
+          -o result-bootstrap-producer-image
+
+      - name: Load image
+        run: >-
+          nix --quiet shell nixpkgs#docker-client
+          -c docker load -i result-bootstrap-producer-image
+
+      - name: Tag image by commit SHA
+        run: >-
+          nix --quiet shell nixpkgs#docker-client
+          -c docker tag amaru-bootstrap-producer:dev
+          "${IMAGE_NAME}:${SOURCE_SHA}"
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          nix --quiet shell nixpkgs#docker-client -c \
+            docker login ghcr.io \
+              -u "${GITHUB_ACTOR}" \
+              --password-stdin <<<"${GHCR_TOKEN}"
+
+      - name: Push image
+        run: >-
+          nix --quiet shell nixpkgs#docker-client
+          -c docker push "${IMAGE_NAME}:${SOURCE_SHA}"
+
+      - name: Summarize published image
+        run: |
+          {
+            echo "## Published bootstrap-producer image"
+            echo
+            echo "\`${IMAGE_NAME}:${SOURCE_SHA}\`"
+          } >>"${GITHUB_STEP_SUMMARY}"

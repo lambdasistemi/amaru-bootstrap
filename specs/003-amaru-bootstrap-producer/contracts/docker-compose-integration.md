@@ -7,13 +7,13 @@ How an operator wires the bootstrap-producer into an existing compose stack. The
 ```yaml
 services:
   p1:
-    image: ghcr.io/intersectmbo/cardano-node:10.5.3
+    image: ghcr.io/intersectmbo/cardano-node:10.7.1
     volumes: [p1-state:/state, p1-configs:/configs]
     restart: always
     # the producer node forges blocks continuously; no pre-loading step
 
   bootstrap-producer:
-    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<sha>
+    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
     environment:
       AMARU_NETWORK: testnet_42
     volumes:
