@@ -25,6 +25,21 @@ wait_for_container_running() {
   return 1
 }
 
+wait_for_node_socket() {
+  local name="$1"
+  local socket="$2"
+  local state
+
+  for _ in {1..60}; do
+    state="$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || true)"
+    [[ "$state" == "true" ]] || return 1
+    [[ -S "$socket" ]] && return 0
+    sleep 1
+  done
+
+  return 1
+}
+
 setup() {
   command -v docker >/dev/null 2>&1 || skip "docker unavailable"
   command -v db-synthesizer >/dev/null 2>&1 || skip "db-synthesizer unavailable"
@@ -74,7 +89,8 @@ teardown() {
     --shelley-vrf-key /keys/vrf.skey \
     --shelley-operational-certificate /keys/opcert.cert
 
-  if ! wait_for_container_running "$NODE_CONTAINER"; then
+  if ! wait_for_container_running "$NODE_CONTAINER" \
+    || ! wait_for_node_socket "$NODE_CONTAINER" "$TMP_DIR/ipc/node.socket"; then
     echo "--- cardano-node logs ---"
     docker logs "$NODE_CONTAINER" || true
     false
