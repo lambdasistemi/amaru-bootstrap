@@ -36,6 +36,7 @@ jobs:
           .#checks.x86_64-linux.header-extractor-cli-bats
           .#checks.x86_64-linux.bootstrap-producer-bats
           .#checks.x86_64-linux.bootstrap-producer-synthesized
+          .#checks.x86_64-linux.amaru-run-bootstrap
           .#checks.x86_64-linux.bootstrap-producer-image
 
   # The Phase 0 verdict job. Runs the orchestrator end-to-end against

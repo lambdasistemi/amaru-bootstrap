@@ -89,16 +89,16 @@ Image runs as root inside the container (no user account creation needed for thi
 ```
 /srv/amaru/testnet_42/
 ├── chain.testnet_42.db/         (populated by amaru import-headers + import-nonces)
-├── ledger.testnet_42.db/        (populated by amaru import-ledger-state)
+├── ledger.testnet_42.db/        (live/ plus >=3 historical epoch dirs)
 ├── nonces.json                  (composed by orchestrator from snapshot's nonces + tail rewrite)
-├── snapshots/<slot>.cbor        (output of amaru convert-ledger-state, intermediate)
+├── snapshots/<slot>.cbor        (target plus two prior converted snapshots)
 ├── snapshots/nonces.<slot>.json (intermediate, source for the rewritten nonces.json)
 └── headers/header.<slot>.<hash>.cbor   (multiple files, one per extracted header)
 ```
 
 `/srv/amaru/<network>/` is the single mount point — operator declares one volume in compose, both producer and amaru consume it.
 
-**Rationale**: matches Arnaud's existing convention so amaru reads it unchanged. Network name in the path (`testnet_42`) keeps multiple-network support open without additional layout work.
+**Rationale**: matches Arnaud's existing convention so amaru reads it unchanged. `amaru run` opens `ledger.<network>.db/live` and then reads historical snapshots for the two prior epochs, so a complete bundle must contain the target snapshot and the two preceding epoch snapshots after `import-ledger-state`. It also aligns the chain store to the ledger tip, so the imported headers must include the exact `<slot>.<hash>` from the latest converted snapshot. Network name in the path (`testnet_42`) keeps multiple-network support open without additional layout work.
 
 **Alternatives considered**:
 - Flat `/srv/amaru/` without network subdirectory — simpler but assumes one network; revisiting is cheap

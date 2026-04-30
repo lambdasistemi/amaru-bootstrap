@@ -10,7 +10,7 @@ Reverse-engineered from
 <bundle>/
 ├── chain.db/                              # amaru's chain store, prepopulated
 ├── ledger.db/                             # amaru's ledger store, prepopulated
-├── snapshots/<slot>.cbor                  # one per epoch boundary
+├── snapshots/<slot>.cbor                  # target plus two prior epoch boundaries
 ├── nonces.json
 └── headers/header.<slot>.<hash>.cbor      # at least 4 entries
 ```
@@ -28,13 +28,20 @@ Steps in `amaru-loader.sh`:
      --target-dir out/snapshots
    ```
 
+   For startup, Amaru needs the target epoch snapshot and the two prior
+   epoch snapshots. The live ledger opens from `ledger.db/live`, then
+   historical stores are consulted for the rewards and leader-schedule
+   stake distributions.
+
 2. **Compose `nonces.json`** by copying the last snapshot's nonces file and
    patching the `tail` field with the last header hash of the previous epoch.
 
 3. **Extract headers** via `db-server query --query list-blocks` then
    `--query "get-header <slot>.<hash>"`. Two headers each for the last and
    second-to-last snapshot — needed because the active nonce of an epoch is
-   computed from the parent hash of its tail.
+   computed from the parent hash of its tail. The header set must include
+   the exact `<slot>.<hash>` named by the latest snapshot, because Amaru
+   aligns its chain store to the ledger tip during startup.
 
 4. **Import** into amaru's stores:
 
@@ -78,6 +85,7 @@ header-extractor tip-info|list-blocks|get-header ...
 
 `ledger-state-emitter` targets the repository's pinned cardano-node 10.7.1
 dependency set and emits the Amaru bootstrap projection documented in
-`specs/003-amaru-bootstrap-producer/research.md#r-011`. `amaru
-convert-ledger-state` still owns the final snapshot slicing, history JSON,
-and nonce JSON formats.
+`specs/003-amaru-bootstrap-producer/research.md#r-011`. The producer calls
+it three times: `target_slot`, `target_slot - epochLength`, and
+`target_slot - 2 * epochLength`. `amaru convert-ledger-state` still owns
+the final snapshot slicing, history JSON, and nonce JSON formats.

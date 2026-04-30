@@ -10,8 +10,8 @@
 #
 #   1. Pre-flight: existing-bundle short-circuit, config validation,
 #      poll for chain DB, poll for era-readiness, tooling sanity.
-#   2. ledger-state-emitter @ target_slot
-#   3. amaru convert-ledger-state
+#   2. ledger-state-emitter @ target_slot and the two prior epochs
+#   3. amaru convert-ledger-state for all emitted snapshots
 #   4. header-extractor list-blocks + get-header loop
 #   5. compose nonces.json (jq tail rewrite)
 #   6. amaru import-{ledger-state,headers,nonces}
@@ -54,13 +54,13 @@ AMARU_POLL_INTERVAL_SECONDS="${AMARU_POLL_INTERVAL_SECONDS:-10}"
 
 # Globals shared across phases. phase_preflight sets TARGET_SLOT and
 # EPOCH_LENGTH; the snapshot pipeline below threads further globals
-# (UNIQUE_TMP, ACTUAL_SLOT, LEGACY_SNAPSHOT_FILE) between phases as
+# (UNIQUE_TMP, ACTUAL_SLOT, LEGACY_SNAPSHOT_FILES) between phases as
 # each one is computed.
 TARGET_SLOT=0
 EPOCH_LENGTH=0
 UNIQUE_TMP=""
 ACTUAL_SLOT=0
-LEGACY_SNAPSHOT_FILE=""
+LEGACY_SNAPSHOT_FILES=()
 
 # ─── Internal-error trap ──────────────────────────────────────────
 
@@ -233,10 +233,38 @@ bundle_complete() {
     local b="$1"
     [[ -d "${b}" ]] || return 1
     [[ -d "${b}/ledger.${NETWORK}.db" ]] || return 1
+    [[ -d "${b}/ledger.${NETWORK}.db/live" ]] || return 1
     [[ -d "${b}/chain.${NETWORK}.db" ]] || return 1
     [[ -f "${b}/nonces.json" ]] || return 1
+    [[ -d "${b}/snapshots" ]] || return 1
     [[ -d "${b}/headers" ]] || return 1
-    [[ -n "$(find "${b}/headers" -name 'header.*.cbor' -print -quit 2>/dev/null)" ]] || return 1
+    local header_count
+    header_count=$(find "${b}/headers" -name 'header.*.cbor' 2>/dev/null | wc -l)
+    (( header_count >= 4 )) || return 1
+    local snapshot_name snapshot_base snapshot_slot snapshot_hash
+    snapshot_name=$(find "${b}/snapshots" -maxdepth 1 \
+        -name '*.cbor' -printf '%f\n' 2>/dev/null \
+        | awk -F. '$1 ~ /^[0-9]+$/ { print $1 "\t" $0 }' \
+        | sort -n -k1,1 \
+        | tail -n 1 \
+        | cut -f2-)
+    [[ -n "${snapshot_name}" ]] || return 1
+    snapshot_base="${snapshot_name%.cbor}"
+    snapshot_slot="${snapshot_base%%.*}"
+    snapshot_hash="${snapshot_base#*.}"
+    [[ "${snapshot_slot}" =~ ^[0-9]+$ ]] || return 1
+    [[ -n "${snapshot_hash}" && "${snapshot_hash}" != "${snapshot_base}" ]] || return 1
+    [[ -f "${b}/headers/header.${snapshot_slot}.${snapshot_hash}.cbor" ]] || return 1
+    local snapshot_count=0
+    local d base
+    for d in "${b}/ledger.${NETWORK}.db"/*; do
+        [[ -d "${d}" ]] || continue
+        base=$(basename "${d}")
+        if [[ "${base}" =~ ^[0-9]+$ ]]; then
+            snapshot_count=$(( snapshot_count + 1 ))
+        fi
+    done
+    (( snapshot_count >= 3 )) || return 1
     return 0
 }
 
@@ -264,32 +292,50 @@ phase_stage_init() {
     printf '+ staging at %s\n' "${UNIQUE_TMP}"
 }
 
-# Step 2: ledger-state-emitter writes a Legacy ExtLedgerState CBOR file
-# with canonical UTxO entries. rc=5 on failure.
+# Step 2: ledger-state-emitter writes Legacy ExtLedgerState CBOR
+# files with canonical UTxO entries. Amaru run needs the live ledger
+# plus three historical epoch snapshots: the target epoch and the two
+# prior epochs used for rewards and leader-schedule stake distribution.
+# rc=5 on failure.
 phase_emit() {
     local cfg="${CONFIG_DIR}/config.json"
     local legacy_dir="${UNIQUE_TMP}/legacy-in"
     mkdir -p "${legacy_dir}"
-    LEGACY_SNAPSHOT_FILE="${legacy_dir}/${TARGET_SLOT}.cbor"
-    printf '+ ledger-state-emitter @ %d\n' "${TARGET_SLOT}"
-    local rc=0
-    log_phase emit ledger-state-emitter \
-        --db "${CHAIN_DB}" \
-        --config "${cfg}" \
-        --target-slot "${TARGET_SLOT}" \
-        --out "${LEGACY_SNAPSHOT_FILE}" \
-        || rc=$?
-    if (( rc != 0 )); then
-        printf 'ledger-state-emitter failed (rc=%d); see %s\n' \
-               "${rc}" "${BUNDLE_DIR}/.logs/emit.stderr" >&2
-        tail_phase_log emit
-        exit 5
-    fi
-    if [[ ! -f "${LEGACY_SNAPSHOT_FILE}" ]]; then
-        printf 'ledger-state-emitter produced no output at %s\n' \
-               "${LEGACY_SNAPSHOT_FILE}" >&2
-        exit 5
-    fi
+    LEGACY_SNAPSHOT_FILES=()
+
+    local slots=(
+        $(( TARGET_SLOT - (2 * EPOCH_LENGTH) ))
+        $(( TARGET_SLOT - EPOCH_LENGTH ))
+        "${TARGET_SLOT}"
+    )
+    local slot out rc
+    for slot in "${slots[@]}"; do
+        if (( slot < 0 )); then
+            printf 'internal error: negative snapshot slot %d\n' "${slot}" >&2
+            exit 5
+        fi
+        out="${legacy_dir}/${slot}.cbor"
+        printf '+ ledger-state-emitter @ %d\n' "${slot}"
+        rc=0
+        log_phase "emit-${slot}" ledger-state-emitter \
+            --db "${CHAIN_DB}" \
+            --config "${cfg}" \
+            --target-slot "${slot}" \
+            --out "${out}" \
+            || rc=$?
+        if (( rc != 0 )); then
+            printf 'ledger-state-emitter failed at slot %d (rc=%d); see %s\n' \
+                   "${slot}" "${rc}" "${BUNDLE_DIR}/.logs/emit-${slot}.stderr" >&2
+            tail_phase_log "emit-${slot}"
+            exit 5
+        fi
+        if [[ ! -f "${out}" ]]; then
+            printf 'ledger-state-emitter produced no output at %s\n' \
+                   "${out}" >&2
+            exit 5
+        fi
+        LEGACY_SNAPSHOT_FILES+=("${out}")
+    done
 }
 
 # Step 3: amaru convert-ledger-state. rc=6 on failure.
@@ -297,30 +343,46 @@ phase_emit() {
 # into <staging>/snapshots/. amaru's import-ledger-state requires the
 # era-history file to live alongside the snapshot for testnet variants.
 phase_convert() {
-    printf '+ amaru convert-ledger-state\n'
-    local rc=0
-    log_phase convert amaru convert-ledger-state \
-        --network "${NETWORK}" \
-        --snapshot "${LEGACY_SNAPSHOT_FILE}" \
-        --target-dir "${UNIQUE_TMP}/snapshots" \
-        || rc=$?
-    if (( rc != 0 )); then
-        printf 'amaru convert-ledger-state failed (rc=%d); see %s\n' \
-               "${rc}" "${BUNDLE_DIR}/.logs/convert.stderr" >&2
-        tail_phase_log convert
-        exit 6
-    fi
+    local snapshot slot rc
+    for snapshot in "${LEGACY_SNAPSHOT_FILES[@]}"; do
+        slot=$(basename "${snapshot}" .cbor)
+        printf '+ amaru convert-ledger-state @ %s\n' "${slot}"
+        rc=0
+        log_phase "convert-${slot}" amaru convert-ledger-state \
+            --network "${NETWORK}" \
+            --snapshot "${snapshot}" \
+            --target-dir "${UNIQUE_TMP}/snapshots" \
+            || rc=$?
+        if (( rc != 0 )); then
+            printf 'amaru convert-ledger-state failed at slot %s (rc=%d); see %s\n' \
+                   "${slot}" "${rc}" "${BUNDLE_DIR}/.logs/convert-${slot}.stderr" >&2
+            tail_phase_log "convert-${slot}"
+            exit 6
+        fi
+    done
+
     local cbor_count
     cbor_count=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
         -name '*.cbor' 2>/dev/null | wc -l)
-    if (( cbor_count == 0 )); then
-        printf 'amaru convert-ledger-state produced no .cbor in %s\n' \
+    if (( cbor_count < 3 )); then
+        printf 'amaru convert-ledger-state produced %d .cbor files in %s, need at least 3\n' \
+               "${cbor_count}" \
                "${UNIQUE_TMP}/snapshots" >&2
         exit 6
     fi
-    local snapshot_file snapshot_base
-    snapshot_file=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
-        -name '*.cbor' 2>/dev/null | sort | tail -n 1)
+    local snapshot_name snapshot_file snapshot_base
+    snapshot_name=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
+        -name '*.cbor' -printf '%f\n' 2>/dev/null \
+        | awk -F. '$1 ~ /^[0-9]+$/ { print $1 "\t" $0 }' \
+        | sort -n -k1,1 \
+        | tail -n 1 \
+        | cut -f2-)
+    if [[ -z "${snapshot_name}" ]]; then
+        printf 'no numerically-prefixed converted snapshot under %s\n' \
+               "${UNIQUE_TMP}/snapshots" >&2
+        exit 6
+    fi
+    snapshot_file="${UNIQUE_TMP}/snapshots/${snapshot_name}"
     snapshot_base=$(basename "${snapshot_file}")
     ACTUAL_SLOT="${snapshot_base%%.*}"
     if ! [[ "${ACTUAL_SLOT}" =~ ^[0-9]+$ ]]; then
@@ -401,13 +463,19 @@ phase_extract() {
 # so amaru's epoch-transition nonce computation has a real anchor.
 phase_nonces() {
     local nonces_src
-    nonces_src=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
-        -name 'nonces.*.json' 2>/dev/null | sort | tail -n 1)
-    if [[ -z "${nonces_src}" ]]; then
+    local nonces_name
+    nonces_name=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
+        -name 'nonces.*.json' -printf '%f\n' 2>/dev/null \
+        | awk -F. '$2 ~ /^[0-9]+$/ { print $2 "\t" $0 }' \
+        | sort -n -k1,1 \
+        | tail -n 1 \
+        | cut -f2-)
+    if [[ -z "${nonces_name}" ]]; then
         printf 'no nonces.*.json under %s\n' \
                "${UNIQUE_TMP}/snapshots" >&2
         exit 8
     fi
+    nonces_src="${UNIQUE_TMP}/snapshots/${nonces_name}"
     cp "${nonces_src}" "${UNIQUE_TMP}/nonces.json"
     local prev_hash=""
     local headers_csv="${UNIQUE_TMP}/headers.csv"

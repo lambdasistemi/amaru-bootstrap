@@ -11,9 +11,9 @@ current branch targets `cardano-node 10.7.1`.
 flowchart LR
     node["cardano-node\nchain DB + config"] --> mount["state mount rw\nconfig mount ro"]
     mount --> preflight["bootstrap-producer\npre-flight"]
-    preflight --> emitter["ledger-state-emitter\nnode-10.7.1 projection"]
-    emitter --> legacy["Legacy ExtLedgerState CBOR"]
-    legacy --> convert["amaru convert-ledger-state"]
+    preflight --> emitter["ledger-state-emitter x3\nnode-10.7.1 projection"]
+    emitter --> legacy["Legacy ExtLedgerState CBOR\nlatest + two prior epochs"]
+    legacy --> convert["amaru convert-ledger-state x3"]
     convert --> snapshot["snapshot CBOR\nhistory JSON\nnonces JSON"]
 
     mount --> headers["header-extractor\nlist-blocks/get-header"]
@@ -140,3 +140,24 @@ sequenceDiagram
 There is no shared temp directory. Concurrent producers cannot corrupt
 each other's intermediate files; one wins the atomic rename and the
 others accept the completed bundle.
+
+## CI Startup Proof
+
+```mermaid
+sequenceDiagram
+    participant Check as amaru-run-bootstrap
+    participant Producer as bootstrap-producer
+    participant Bundle as Bundle
+    participant Amaru as amaru run
+
+    Check->>Producer: synthesize chain DB, produce bundle
+    Producer->>Bundle: import ledger, headers, nonces
+    Check->>Bundle: copy to writable test directory
+    Check->>Amaru: run with ledger-dir and chain-dir
+    Amaru-->>Check: build_ledger trace
+    Check-->>Check: timeout is expected; early bootstrap failure is not
+```
+
+The CI proof is deliberately peerless: it does not prove live chain
+synchronisation. It proves the produced stores are sufficient for Amaru
+to open its ledger and chain state and enter node startup.

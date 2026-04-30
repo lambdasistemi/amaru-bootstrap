@@ -12,14 +12,18 @@
   tags it as
   `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>`,
   and pushes it with the repository `GITHUB_TOKEN`.
+- T027 / issue #21: added a CI-gated `amaru-run-bootstrap` proof. The
+  producer now emits the target ledger snapshot plus the two prior epoch
+  snapshots, and the Build Gate starts `amaru run` from the produced
+  bundle and requires the `build_ledger` trace.
 - Documentation now states the commit-SHA pinning policy for downstream
-  compose files and avoids moving runtime tags as the integration
-  contract.
+  compose files, the three-snapshot startup contract, and the CI startup
+  proof before Antithesis integration.
 
 **Current**:
-- Next production integration step is T023/T024 locally and issue #15
-  downstream: consume the published SHA-tagged image from the Antithesis
-  compose stack.
+- Next production integration step is to merge the CI startup proof, let
+  the publish workflow produce a new SHA-tagged image, then consume that
+  image from the Antithesis compose stack.
 
 **Blockers**:
 - None for image publication. Mainnet-mature manual timing remains T024
@@ -27,7 +31,7 @@
 
 ## Summary
 
-A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>`) that **follows any cardano-node's chain DB** (mainnet operator, antithesis cluster, anything in between), waits until the *immutable tip is era-ready for amaru's consumer* (Conway, with at least two preceding Conway epochs), then runs the full bootstrap pipeline as a one-shot container: pre-flight (era-readiness predicate evaluation, polling if the chain isn't yet ready), `ledger-state-emitter` snapshot emission for the pinned cardano-node 10.7.1 ledger set, `amaru convert-ledger-state`, header extraction, nonces composition, three `amaru import-*` invocations, exit 0. On a mainnet-mature cardano-node the wait is a no-op; on an antithesis fresh cluster it's ~10-20 wall-minutes under simulator speedup. Its exit code is the synchronisation primitive — Amaru services in the same compose stack `depends_on` it via `condition: service_completed_successfully`. The bootstrap-producer itself `depends_on` the cardano-node only with `condition: service_started`. No marker file, no out-of-band signalling. Built with `nix dockerTools`, published to ghcr.io tagged by commit SHA via a new GitHub Actions workflow.
+A docker image (`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>`) that **follows any cardano-node's chain DB** (mainnet operator, antithesis cluster, anything in between), waits until the *immutable tip is era-ready for amaru's consumer* (Conway, with at least two preceding Conway epochs), then runs the full bootstrap pipeline as a one-shot container: pre-flight (era-readiness predicate evaluation, polling if the chain isn't yet ready), `ledger-state-emitter` snapshot emission for the pinned cardano-node 10.7.1 ledger set at the target slot plus the two prior epoch slots, `amaru convert-ledger-state`, header extraction, nonces composition, three `amaru import-*` invocations, and `amaru run` startup proof in CI. On a mainnet-mature cardano-node the wait is a no-op; on an antithesis fresh cluster it's ~10-20 wall-minutes under simulator speedup. Its exit code is the synchronisation primitive — Amaru services in the same compose stack `depends_on` it via `condition: service_completed_successfully`. The bootstrap-producer itself `depends_on` the cardano-node only with `condition: service_started`. No marker file, no out-of-band signalling. Built with `nix dockerTools`, published to ghcr.io tagged by commit SHA via a new GitHub Actions workflow.
 
 ## Technical Context
 
@@ -155,8 +159,9 @@ No new violations. Plan ready for `/speckit.tasks`.
 - **Phase 1-3 (T001-T021) — landed on this branch**:
   - cabal: `library` exposes `HeaderExtractor`, `AmaruBootstrap`, and `LedgerStateEmitter`; executable stanzas expose `header-extractor` and `ledger-state-emitter`.
   - nix: `nix/header-extractor.nix` extracts both in-repo executables; `nix/bootstrap-producer-image.nix` builds a runtime image with `ledger-state-emitter`, `header-extractor`, `amaru`, bash/coreutils/findutils/gawk/jq, and the producer wrapper. `db-analyser` and `snapshot-converter` remain only for Phase 0 checks.
-  - flake: checks include the producer image, unit bats, header-extractor integration, `bootstrap-producer-bats` with the T016 concurrent race, and `bootstrap-producer-synthesized` for the full real Amaru import path.
+  - flake: checks include the producer image, unit bats, header-extractor integration, `bootstrap-producer-bats` with the T016 concurrent race, `bootstrap-producer-synthesized` for the full real Amaru import path, and `amaru-run-bootstrap` for the startup proof.
   - live verifier: `tests/test-bootstrap-producer-live.bats` seeds a stock `testnet_42` ChainDB with `db-synthesizer`, adds the node-10.7.1 DB marker, runs `ghcr.io/intersectmbo/cardano-node:10.7.1` against that DB, and runs the bootstrap-producer image while the official node has the DB open.
   - design correction from T021: the ChainDB mount is read-write, not `:ro`. The producer still consults only immutable chunks; the write permission is required because node-10.7.1 consensus validation opens immutable chunk files through APIs that reject a read-only filesystem.
   - validated locally: `nix build .#checks.x86_64-linux.ledger-state-emitter .#checks.x86_64-linux.bootstrap-producer-synthesized`, `nix build .#checks.x86_64-linux.shellcheck`, `mkdocs build --strict`, the Docker-level live verifier, and `just ci`.
-  - `just ci` reached the Phase 0 smoke verdict `FAIL: format mismatch`; this is an accepted hypothesis outcome for that legacy smoke job, not a producer failure. The producer-specific Build Gate checks and live node-10.7.1 verifier passed.
+  - T027 correction: `amaru import-ledger-state` accepting a bundle was not enough evidence; `amaru run` needs `live/` plus historical snapshots for the two prior epochs. The producer now emits a three-snapshot window and the Build Gate verifies `amaru run` reaches `build_ledger`.
+  - `just ci` reached the Phase 0 smoke verdict `FAIL: format mismatch`; this is an accepted hypothesis outcome for that legacy smoke job, not a producer failure. The producer-specific Build Gate checks, `amaru-run-bootstrap`, and live node-10.7.1 verifier passed.

@@ -13,14 +13,26 @@ setup() {
   TMP_DIR="$(mktemp -d)"
   make_valid_inputs "$TMP_DIR"
   # Pre-populate a complete bundle for testnet_42. The orchestrator
-  # checks for `<bundle>/<network>/{ledger.<network>.db, chain.<network>.db,
-  # nonces.json, headers}` before entering any wait state.
-  mkdir -p "$TMP_DIR/bundle/testnet_42/ledger.testnet_42.db"
+  # checks for the startup-ready bundle shape before entering any wait
+  # state: live ledger DB, at least three historical epoch snapshots,
+  # chain DB, converted snapshots, nonces.json, the four imported
+  # header anchors, and an exact header for the latest snapshot tip.
+  mkdir -p "$TMP_DIR/bundle/testnet_42/ledger.testnet_42.db/live"
+  mkdir -p "$TMP_DIR/bundle/testnet_42/ledger.testnet_42.db/0"
+  mkdir -p "$TMP_DIR/bundle/testnet_42/ledger.testnet_42.db/1"
+  mkdir -p "$TMP_DIR/bundle/testnet_42/ledger.testnet_42.db/2"
   mkdir -p "$TMP_DIR/bundle/testnet_42/chain.testnet_42.db"
   mkdir -p "$TMP_DIR/bundle/testnet_42/headers"
+  mkdir -p "$TMP_DIR/bundle/testnet_42/snapshots"
   : >"$TMP_DIR/bundle/testnet_42/nonces.json"
-  # Write at least one header file so the headers/* check passes.
+  : >"$TMP_DIR/bundle/testnet_42/snapshots/1.111111.cbor"
+  : >"$TMP_DIR/bundle/testnet_42/snapshots/2.222222.cbor"
+  : >"$TMP_DIR/bundle/testnet_42/snapshots/3.333333.cbor"
+  # Write the minimum header count expected by the runtime contract.
   : >"$TMP_DIR/bundle/testnet_42/headers/header.0.000000.cbor"
+  : >"$TMP_DIR/bundle/testnet_42/headers/header.1.111111.cbor"
+  : >"$TMP_DIR/bundle/testnet_42/headers/header.2.222222.cbor"
+  : >"$TMP_DIR/bundle/testnet_42/headers/header.3.333333.cbor"
   # Cluster mount intentionally empty - the test is that we never
   # poll for it.
   rm -rf "$TMP_DIR/chain-db"
