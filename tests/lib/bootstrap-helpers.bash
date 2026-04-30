@@ -133,6 +133,13 @@ synthesize_live_chain_db() {
   # cardano-node 10.7.1 refuses to open a non-empty DB without it.
   jq -r '.networkMagic' "$tmp/config/shelley-genesis.json" \
     >"$tmp/state/db/protocolMagicId"
+
+  # The synthesizer's ledger snapshot directory is useful to analyser
+  # tools but is not a reliable on-disk LedgerDB seed for the official
+  # cardano-node image. Let the node rebuild its own LedgerDB from the
+  # immutable DB so the live verifier exercises the same hand-off a
+  # running node would own.
+  rm -rf "$tmp/state/db/ledger"
 }
 
 # docker_rm_worktree <tmp-dir> <image>
