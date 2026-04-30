@@ -91,6 +91,9 @@ amaru-bootstrap-producer-<github-sha>.tar.gz
   producer race.
 - A CI-gated `amaru-run-bootstrap` proof that Amaru can open the
   produced ledger/chain stores and reach ledger startup.
+- A short-epoch Antithesis golden gate that samples slots `9`, `129`,
+  and `249` from a generated 120-slot-epoch ChainDB and imports them
+  through Amaru.
 
 The architecture, state machine, release boundary, and concurrency model
 are documented with diagrams in `docs/architecture.md`.
@@ -135,6 +138,8 @@ the Amaru bootstrap projection of the node-10.7.1 state:
 - Conway/Dijkstra pool state projected to the fields Amaru imports
 - Conway/Dijkstra account state projected to Amaru's legacy delegation
   wrapper
+- empty reward-update state projected as a completed zero reward update,
+  matching Amaru's `has_rewards=true` import path
 
 ## Inputs / outputs
 
@@ -160,6 +165,7 @@ running.
 ├── chain.<network>.db/                    # populated by amaru import-headers/import-nonces
 ├── ledger.<network>.db/                   # populated by amaru import-ledger-state
 ├── snapshots/<slot>.<hash>.cbor           # target plus two prior epoch snapshots
+├── snapshots/history.<slot>.<hash>.json   # testnet era history sidecars
 ├── nonces.json                            # tail rewritten to previous-epoch header hash
 └── headers/header.<slot>.<hash>.cbor      # headers needed by Amaru
 ```
@@ -167,6 +173,11 @@ running.
 The latest snapshot's `<slot>.<hash>` must have a matching
 `headers/header.<slot>.<hash>.cbor`; Amaru uses that exact header when
 aligning its chain store to the ledger tip at startup.
+
+For custom testnets, the producer also corrects each open-ended current
+era history sidecar to the `epochLength` from the node's Shelley genesis.
+This matters for short-epoch Antithesis networks because Amaru imports
+testnet snapshots using the sidecar history file next to each snapshot.
 
 ## Local verification
 
@@ -180,6 +191,9 @@ Phase 0 smoke verdict and accepts either `PASS` or the expected
 bootstrap-producer verifier. The pure producer-specific end-to-end check
 is `.#checks.x86_64-linux.bootstrap-producer-synthesized`; the startup
 proof is `.#checks.x86_64-linux.amaru-run-bootstrap`.
+The short-epoch Antithesis regression checks are
+`.#checks.x86_64-linux.antithesis-short-epoch-samples` and
+`.#checks.x86_64-linux.antithesis-short-epoch-golden`.
 
 These checks prove bundle production, Amaru import, and Amaru startup
 alignment. They are not a full mainnet ledger-content coverage suite for

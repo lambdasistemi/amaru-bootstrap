@@ -102,6 +102,32 @@ tail_phase_log() {
     printf -- '--- end %s ---\n' "${f}" >&2
 }
 
+patch_converted_era_history() {
+    local history tmp count=0
+
+    for history in "${UNIQUE_TMP}/snapshots"/history.*.json; do
+        [[ -e "${history}" ]] || continue
+        count=$(( count + 1 ))
+        tmp="${history}.tmp"
+        if ! jq --argjson epochLength "${EPOCH_LENGTH}" \
+            '(.eras[] | select(.end == null) | .params.epoch_size_slots) = $epochLength' \
+            "${history}" >"${tmp}" 2>"${BUNDLE_DIR}/.logs/history.stderr"
+        then
+            printf 'era-history patch failed for %s; see %s\n' \
+                   "${history}" "${BUNDLE_DIR}/.logs/history.stderr" >&2
+            rm -f "${tmp}"
+            exit 6
+        fi
+        mv "${tmp}" "${history}"
+    done
+
+    if (( count == 0 )); then
+        printf 'amaru convert-ledger-state produced no history.*.json files in %s\n' \
+               "${UNIQUE_TMP}/snapshots" >&2
+        exit 6
+    fi
+}
+
 # ─── 8-step state diagram (functions stubbed, T018+T019 fill them) ─
 
 # Step 1: pre-flight (wait + validate + era-readiness predicate).
@@ -342,6 +368,9 @@ phase_emit() {
 # Writes <slot>.<hash>.cbor + nonces.<slot>.<hash>.json + history.<slot>.<hash>.json
 # into <staging>/snapshots/. amaru's import-ledger-state requires the
 # era-history file to live alongside the snapshot for testnet variants.
+# Amaru's converter currently fills the open-ended current era with the
+# network default epoch size; for custom short-epoch testnets the
+# producer corrects that sidecar from the node genesis before import.
 phase_convert() {
     local snapshot slot rc
     for snapshot in "${LEGACY_SNAPSHOT_FILES[@]}"; do
@@ -360,6 +389,8 @@ phase_convert() {
             exit 6
         fi
     done
+
+    patch_converted_era_history
 
     local cbor_count
     cbor_count=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \

@@ -204,6 +204,7 @@ let
           pkgs.bash
           pkgs.coreutils
           pkgs.findutils
+          pkgs.jq
           amaruPkg
           headerExtractorPkgs.ledger-state-emitter
         ];
@@ -227,6 +228,16 @@ let
           --network testnet_42 \
           --snapshot "$out/legacy/$slot.cbor" \
           --target-dir "$out/snapshots"
+      done
+
+      epoch_length=$(jq -r '.epochLength' \
+        "$TMPDIR/config/shelley-genesis.json")
+      for history in "$out"/snapshots/history.*.json; do
+        tmp="$history.tmp"
+        jq --argjson epochLength "$epoch_length" \
+          '(.eras[] | select(.end == null) | .params.epoch_size_slots) = $epochLength' \
+          "$history" >"$tmp"
+        mv "$tmp" "$history"
       done
 
       cbor_count=$(find "$out/snapshots" -maxdepth 1 \
@@ -353,6 +364,8 @@ in
       chmod -R u+w $TMPDIR/chain-db
       BOOTSTRAP_PRODUCER_CHAIN_DB=$TMPDIR/chain-db \
         bats --tap tests/test-bootstrap-producer-concurrent.bats
+
+      bats --tap tests/test-bootstrap-producer-history.bats
 
       mkdir -p $out
     '';

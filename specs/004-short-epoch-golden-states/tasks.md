@@ -20,7 +20,7 @@
 
 ## Phase 3 - Make It Pass
 
-- [ ] T008 Fix the ledger-state projection/import contract mismatch.
-- [ ] T009 Re-run the sample and golden checks and update this status.
-- [ ] T010 Re-run the full Build Gate before sending the image back to
+- [X] T008 Fix the ledger-state projection/import contract mismatch.
+- [X] T009 Re-run the sample and golden checks and update this status.
+- [X] T010 Re-run the full Build Gate before sending the image back to
   Antithesis.

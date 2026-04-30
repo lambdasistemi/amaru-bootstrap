@@ -39,6 +39,9 @@ adjusted where Amaru's importer still expects older ledger shapes:
   and DRep delegation are preserved; historical pointer indexes and the
   intermediate deposits accumulator are omitted because Amaru skips them
   during bootstrap.
+* Empty reward-update state is projected as a completed zero reward
+  update. Amaru's import command runs in @has_rewards=true@ mode and
+  unconditionally decodes a @Complete RewardUpdate@ at this position.
 -}
 module LedgerStateEmitter (
     emitLedgerSnapshot,
@@ -58,6 +61,7 @@ import Cardano.Ledger.Conway.State qualified as Conway
 import Cardano.Ledger.Core qualified as Core
 import Cardano.Ledger.Dijkstra.State ()
 import Cardano.Ledger.Shelley.LedgerState qualified as SL
+import Cardano.Ledger.Shelley.RewardUpdate qualified as ShelleyReward
 import Cardano.Ledger.State qualified as Ledger
 import Cardano.Slotting.Slot (SlotNo)
 import Cardano.Tools.DBAnalyser.Block.Cardano (
@@ -81,11 +85,13 @@ import Control.ResourceRegistry (
 import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant ((>$<))
 import Data.Map.Strict qualified as Map
+import Data.Maybe.Strict (StrictMaybe (..))
 import Data.Proxy (Proxy (Proxy))
 import Data.SOP.BasicFunctors (K (K))
 import Data.SOP.Functors (Flip (unFlip))
 import Data.SOP.Strict (NP (Nil, (:*)), fn, type (-.->))
 import HeaderExtractor (NodeConfig (NodeConfig))
+import Lens.Micro ((^.))
 import Ouroboros.Consensus.Block (
     GetHeader,
     blockNo,
@@ -190,7 +196,6 @@ import Ouroboros.Consensus.Util.CBOR (
  )
 import Ouroboros.Consensus.Util.Versioned (encodeVersion)
 import Ouroboros.Network.Block (genesisPoint)
-import Lens.Micro ((^.))
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath (takeDirectory)
 
@@ -499,7 +504,8 @@ encodeShelleyLedgerStateCanonicalWith ::
     (SL.NewEpochState era -> CBOR.Encoding) ->
     LedgerState (ShelleyBlock proto era) EmptyMK ->
     CBOR.Encoding
-encodeShelleyLedgerStateCanonicalWith encodeNewEpochState
+encodeShelleyLedgerStateCanonicalWith
+    encodeNewEpochState
     ShelleyLedgerState
         { shelleyLedgerTip
         , shelleyLedgerState
@@ -562,10 +568,20 @@ encodeNewEpochStateCanonicalLedgerWith encodeCertState (SL.NewEpochState e bp bc
         , encCBOR bp
         , encCBOR bc
         , encodeEpochStateCanonicalWith encodeCertState es
-        , encCBOR ru
+        , encodeRewardUpdateAmaru ru
         , encCBOR pd
         , encCBOR av
         ]
+
+encodeRewardUpdateAmaru ::
+    StrictMaybe ShelleyReward.PulsingRewUpdate ->
+    LedgerEncoding
+encodeRewardUpdateAmaru =
+    encCBOR . \case
+        SNothing ->
+            SJust $
+                ShelleyReward.Complete ShelleyReward.emptyRewardUpdate
+        SJust ru -> SJust ru
 
 encodeEpochStateCanonicalWith ::
     forall era.
@@ -573,7 +589,8 @@ encodeEpochStateCanonicalWith ::
     (SL.CertState era -> LedgerEncoding) ->
     SL.EpochState era ->
     LedgerEncoding
-encodeEpochStateCanonicalWith encodeCertState
+encodeEpochStateCanonicalWith
+    encodeCertState
     SL.EpochState
         { SL.esChainAccountState = esChainAccountState
         , SL.esLState = esLState
@@ -594,7 +611,8 @@ encodeLedgerStateCanonicalWith ::
     (SL.CertState era -> LedgerEncoding) ->
     SL.LedgerState era ->
     LedgerEncoding
-encodeLedgerStateCanonicalWith encodeCertState
+encodeLedgerStateCanonicalWith
+    encodeCertState
     SL.LedgerState
         { SL.lsUTxOState = lsUTxOState
         , SL.lsCertState = lsCertState
