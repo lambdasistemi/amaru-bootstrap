@@ -168,7 +168,7 @@ Combined with FR-008 idempotency: pre-flight detects a complete `<bundle>/<netwo
 
 ## R-008: CI workflow for image publishing
 
-**Decision**: new workflow [`/.github/workflows/publish-bootstrap-image.yml`](../../../.github/workflows/publish-bootstrap-image.yml). Triggers on push to `main`. Steps:
+**Decision**: new workflow [`/.github/workflows/publish-bootstrap-image.yml`](../../../.github/workflows/publish-bootstrap-image.yml). Triggers after successful CI on `main` or on same-repository pull requests. Steps:
 
 1. checkout
 2. cachix-action (warm the nix cache)
@@ -178,12 +178,17 @@ Combined with FR-008 idempotency: pre-flight detects a complete `<bundle>/<netwo
 6. `docker tag <local-tag> ghcr.io/lambdasistemi/amaru-bootstrap-producer:${{ github.sha }}`
 7. `docker push ghcr.io/lambdasistemi/amaru-bootstrap-producer:${{ github.sha }}`
 
+For same-repository pull requests, the workflow also pushes
+`ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<number>-<head-sha>`.
+The same-repository restriction prevents package-write workflow runs from
+checking out and building untrusted fork code.
+
 `runs-on: nixos`. `permissions: { contents: read, packages: write }`. Build Gate dependency added so the image only publishes if smoke-test-bats and bootstrap-producer-bats are both green.
 
 **Rationale**: standard pattern; same workflow shape as `cardano-foundation/cardano-node-antithesis/.github/workflows/publish-images.yaml`.
 
 **Alternatives considered**:
-- Build on every PR — wasteful; PR builds use the image-build flake check (no push) which already verifies the image evaluates cleanly
+- Build and publish every PR directly from the pull-request workflow — rejected because fork PRs must not run untrusted code with package-write permissions
 - Tag with `${{ github.ref_name }}` (branch name) instead of SHA — violates FR-010 / Principle III
 
 ## R-009: Wait strategy — poll immutable DB tip-info

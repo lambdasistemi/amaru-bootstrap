@@ -44,14 +44,22 @@ as:
 ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
 ```
 
+After CI succeeds on a same-repository pull request, GitHub Actions also
+publishes immutable PR test images:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-pr-head-sha>
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>
+```
+
 Downstream compose files should pin that full commit-SHA tag. The
 project does not publish moving runtime tags as the integration
 contract.
 
 To select a runtime image, use the full commit SHA from the successful
-`main` CI run you want to consume. The matching publish workflow pushes
-that same SHA as the GHCR tag, and the Build Gate uploads
-`bootstrap-producer-image-<github-sha>` for the same commit.
+`main` or same-repository PR CI run you want to consume. The matching
+publish workflow pushes that same SHA as the GHCR tag, and the Build Gate
+uploads `bootstrap-producer-image-<github-sha>` for the same commit.
 
 ## Build artifacts
 
@@ -62,7 +70,8 @@ The producer image is intentionally available in four places:
 | Flake package | `.#packages.x86_64-linux.bootstrap-producer-image` | Build the Docker image tarball locally. |
 | Flake check | `.#checks.x86_64-linux.bootstrap-producer-image` | Prove the image still builds in CI's Build Gate. |
 | GitHub Actions artifact | `bootstrap-producer-image-<github-sha>` | Download the CI-built tarball from a PR or `main` CI run. |
-| GHCR image | `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>` | Runtime image for downstream Compose stacks after `main` CI passes. |
+| GHCR image | `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>` | Runtime image for downstream Compose stacks after `main` or same-repository PR CI passes. |
+| GHCR PR image | `ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>` | Human-identifiable test image for downstream PR validation before merge. |
 
 Local build:
 
