@@ -21,7 +21,9 @@ semantics.
 Do not use a moving tag as the integration contract. Pick the commit SHA
 that passed this repository's CI and pin that exact image in the
 downstream stack. The matching `Publish bootstrap-producer image`
-workflow run pushes the GHCR tag after `main` CI succeeds.
+workflow run pushes the GHCR tag after `main` CI or same-repository PR CI
+succeeds. PR builds also publish a human-identifiable immutable tag:
+`ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>`.
 
 The same image tarball is also exposed as the flake package
 `.#packages.x86_64-linux.bootstrap-producer-image` and uploaded by CI as

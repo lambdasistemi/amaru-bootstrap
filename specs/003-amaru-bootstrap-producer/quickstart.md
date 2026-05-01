@@ -150,6 +150,13 @@ The producer image is published after `main` CI succeeds:
 ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
 ```
 
+Same-repository pull request CI also publishes immutable test tags:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-pr-head-sha>
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>
+```
+
 Use the full commit-SHA tag in downstream compose files. Do not consume
 moving tags as the integration contract; the tested SHA is what matters.
 To pick up a fix:

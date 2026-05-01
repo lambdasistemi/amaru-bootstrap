@@ -116,6 +116,14 @@ builds the Nix docker image, loads it into Docker, and pushes:
 ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
 ```
 
+After the full CI workflow succeeds on a same-repository pull request,
+the same workflow publishes immutable PR test tags:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-pr-head-sha>
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>
+```
+
 The full commit SHA is the runtime integration contract. Downstream
 compose files should pin the exact SHA they tested. The project does not
 publish moving runtime tags such as `latest` for the producer.
@@ -126,10 +134,11 @@ the Build Gate as an artifact named
 `bootstrap-producer-image-<github-sha>`, containing
 `amaru-bootstrap-producer-<github-sha>.tar.gz`.
 
-To choose a concrete image, open the successful `main` CI run for the
-commit you want, copy its full head SHA, then use the matching successful
-`Publish bootstrap-producer image` workflow run. The GHCR image tag and
-the uploaded artifact name both contain that same SHA.
+To choose a concrete image, open the successful `main` or
+same-repository PR CI run for the commit you want, copy its full head
+SHA, then use the matching successful `Publish bootstrap-producer image`
+workflow run. The GHCR image tag and the uploaded artifact name both
+contain that same SHA.
 
 ## ChainDB Mount Contract
 
