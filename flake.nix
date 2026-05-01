@@ -45,10 +45,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # pragma-org/amaru consumed as a non-flake input; SHA pinned via
-    # flake.lock per constitution Principle III.
+    # lambdasistemi/amaru consumed as a non-flake input; SHA pinned via
+    # flake.lock per constitution Principle III. This fork carries the
+    # runtime-parameter flags needed for generated Antithesis testnets.
     amaru = {
-      url = "github:pragma-org/amaru";
+      url = "github:lambdasistemi/amaru/feat/runtime-testnet-parameters";
       flake = false;
     };
   };
