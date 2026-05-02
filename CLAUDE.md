@@ -30,6 +30,7 @@ Project-specific guidance for AI agents. **Read [`.specify/memory/constitution.m
 ## Active feature
 
 - `001-snapshot-format-smoke` — Phase 0 hypothesis-validation smoke test. See [`specs/001-snapshot-format-smoke/`](./specs/001-snapshot-format-smoke/).
+- `005-amaru-run-live-test` — extends the live cardano-node verifier to run amaru against the produced bundle (closes [issue #34](https://github.com/lambdasistemi/amaru-bootstrap/issues/34)). See [`specs/005-amaru-run-live-test/`](./specs/005-amaru-run-live-test/).
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
@@ -37,6 +38,8 @@ Project-specific guidance for AI agents. **Read [`.specify/memory/constitution.m
 ## Active Technologies
 - Bash 5.x (orchestrator script); Haskell GHC 9.6.x (existing tools, plus the small header-extractor tool from R-001) (003-amaru-bootstrap-producer)
 - filesystem only — read cluster's chain DB, write the bundle to a docker volume. No database, no state. (003-amaru-bootstrap-producer)
+- Bash 5.x (test orchestration); bats-core (existing test runner). + docker-client, cardano-node 10.7.1 image, db-synthesizer (haskell.nix), `amaru` (crane via `nix/amaru.nix`), bats, jq, gnugrep, coreutils. (005-amaru-run-live-test)
+- Filesystem only — `$TMP_DIR` per bats test as today; no DB. (005-amaru-run-live-test)
 
 ## Recent Changes
 - 003-amaru-bootstrap-producer: Added Bash 5.x (orchestrator script); Haskell GHC 9.6.x (existing tools, plus the small header-extractor tool from R-001)

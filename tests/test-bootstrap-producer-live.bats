@@ -43,6 +43,7 @@ wait_for_node_socket() {
 setup() {
   command -v docker >/dev/null 2>&1 || skip "docker unavailable"
   command -v db-synthesizer >/dev/null 2>&1 || skip "db-synthesizer unavailable"
+  command -v amaru >/dev/null 2>&1 || skip "amaru unavailable"
   if [[ -z "${BOOTSTRAP_PRODUCER_IMAGE:-}" ]]; then
     skip "BOOTSTRAP_PRODUCER_IMAGE unset; load/build the image first"
   fi
@@ -58,9 +59,9 @@ setup() {
   NODE_CONTAINER="amaru-live-node-${BATS_TEST_NUMBER}-$$"
   PRODUCER_CONTAINER="amaru-live-producer-${BATS_TEST_NUMBER}-$$"
   NODE_MONITOR_PID=""
+  AMARU_PID=""
 
-  make_live_node_inputs "$TMP_DIR"
-  synthesize_live_chain_db "$TMP_DIR" "${BOOTSTRAP_LIVE_SLOTS:-300000}"
+  make_short_epoch_node_inputs "$TMP_DIR"
 }
 
 teardown() {
@@ -68,6 +69,7 @@ teardown() {
     kill "$NODE_MONITOR_PID" >/dev/null 2>&1 || true
     wait "$NODE_MONITOR_PID" >/dev/null 2>&1 || true
   fi
+  stop_amaru_run "${AMARU_PID:-}"
   docker rm -f "$PRODUCER_CONTAINER" "$NODE_CONTAINER" >/dev/null 2>&1 || true
   docker_rm_worktree "$TMP_DIR" "$CARDANO_NODE_IMAGE"
 }
@@ -75,6 +77,7 @@ teardown() {
 @test "producer reads a cardano-node 10.7.1 ChainDB while the node has it open" {
   docker run -d --name "$NODE_CONTAINER" \
     -e CARDANO_BLOCK_PRODUCER=true \
+    -p 127.0.0.1::3001 \
     -v "$TMP_DIR/config:/config:ro" \
     -v "$TMP_DIR/keys:/keys:ro" \
     -v "$TMP_DIR/state:/data" \
@@ -96,6 +99,22 @@ teardown() {
     false
   fi
 
+  if ! node_host_port="$(wait_for_node_n2n_port "$NODE_CONTAINER" 60)"; then
+    echo "--- cardano-node logs ---"
+    docker logs "$NODE_CONTAINER" || true
+    false
+  fi
+
+  # The node mints its own chain at the short-epoch params
+  # (epochLength=120, securityParam=8, activeSlotsCoeff=1.0). Wait
+  # for it to clear 2*epochLength + safety so bootstrap-producer's
+  # era-readiness predicate has chain to read. With activeSlotsCoeff=1.0
+  # we expect ~1 block per slot of wall-clock; default 300s gives a
+  # comfortable margin past the era boundary.
+  grow_seconds="${BOOTSTRAP_LIVE_NODE_GROW_SECONDS:-300}"
+  echo "+ waiting ${grow_seconds}s for cardano-node to grow chain past 2*epochLength"
+  sleep "$grow_seconds"
+
   node_monitor_log="$TMP_DIR/node-monitor.log"
   (
     while true; do
@@ -114,7 +133,7 @@ teardown() {
   run docker run --name "$PRODUCER_CONTAINER" \
     -e AMARU_NETWORK=testnet_42 \
     -e AMARU_CLUSTER_READY_DEADLINE_SECONDS=30 \
-    -e AMARU_WAIT_DEADLINE_SECONDS=120 \
+    -e AMARU_WAIT_DEADLINE_SECONDS=240 \
     -e AMARU_POLL_INTERVAL_SECONDS=1 \
     -v "$TMP_DIR/state/db:/cardano/state" \
     -v "$TMP_DIR/config:/cardano/config:ro" \
@@ -157,4 +176,58 @@ teardown() {
 
   header_count="$(find "$final/headers" -name 'header.*.cbor' | wc -l)"
   [ "$header_count" -ge 4 ]
+
+  # The producer container writes the bundle as root. Reclaim
+  # ownership for the host user via a one-shot root container so the
+  # host-side amaru can open the ledger DB read-write (rocksdb LOG
+  # rotation needs write access).
+  docker run --rm --entrypoint sh \
+    -v "$TMP_DIR/bundle:/work" \
+    "$CARDANO_NODE_IMAGE" \
+    -c "chown -R $(id -u):$(id -g) /work"
+
+  # ---- Amaru consume step (005-amaru-run-live-test) -------------------
+  # Run the flake-pinned amaru against the bundle just produced,
+  # peering with the same cardano-node container that produced it.
+  # Hold for BOOTSTRAP_LIVE_AMARU_HOLD_SECONDS (default 60). Fail if
+  # amaru exits early or its log contains any of the four fatal
+  # substrings from contracts/failure-classes.md.
+  hold_seconds="$(parse_hold_window_seconds)"
+
+  amaru_log="$TMP_DIR/amaru-run.log"
+  AMARU_PID="$(start_amaru_run "$final" "$node_host_port" "$amaru_log")"
+
+  start_epoch="$(date +%s)"
+  sleep "$hold_seconds"
+  end_epoch="$(date +%s)"
+  elapsed=$((end_epoch - start_epoch))
+
+  amaru_alive=true
+  if ! assert_amaru_alive "$AMARU_PID"; then
+    amaru_alive=false
+  fi
+
+  fatal_class=""
+  if scan_class="$(scan_amaru_log_for_fatal "$amaru_log")"; then
+    fatal_class="$scan_class"
+  fi
+
+  if [[ -n "$fatal_class" ]]; then
+    stop_amaru_run "$AMARU_PID"
+    AMARU_PID=""
+    echo "amaru consume failed: class=$fatal_class"
+    false
+  fi
+
+  if [[ "$amaru_alive" != "true" ]]; then
+    report_amaru_exited_early "$amaru_log" "$elapsed" "$hold_seconds"
+    AMARU_PID=""
+    echo "amaru consume failed: class=exited-early"
+    false
+  fi
+
+  echo "+ amaru ran cleanly for ${hold_seconds}s, no fatal substrings matched"
+
+  stop_amaru_run "$AMARU_PID"
+  AMARU_PID=""
 }
