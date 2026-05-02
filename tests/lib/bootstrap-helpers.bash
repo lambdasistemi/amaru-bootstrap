@@ -262,12 +262,21 @@ start_amaru_run() {
   local peer_port="$2"
   local log="$3"
 
+  local extra=()
+  if [[ -f "$bundle/era-history.json" ]]; then
+    extra+=(--era-history-file "$bundle/era-history.json")
+  fi
+  if [[ -f "$bundle/global-parameters.json" ]]; then
+    extra+=(--global-parameters-file "$bundle/global-parameters.json")
+  fi
+
   amaru --with-json-traces run \
     --network testnet_42 \
     --ledger-dir "$bundle/ledger.testnet_42.db" \
     --chain-dir "$bundle/chain.testnet_42.db" \
     --listen-address 127.0.0.1:0 \
     --peer-address "127.0.0.1:$peer_port" \
+    "${extra[@]}" \
     >"$log" 2>&1 &
   printf '%s\n' "$!"
 }
