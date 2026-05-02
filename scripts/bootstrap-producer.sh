@@ -535,6 +535,118 @@ phase_nonces() {
     mv "${tmp_json}" "${UNIQUE_TMP}/nonces.json"
 }
 
+# Step 5b (#36): derive era-history.json + global-parameters.json from
+# the source genesis files so consumers (amaru run) on testnets with a
+# non-default epoch length / activeSlotsCoeff can pick them up via
+# --era-history-file / --global-parameters-file. rc=11 on failure.
+#
+# Assumes:
+# - All HFC test triggers (Shelley..Conway) fire at epoch 0 — i.e. the
+#   chain is in Conway from genesis. The vendored Antithesis fixtures
+#   match this; mainnet/preprod historical chains do not and would
+#   need a multi-era summary instead. The current scope is generated
+#   testnets, per the live-test scenario in #35.
+# - Byron startTime + Shelley networkMagic / epochLength / slotLength /
+#   securityParam / activeSlotsCoeff / maxLovelaceSupply /
+#   slotsPerKESPeriod / maxKESEvolutions are present and valid.
+phase_runtime_params() {
+    local shelley="${CONFIG_DIR}/shelley-genesis.json"
+    local byron="${CONFIG_DIR}/byron-genesis.json"
+    [[ -f "${shelley}" && -f "${byron}" ]] || {
+        printf 'phase_runtime_params: missing %s or %s\n' \
+               "${shelley}" "${byron}" >&2
+        exit 11
+    }
+
+    local epoch_length slot_length_sec sec_param active_f
+    local max_lovelace slots_per_kes max_kes_evol system_start_sec
+    epoch_length=$(jq -r '.epochLength' "${shelley}")
+    slot_length_sec=$(jq -r '.slotLength' "${shelley}")
+    sec_param=$(jq -r '.securityParam' "${shelley}")
+    active_f=$(jq -r '.activeSlotsCoeff' "${shelley}")
+    max_lovelace=$(jq -r '.maxLovelaceSupply' "${shelley}")
+    slots_per_kes=$(jq -r '.slotsPerKESPeriod' "${shelley}")
+    max_kes_evol=$(jq -r '.maxKESEvolutions' "${shelley}")
+    system_start_sec=$(jq -r '.startTime' "${byron}")
+
+    local active_inv slot_length_ms system_start_ms
+    local stab_win rand_stab scale_factor
+    active_inv=$(awk -v f="${active_f}" \
+                     'BEGIN { printf "%d\n", (1.0 / f) + 0.5 }')
+    slot_length_ms=$(awk -v s="${slot_length_sec}" \
+                         'BEGIN { printf "%d\n", (s * 1000.0) + 0.5 }')
+    system_start_ms=$(awk -v s="${system_start_sec}" \
+                          'BEGIN { printf "%d\n", s * 1000 }')
+    stab_win=$(( 2 * sec_param * active_inv ))
+    rand_stab=$(( 4 * sec_param * active_inv ))
+    if (( active_inv * sec_param > 0 \
+          && epoch_length % (active_inv * sec_param) == 0 )); then
+        scale_factor=$(( epoch_length / (active_inv * sec_param) ))
+    else
+        scale_factor=1
+    fi
+
+    if ! jq -n \
+        --argjson k "${sec_param}" \
+        --argjson scale "${scale_factor}" \
+        --argjson inv "${active_inv}" \
+        --argjson maxL "${max_lovelace}" \
+        --argjson kes "${slots_per_kes}" \
+        --argjson kesEv "${max_kes_evol}" \
+        --argjson el "${epoch_length}" \
+        --argjson sw "${stab_win}" \
+        --argjson rs "${rand_stab}" \
+        --argjson ss "${system_start_ms}" \
+        '{
+            consensus_security_param: $k,
+            epoch_length_scale_factor: $scale,
+            active_slot_coeff_inverse: $inv,
+            max_lovelace_supply: $maxL,
+            slots_per_kes_period: $kes,
+            max_kes_evolution: $kesEv,
+            epoch_length: $el,
+            stability_window: $sw,
+            randomness_stabilization_window: $rs,
+            system_start: $ss
+         }' \
+        >"${UNIQUE_TMP}/global-parameters.json" \
+        2>"${BUNDLE_DIR}/.logs/global-parameters.stderr"
+    then
+        printf 'phase_runtime_params: failed to write global-parameters.json; see %s\n' \
+               "${BUNDLE_DIR}/.logs/global-parameters.stderr" >&2
+        exit 11
+    fi
+
+    if ! jq -n \
+        --argjson sw "${stab_win}" \
+        --argjson el "${epoch_length}" \
+        --argjson sl "${slot_length_ms}" \
+        '{
+            stability_window: $sw,
+            eras: [
+                {
+                    start: { time: 0, slot: 0, epoch: 0 },
+                    end: null,
+                    params: {
+                        epoch_size_slots: $el,
+                        slot_length: $sl,
+                        era_name: "Conway"
+                    }
+                }
+            ]
+         }' \
+        >"${UNIQUE_TMP}/era-history.json" \
+        2>"${BUNDLE_DIR}/.logs/era-history.stderr"
+    then
+        printf 'phase_runtime_params: failed to write era-history.json; see %s\n' \
+               "${BUNDLE_DIR}/.logs/era-history.stderr" >&2
+        exit 11
+    fi
+
+    printf '+ wrote era-history.json + global-parameters.json (epoch_length=%s, k=%s, 1/f=%s)\n' \
+           "${epoch_length}" "${sec_param}" "${active_inv}"
+}
+
 # Step 6: three chained `amaru import-*` calls. rc=9 on failure.
 # Paths follow R-005 / Obs#3: ledger.<network>.db, chain.<network>.db,
 # headers/* all at the staging root so the final `mv -T` lands them in
@@ -626,6 +738,7 @@ main() {
     phase_convert
     phase_extract
     phase_nonces
+    phase_runtime_params
     phase_import
     phase_commit
 }
