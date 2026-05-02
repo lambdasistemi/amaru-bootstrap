@@ -36,16 +36,16 @@
     "amaru": {
       "flake": false,
       "locked": {
-        "lastModified": 1777632659,
-        "narHash": "sha256-7FJh0slktbRgkVGsaXpkh090mEuONPWGnWecU4H6eLI=",
+        "lastModified": 1777751775,
+        "narHash": "sha256-5OR05cRD7iAI5azgaCKNoKz/SA8AvbiaYrV2TJ24fA4=",
         "owner": "lambdasistemi",
         "repo": "amaru",
-        "rev": "b69fa13e720aea6453c9c2838114600806ad1b1d",
+        "rev": "ee49f08d21b47083cb3d2deca1a1717e7997e3d4",
         "type": "github"
       },
       "original": {
         "owner": "lambdasistemi",
-        "ref": "feat/runtime-testnet-parameters",
+        "ref": "005-saturating-stake-distribution-lookup",
         "repo": "amaru",
         "type": "github"
       }
