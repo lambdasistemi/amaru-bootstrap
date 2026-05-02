@@ -103,6 +103,61 @@ make_live_node_inputs() {
     >"$tmp/config/topology.json"
 }
 
+# make_short_epoch_node_inputs <tmp-dir>
+#
+# Variant of make_live_node_inputs for issue #34's failure boundary:
+# the cardano-node grows its own chain organically at the antithesis
+# short-epoch params (epochLength=120, securityParam=8,
+# activeSlotsCoeff=1.0). The chain is NOT pre-synthesized — the node
+# mints blocks across wall-clock time, which is the exact path that
+# blew up amaru consumption in lambdasistemi/amaru-bootstrap#34.
+#
+# Synthesized short-epoch coverage already exists in
+# nix/checks.nix's antithesis-short-epoch-* checks; this helper is
+# specifically the *non-synthesized* live-node path.
+make_short_epoch_node_inputs() {
+  local tmp="$1"
+
+  make_live_node_inputs "$tmp"
+
+  # Genesis start instant: a few seconds in the past, so when the
+  # node opens its DB it is just past genesis and can begin minting
+  # blocks immediately. The vendored fixture's systemStart is months
+  # ago — that triggers cardano-node's "Too far from the chain tip"
+  # warning and the node never mints. Rewrite both byron startTime
+  # and shelley systemStart to the same instant.
+  local start_epoch start_iso
+  start_epoch="$(($(date -u +%s) - 5))"
+  start_iso="$(date -u -d "@$start_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+
+  # Byron's protocolConsts.k is the toplevel security parameter the
+  # HFC uses to gate immutable-flush across all configured eras. The
+  # vendored fixture sets it to 432, which means nothing ever moves
+  # past the volatile DB on a fresh-grown short-epoch chain — header-
+  # extractor then sees "tip is at genesis" forever. Match Byron's k
+  # to shelley securityParam (8) so the immutable boundary tracks
+  # the active short-epoch params.
+  jq \
+    --argjson start "$start_epoch" \
+    '.startTime = $start | .protocolConsts.k = 8' \
+    "$tmp/config/byron-genesis.json" \
+    >"$tmp/config/byron-genesis.json.tmp"
+  mv "$tmp/config/byron-genesis.json.tmp" \
+    "$tmp/config/byron-genesis.json"
+
+  jq \
+    --arg start "$start_iso" \
+    '
+      .systemStart = $start
+      | .epochLength = 120
+      | .securityParam = 8
+      | .activeSlotsCoeff = 1.0
+    ' "$tmp/config/shelley-genesis.json" \
+    >"$tmp/config/shelley-genesis.json.tmp"
+  mv "$tmp/config/shelley-genesis.json.tmp" \
+    "$tmp/config/shelley-genesis.json"
+}
+
 # synthesize_live_chain_db <tmp-dir> [slots]
 #
 # Seed the node state directory with an era-ready testnet_42 ChainDB
@@ -140,6 +195,167 @@ synthesize_live_chain_db() {
   # immutable DB so the live verifier exercises the same hand-off a
   # running node would own.
   rm -rf "$tmp/state/db/ledger"
+}
+
+# wait_for_node_n2n_port <container> <retries>
+#
+# Poll `docker port "$container" 3001/tcp` until docker reports a
+# published host port for the cardano-node N2N socket. On success,
+# print the host port (e.g. "32789") on stdout and return 0. On
+# failure (container not publishing within <retries> seconds), return
+# 1 and emit a diagnostic line on stderr. Mirrors the polling shape
+# of wait_for_node_socket.
+#
+# This is the bridge that lets a host-side amaru dial the live node
+# container (005-amaru-run-live-test, R-1).
+wait_for_node_n2n_port() {
+  local name="$1"
+  local retries="${2:-60}"
+  local mapping host_port
+  local i=0
+
+  while [[ $i -lt $retries ]]; do
+    mapping="$(docker port "$name" 3001/tcp 2>/dev/null || true)"
+    if [[ -n "$mapping" ]]; then
+      # docker port output: "0.0.0.0:32789" or "127.0.0.1:32789"; one
+      # mapping per line for IPv4 + IPv6. Take the first IPv4 entry.
+      host_port="$(printf '%s\n' "$mapping" \
+        | awk -F: '/^([0-9]+\.){3}[0-9]+:/ {print $NF; exit}')"
+      if [[ -n "$host_port" ]]; then
+        printf '%s\n' "$host_port"
+        return 0
+      fi
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+
+  printf 'wait_for_node_n2n_port: %s did not publish 3001/tcp within %ss\n' \
+    "$name" "$retries" >&2
+  return 1
+}
+
+# parse_hold_window_seconds
+#
+# Read BOOTSTRAP_LIVE_AMARU_HOLD_SECONDS, default 60. Validate it is
+# a positive integer and print it on stdout. On malformed input emit
+# an error to stderr and return 1.
+parse_hold_window_seconds() {
+  local raw="${BOOTSTRAP_LIVE_AMARU_HOLD_SECONDS:-60}"
+  if [[ ! "$raw" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'parse_hold_window_seconds: invalid BOOTSTRAP_LIVE_AMARU_HOLD_SECONDS=%q (want positive integer)\n' \
+      "$raw" >&2
+    return 1
+  fi
+  printf '%s\n' "$raw"
+}
+
+# start_amaru_run <bundle-dir> <peer-host-port> <log-path>
+#
+# Background the flake-pinned `amaru run` against the bootstrap bundle
+# at <bundle-dir>, peering with 127.0.0.1:<peer-host-port>. Combined
+# stdout+stderr go to <log-path>. Print the child PID on stdout. CLI
+# shape mirrors nix/checks.nix's amaru-run-bootstrap (line 435), with
+# the dummy peer replaced by the real published port.
+start_amaru_run() {
+  local bundle="$1"
+  local peer_port="$2"
+  local log="$3"
+
+  amaru --with-json-traces run \
+    --network testnet_42 \
+    --ledger-dir "$bundle/ledger.testnet_42.db" \
+    --chain-dir "$bundle/chain.testnet_42.db" \
+    --listen-address 127.0.0.1:0 \
+    --peer-address "127.0.0.1:$peer_port" \
+    >"$log" 2>&1 &
+  printf '%s\n' "$!"
+}
+
+# assert_amaru_alive <pid>
+#
+# Return 0 if the process is alive, 1 otherwise. Thin wrapper around
+# `kill -0` so callers can attach richer messaging without
+# duplicating the probe.
+assert_amaru_alive() {
+  local pid="$1"
+  kill -0 "$pid" 2>/dev/null
+}
+
+# scan_amaru_log_for_fatal <log-path>
+#
+# Grep -F the four fatal substrings from the failure-classes contract
+# in declaration order. On the first match: print the class label on
+# stdout, emit the labelled context block on stderr, return 0. No
+# match: return 1.
+#
+# Class table (must stay in lockstep with
+# specs/005-amaru-run-live-test/contracts/failure-classes.md):
+#   "Invalid VRF proof"      -> vrf
+#   "Consensus died"         -> consensus
+#   "HeaderValidationError"  -> header
+#   "ledger inconsistency"   -> rollback
+scan_amaru_log_for_fatal() {
+  local log="$1"
+  [[ -f "$log" ]] || return 1
+
+  local -a classes=(vrf consensus header rollback)
+  local -a needles=(
+    'Invalid VRF proof'
+    'Consensus died'
+    'HeaderValidationError'
+    'ledger inconsistency'
+  )
+
+  local i
+  for i in "${!classes[@]}"; do
+    if grep -F -q -- "${needles[$i]}" "$log"; then
+      printf '%s\n' "${classes[$i]}"
+      {
+        printf -- '--- amaru consume failure: %s ---\n' "${classes[$i]}"
+        grep -F -n -B2 -A2 -- "${needles[$i]}" "$log" | head -n 50
+        printf -- '--- end amaru consume failure ---\n'
+      } >&2
+      return 0
+    fi
+  done
+  return 1
+}
+
+# report_amaru_exited_early <log-path> <elapsed> <hold>
+#
+# Emit the "exited-early" diagnostic block on stderr per
+# contracts/failure-classes.md. Used when amaru's process is gone
+# before the hold window elapses AND no fatal substring matched.
+report_amaru_exited_early() {
+  local log="$1"
+  local elapsed="$2"
+  local hold="$3"
+  {
+    printf -- '--- amaru consume failure: exited-early ---\n'
+    printf 'amaru process exited before hold window (%ss of %ss)\n' \
+      "$elapsed" "$hold"
+    printf -- '--- amaru tail (last 50 lines) ---\n'
+    if [[ -f "$log" ]]; then
+      tail -n 50 "$log"
+    else
+      printf '(no log file at %s)\n' "$log"
+    fi
+    printf -- '--- end amaru consume failure ---\n'
+  } >&2
+}
+
+# stop_amaru_run <pid>
+#
+# SIGTERM the amaru process and wait for it to exit. Tolerates an
+# empty pid (defaulted from a never-set AMARU_PID) and a process that
+# has already exited. Used by both the happy-path consume block and
+# the test-level teardown reaper.
+stop_amaru_run() {
+  local pid="${1:-}"
+  [[ -n "$pid" ]] || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
 }
 
 # docker_rm_worktree <tmp-dir> <image>
