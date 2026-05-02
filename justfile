@@ -63,6 +63,7 @@ live-bootstrap-producer:
     BOOTSTRAP_PRODUCER_IMAGE=amaru-bootstrap-producer:dev \
         nix --quiet shell \
             .#checks.x86_64-linux.db-synthesizer \
+            .#packages.x86_64-linux.amaru \
             nixpkgs#bash \
             nixpkgs#bats \
             nixpkgs#coreutils \
