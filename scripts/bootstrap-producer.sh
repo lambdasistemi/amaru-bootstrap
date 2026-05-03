@@ -59,6 +59,7 @@ AMARU_POLL_INTERVAL_SECONDS="${AMARU_POLL_INTERVAL_SECONDS:-10}"
 TARGET_SLOT=0
 EPOCH_LENGTH=0
 UNIQUE_TMP=""
+PREV_EPOCH_TAIL_HASH=""
 ACTUAL_SLOT=0
 LEGACY_SNAPSHOT_FILES=()
 
@@ -486,13 +487,49 @@ phase_extract() {
             exit 7
         fi
     done <"${headers_csv}"
+
+    # Additionally: resolve the previous-epoch tail boundary block
+    # (the actual last header of the previous epoch — NOT the
+    # `lab` value in the snapshot, which is its parent_hash) and
+    # ensure both the header CBOR is in the bundle and the JSON
+    # tail field is set to the right hash. Used by amaru's
+    # evolve_nonce at the first post-bootstrap epoch boundary
+    # (load_header(parent_nonces.tail).parent() = lab in
+    # cardano-ledger's combineNonce ηc lab formula).
+    local prev_tail_out="${UNIQUE_TMP}/snapshots/prev-epoch-tail.json"
+    rc=0
+    log_phase "prev-epoch-tail" bash -c \
+        "header-extractor prev-epoch-tail --tip-slot \"\$1\" --epoch-length \"\$2\" --out \"\$3\" --db \"\$4\" --config \"\$5\"" \
+        _ "${ACTUAL_SLOT}" "${EPOCH_LENGTH}" \
+        "${UNIQUE_TMP}/headers/header.prev-epoch-tail.cbor" \
+        "${CHAIN_DB}" "${cfg}" \
+        >"${prev_tail_out}" \
+        || rc=$?
+    if (( rc != 0 )); then
+        printf 'header-extractor prev-epoch-tail failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/prev-epoch-tail.stderr" >&2
+        exit 7
+    fi
+    PREV_EPOCH_TAIL_HASH=$(jq -r '.hash' "${prev_tail_out}")
+    printf '+ prev-epoch tail = slot=%s hash=%s\n' \
+           "$(jq -r '.slot' "${prev_tail_out}")" \
+           "${PREV_EPOCH_TAIL_HASH}"
 }
 
-# Step 5: compose nonces.json from snapshot's nonces + tail rewrite. rc=8.
-# amaru convert-ledger-state writes nonces.<slot>.<hash>.json with a
-# zero-byte `tail`. We rewrite that field to the parent hash from the
-# previous-epoch header batch (the LAST hash with slot <= prev_boundary)
-# so amaru's epoch-transition nonce computation has a real anchor.
+# Step 5: compose nonces.json from snapshot's nonces. rc=8.
+# `amaru convert-ledger-state` writes nonces.<slot>.<hash>.json
+# carrying the snapshot's PraosState fields (active, evolving,
+# candidate, tail). The `tail` field is the
+# `praosStateLastEpochBlockNonce` decoded directly from the
+# snapshot — i.e. the hash of the last header of the previous
+# epoch — which is exactly what amaru's epoch-transition nonce
+# combiner needs.
+#
+# Earlier versions of convert-ledger-state stamped tail=0 and this
+# phase rewrote it from a headers.csv heuristic; both paths are
+# unsound (the heuristic picked an arbitrary header, not the last
+# of the previous epoch) and have been removed in favour of
+# trusting the snapshot's encoded value.
 phase_nonces() {
     local nonces_src
     local nonces_name
@@ -508,32 +545,18 @@ phase_nonces() {
         exit 8
     fi
     nonces_src="${UNIQUE_TMP}/snapshots/${nonces_name}"
-    cp "${nonces_src}" "${UNIQUE_TMP}/nonces.json"
-    local prev_hash=""
-    local headers_csv="${UNIQUE_TMP}/headers.csv"
-    if [[ -s "${headers_csv}" ]]; then
-        prev_hash=$(awk -F, 'NR==3 {gsub(/"/,"",$2); print $2}' \
-                    "${headers_csv}" 2>/dev/null || true)
-        if [[ -z "${prev_hash}" ]]; then
-            prev_hash=$(awk -F, 'END {gsub(/"/,"",$2); print $2}' \
-                        "${headers_csv}" 2>/dev/null || true)
-        fi
-    fi
-    if [[ -z "${prev_hash}" ]]; then
-        printf 'no previous-epoch hash to anchor nonces.tail\n' >&2
+    if [[ -z "${PREV_EPOCH_TAIL_HASH:-}" ]]; then
+        printf 'phase_nonces: PREV_EPOCH_TAIL_HASH unset — phase_extract should have resolved it\n' >&2
         exit 8
     fi
-    printf '+ rewriting nonces.tail = %s\n' "${prev_hash}"
-    local tmp_json="${UNIQUE_TMP}/nonces.json.tmp"
-    if ! jq --arg t "${prev_hash}" '.tail = $t' \
-        "${UNIQUE_TMP}/nonces.json" \
-        >"${tmp_json}" 2>"${BUNDLE_DIR}/.logs/nonces.stderr"
+    if ! jq --arg t "${PREV_EPOCH_TAIL_HASH}" '.tail = $t' \
+        "${nonces_src}" >"${UNIQUE_TMP}/nonces.json" \
+        2>"${BUNDLE_DIR}/.logs/nonces.stderr"
     then
-        printf 'nonces tail rewrite failed; see %s\n' \
+        printf 'phase_nonces: failed to set tail; see %s\n' \
                "${BUNDLE_DIR}/.logs/nonces.stderr" >&2
         exit 8
     fi
-    mv "${tmp_json}" "${UNIQUE_TMP}/nonces.json"
 }
 
 # Step 5b (#36): derive era-history.json + global-parameters.json from
