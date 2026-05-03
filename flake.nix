@@ -49,7 +49,7 @@
     # flake.lock per constitution Principle III. This fork carries the
     # runtime-parameter flags needed for generated Antithesis testnets.
     amaru = {
-      url = "github:lambdasistemi/amaru/006-guard-ln-leader-stake";
+      url = "github:lambdasistemi/amaru/feat/runtime-testnet-parameters";
       flake = false;
     };
   };
