@@ -381,6 +381,7 @@ phase_convert() {
             --network "${NETWORK}" \
             --snapshot "${snapshot}" \
             --target-dir "${UNIQUE_TMP}/snapshots" \
+            --era-history-file "${UNIQUE_TMP}/era-history.json" \
             || rc=$?
         if (( rc != 0 )); then
             printf 'amaru convert-ledger-state failed at slot %s (rc=%d); see %s\n' \
@@ -695,6 +696,7 @@ phase_import() {
     log_phase import-nonces amaru import-nonces \
         --network "${NETWORK}" \
         --nonces-file "${UNIQUE_TMP}/nonces.json" \
+        --era-history-file "${UNIQUE_TMP}/era-history.json" \
         --chain-dir "${chain_dir}" \
         || rc=$?
     if (( rc != 0 )); then
@@ -734,11 +736,17 @@ phase_commit() {
 main() {
     phase_preflight
     phase_stage_init
+    # phase_runtime_params runs before phase_convert so that the
+    # bundle's era-history.json is on disk and can be passed via
+    # --era-history-file to convert-ledger-state — otherwise convert
+    # falls back to the network-default era history (epochLength
+    # 86400 for any testnet) and emits per-snapshot history sidecars
+    # that import-ledger-state then uses to mis-tag epochs.
+    phase_runtime_params
     phase_emit
     phase_convert
     phase_extract
     phase_nonces
-    phase_runtime_params
     phase_import
     phase_commit
 }

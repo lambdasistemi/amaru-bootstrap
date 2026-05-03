@@ -36,16 +36,16 @@
     "amaru": {
       "flake": false,
       "locked": {
-        "lastModified": 1777792876,
-        "narHash": "sha256-MDw2qX8YCZ5pqeTpLx/E4jsgyxqVUu8Infpw1kEUM/c=",
+        "lastModified": 1777803934,
+        "narHash": "sha256-z7itL4k0vB6i7M+GWlVkIDQBKncqNk3u4UGaH0vVcmQ=",
         "owner": "lambdasistemi",
         "repo": "amaru",
-        "rev": "783c7a9812b65a4859221b0b285a48dc95b4a656",
+        "rev": "bfe5b7ea4a76b049df7fbc8498561baa81155f61",
         "type": "github"
       },
       "original": {
         "owner": "lambdasistemi",
-        "ref": "feat/runtime-testnet-parameters",
+        "ref": "037-import-nonces-era-history",
         "repo": "amaru",
         "type": "github"
       }
