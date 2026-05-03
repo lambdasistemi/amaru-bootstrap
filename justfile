@@ -61,6 +61,10 @@ live-bootstrap-producer:
     : "${CARDANO_NODE_IMAGE:=ghcr.io/intersectmbo/cardano-node:10.7.1-amd64}"
     export CARDANO_NODE_IMAGE
     BOOTSTRAP_PRODUCER_IMAGE=amaru-bootstrap-producer:dev \
+    BOOTSTRAP_LIVE_TMPDIR="${BOOTSTRAP_LIVE_TMPDIR:-}" \
+    BOOTSTRAP_LIVE_KEEP_TMPDIR="${BOOTSTRAP_LIVE_KEEP_TMPDIR:-}" \
+    BOOTSTRAP_LIVE_AMARU_HOLD_SECONDS="${BOOTSTRAP_LIVE_AMARU_HOLD_SECONDS:-}" \
+    BOOTSTRAP_LIVE_NODE_GROW_SECONDS="${BOOTSTRAP_LIVE_NODE_GROW_SECONDS:-}" \
         nix --quiet shell \
             .#checks.x86_64-linux.db-synthesizer \
             .#packages.x86_64-linux.amaru \
