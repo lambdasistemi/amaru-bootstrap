@@ -36,16 +36,16 @@
     "amaru": {
       "flake": false,
       "locked": {
-        "lastModified": 1777755314,
+        "lastModified": 1777792876,
         "narHash": "sha256-MDw2qX8YCZ5pqeTpLx/E4jsgyxqVUu8Infpw1kEUM/c=",
         "owner": "lambdasistemi",
         "repo": "amaru",
-        "rev": "e32ba17fc0a7c6b6928168a66cf3ec0171ea0090",
+        "rev": "783c7a9812b65a4859221b0b285a48dc95b4a656",
         "type": "github"
       },
       "original": {
         "owner": "lambdasistemi",
-        "ref": "006-guard-ln-leader-stake",
+        "ref": "feat/runtime-testnet-parameters",
         "repo": "amaru",
         "type": "github"
       }
