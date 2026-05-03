@@ -38,15 +38,19 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as T
 import HeaderExtractor
     ( NodeConfig (NodeConfig)
+    , PrevEpochTail (PrevEpochTail, tailCbor, tailHash, tailSlot)
     , TipInfo
     , getHeader
+    , getHeaderByHash
     , listBlocks
+    , prevEpochTailHeader
     , tipInfo
     )
 import Options.Applicative
     ( Parser
     , ParserInfo
     , argument
+    , auto
     , command
     , execParser
     , fullDesc
@@ -55,6 +59,7 @@ import Options.Applicative
     , info
     , long
     , metavar
+    , option
     , progDesc
     , str
     , strOption
@@ -75,6 +80,8 @@ data Cmd
     = CmdTipInfo Common
     | CmdListBlocks Common
     | CmdGetHeader String Common
+    | CmdGetHeaderByHash String Common
+    | CmdPrevEpochTail Integer Integer FilePath Common
 
 main :: IO ()
 main = handle topLevelHandler $ do
@@ -83,6 +90,8 @@ main = handle topLevelHandler $ do
         CmdTipInfo c -> runTipInfo c
         CmdListBlocks c -> runListBlocks c
         CmdGetHeader slotDotHash c -> runGetHeader slotDotHash c
+        CmdGetHeaderByHash hHex c -> runGetHeaderByHash hHex c
+        CmdPrevEpochTail tipS el out c -> runPrevEpochTail tipS el out c
 
 -- ─── Handlers ────────────────────────────────────────────────────
 
@@ -121,6 +130,29 @@ runGetHeader slotDotHash Common{db, config} = do
                 )
     bytes <- getHeader db (NodeConfig config) s h
     BS.hPut stdout bytes
+
+runGetHeaderByHash :: String -> Common -> IO ()
+runGetHeaderByHash hHex Common{db, config} = do
+    bytes <- getHeaderByHash db (NodeConfig config) (T.pack hHex)
+    BS.hPut stdout bytes
+
+runPrevEpochTail :: Integer -> Integer -> FilePath -> Common -> IO ()
+runPrevEpochTail tipS el out Common{db, config} = do
+    res <- prevEpochTailHeader db (NodeConfig config) tipS el
+    case res of
+        Nothing -> exitWith (ExitFailure 7)
+        Just PrevEpochTail{tailSlot, tailHash, tailCbor} -> do
+            BS.writeFile out tailCbor
+            LBS.hPut stdout
+                ( Aeson.encode
+                    ( Aeson.object
+                        [ "slot" Aeson..= tailSlot
+                        , "hash" Aeson..= tailHash
+                        , "out" Aeson..= out
+                        ]
+                    )
+                )
+            LBS.hPut stdout "\n"
 
 -- ─── Error mapping ───────────────────────────────────────────────
 
@@ -170,6 +202,46 @@ cmdParser =
                         <**> helper
                     )
                     (progDesc "Print one header's raw CBOR bytes")
+                )
+            <> command
+                "get-header-by-hash"
+                ( info
+                    ( CmdGetHeaderByHash
+                        <$> argument str (metavar "HASH")
+                        <*> commonParser
+                        <**> helper
+                    )
+                    ( progDesc
+                        "Print one header's raw CBOR bytes, addressed by hash alone (slot resolved internally)"
+                    )
+                )
+            <> command
+                "prev-epoch-tail"
+                ( info
+                    ( CmdPrevEpochTail
+                        <$> option
+                            auto
+                            ( long "tip-slot"
+                                <> metavar "SLOT"
+                                <> help "Snapshot tip slot"
+                            )
+                        <*> option
+                            auto
+                            ( long "epoch-length"
+                                <> metavar "SLOTS"
+                                <> help "Epoch length in slots"
+                            )
+                        <*> strOption
+                            ( long "out"
+                                <> metavar "FILE"
+                                <> help "Where to write the boundary header CBOR"
+                            )
+                        <*> commonParser
+                        <**> helper
+                    )
+                    ( progDesc
+                        "Resolve and emit the previous-epoch tail boundary header for a snapshot"
+                    )
                 )
         )
 

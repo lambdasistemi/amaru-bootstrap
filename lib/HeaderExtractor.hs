@@ -35,11 +35,14 @@ module HeaderExtractor
     ( -- * Types
       TipInfo (..)
     , NodeConfig (..)
+    , PrevEpochTail (..)
 
       -- * Library API
     , tipInfo
     , listBlocks
     , getHeader
+    , getHeaderByHash
+    , prevEpochTailHeader
     ) where
 
 import Cardano.Tools.DBAnalyser.Block.Cardano
@@ -175,6 +178,83 @@ getHeader dbDir nc s hHex = do
                 immDB
                 GetRawHeader
                 (RealPoint (fromIntegral s) (OneEraHash sbs))
+
+{- | Fetch a single header's CBOR bytes addressed by hash alone, by
+scanning the immutable chain DB to resolve the slot. Used by
+bootstrap-producer to materialise headers referenced by hash from a
+ledger snapshot's nonce fields (e.g. @praosStateLabNonce@) without
+the caller needing to know the slot upfront.
+
+Errors out with a descriptive message when no immutable block
+matches @hHex@.
+-}
+getHeaderByHash :: FilePath -> NodeConfig -> Text -> IO ByteString
+getHeaderByHash dbDir nc hHex = do
+    pairs <- listBlocks dbDir nc
+    case lookup hHex [(h, s) | (s, h) <- pairs] of
+        Just s -> getHeader dbDir nc s hHex
+        Nothing ->
+            error $
+                "HeaderExtractor.getHeaderByHash: no immutable block with hash "
+                    <> show hHex
+
+{- | The boundary header that the orchestrator must ship in the
+bundle so amaru's evolve_nonce can resolve @parent_nonces.tail@ at
+the first post-bootstrap epoch transition.
+
+@slot@ and @hash@ identify the block; @cbor@ is the on-disk header
+CBOR (suitable for writing to a @header.<slot>.<hash>.cbor@ file
+that @amaru import-headers@ can read).
+-}
+data PrevEpochTail = PrevEpochTail
+    { tailSlot :: Integer
+    , tailHash :: Text
+    , tailCbor :: ByteString
+    }
+
+{- | Resolve the "previous-epoch tail" boundary block given a tip
+slot and the chain's epoch length. Returns the highest-slot block
+whose slot is strictly less than the current epoch's first slot
+(@tip - tip mod epochLength@) — i.e. the actual last header of the
+previous epoch, NOT the @lab@ value (which is its parent_hash).
+
+Returns @Nothing@ when the tip is itself in epoch 0 (no previous
+epoch boundary exists).
+
+Used by bootstrap-producer's @phase_extract@ to set the bundle's
+@nonces.tail@ to a value that amaru's @load_header@ can resolve at
+the next epoch boundary, and to ensure the corresponding header is
+in the bundle's @headers/@ directory.
+-}
+prevEpochTailHeader
+    :: FilePath
+    -> NodeConfig
+    -> Integer
+    -- ^ tip slot
+    -> Integer
+    -- ^ epoch length in slots
+    -> IO (Maybe PrevEpochTail)
+prevEpochTailHeader dbDir nc tipSlot epochLength
+    | epochLength <= 0 = pure Nothing
+    | otherwise = do
+        let currentEpochStart = tipSlot - (tipSlot `mod` epochLength)
+            maxSlot = currentEpochStart - 1
+        if maxSlot < 0
+            then pure Nothing
+            else do
+                pairs <- listBlocks dbDir nc
+                case reverse (filter (\(s, _) -> s <= maxSlot) pairs) of
+                    [] -> pure Nothing
+                    (s, h) : _ -> do
+                        bytes <- getHeader dbDir nc s h
+                        pure
+                            ( Just
+                                PrevEpochTail
+                                    { tailSlot = s
+                                    , tailHash = h
+                                    , tailCbor = bytes
+                                    }
+                            )
 
 -- ─── Internals ───────────────────────────────────────────────────
 
