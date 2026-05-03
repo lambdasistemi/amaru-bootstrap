@@ -60,6 +60,20 @@ case "\$cmd" in
   get-header)
     printf 'header'
     ;;
+  prev-epoch-tail)
+    out=""
+    while [[ \$# -gt 0 ]]; do
+      case "\$1" in
+        --out) out="\$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [[ -n "\$out" ]] || exit 1
+    mkdir -p "\$(dirname "\$out")"
+    printf 'header' >"\$out"
+    h120="\$(printf '%064x' 120)"
+    printf '{"slot":120,"hash":"%s","out":"%s"}\n' "\$h120" "\$out"
+    ;;
   *)
     printf 'unexpected header-extractor command: %s\n' "\$cmd" >&2
     exit 1
