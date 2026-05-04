@@ -92,10 +92,17 @@ log "config: network=$AMARU_NETWORK peer=$AMARU_PEER amaru_log=$AMARU_LOG"
 log "paths: final=$final live=$live config=$config runtime=$runtime"
 
 bundle_complete() {
-  test -f "$sentinel" \
-    && test -d "$final/ledger.$AMARU_NETWORK.db/live" \
-    && test -d "$final/chain.$AMARU_NETWORK.db" \
-    && test -f "$final/nonces.json"
+  test -f "$sentinel" || return 1
+  test -d "$final/chain.$AMARU_NETWORK.db" || return 1
+  test -f "$final/nonces.json" || return 1
+  # The ledger DB needs a `live/` rocksdb plus at least one GO
+  # snapshot tier (`0/CURRENT`); otherwise `amaru run` exits with
+  # "Failed to create ledger ... 0/CURRENT does not exist". The
+  # producer emits one snapshot tier per past Conway epoch
+  # available on the immutable chain, so a thin chain produces a
+  # bundle that passes a live/-only check but fails amaru's open.
+  test -d "$final/ledger.$AMARU_NETWORK.db/live" || return 1
+  test -f "$final/ledger.$AMARU_NETWORK.db/0/CURRENT" || return 1
 }
 
 refresh_snapshot() {
