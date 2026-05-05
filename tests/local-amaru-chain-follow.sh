@@ -13,8 +13,37 @@ trap "docker rm -f $RELAY $NODE >/dev/null 2>&1 || true; docker network rm $NET 
 
 docker network create $NET >/dev/null 2>&1 || true
 make_short_epoch_node_inputs $TMP_DIR
-mkdir -p "$TMP_DIR/srv-amaru" "$TMP_DIR/startup"
-cp -r /code/cardano-node-antithesis-amaru-marker-fix/testnets/cardano_amaru_epoch240/amaru-runtime "$TMP_DIR/amaru-runtime"
+mkdir -p "$TMP_DIR/srv-amaru" "$TMP_DIR/startup" "$TMP_DIR/amaru-runtime"
+# amaru-runtime MUST match the local cluster's genesis params, otherwise
+# amaru computes wrong epoch boundaries and fails consensus checks. The
+# vendored cardano_amaru_epoch240 config targets epochLength=240 / coeff=0.2;
+# our local cluster runs epochLength=120 / coeff=1.0 (make_short_epoch_node_inputs).
+cat >"$TMP_DIR/amaru-runtime/era-history.json" <<'EOF'
+{
+  "stability_window": 24,
+  "eras": [
+    {
+      "start": {"time": 0, "slot": 0, "epoch": 0},
+      "end": null,
+      "params": {"epoch_size_slots": 120, "slot_length": 1000, "era_name": "Conway"}
+    }
+  ]
+}
+EOF
+cat >"$TMP_DIR/amaru-runtime/global-parameters.json" <<'EOF'
+{
+  "consensus_security_param": 8,
+  "epoch_length_scale_factor": 10,
+  "active_slot_coeff_inverse": 1,
+  "max_lovelace_supply": 45000000000000000,
+  "slots_per_kes_period": 129600,
+  "max_kes_evolution": 62,
+  "epoch_length": 120,
+  "stability_window": 24,
+  "randomness_stabilization_window": 32,
+  "system_start": 0
+}
+EOF
 
 docker run -d --name "$NODE" --network "$NET" \
   -e CARDANO_BLOCK_PRODUCER=true \
@@ -45,8 +74,9 @@ for _ in {1..60}; do
   sleep 5
 done
 
-echo "+ amaru running; capturing 60s of tracing"
-sleep 60
+CAPTURE_SECONDS="${CAPTURE_SECONDS:-300}"
+echo "+ amaru running; capturing ${CAPTURE_SECONDS}s of tracing"
+sleep "$CAPTURE_SECONDS"
 
 echo
 echo "=== last 50 lines of amaru tracing ==="
@@ -60,3 +90,18 @@ for needle in "roll_forward" "roll_backward" "header_validation" "ChainSync" \
   c=$(docker logs "$RELAY" 2>&1 | grep -c "$needle" || true)
   printf "  %-25s %s\n" "$needle" "$c"
 done
+
+echo
+echo "=== epoch-rotation verification ==="
+err_count=$(docker logs "$RELAY" 2>&1 | grep -cE "no stake distribution available|HeaderValidationError|Invalid VRF proof|panicked" || true)
+last_slot=$(docker logs "$RELAY" 2>&1 | grep -oE 'slot=[0-9]+' | awk -F= '{print $2}' | sort -n | tail -1)
+echo "  fatal errors: $err_count"
+echo "  last slot:    ${last_slot:-<none>}"
+if [[ "$err_count" -eq 0 && -n "${last_slot:-}" && "$last_slot" -gt 720 ]]; then
+  echo "  RESULT: PASS — chain advanced past slot 720 (epoch 6 boundary) with no errors"
+elif [[ "$err_count" -gt 0 ]]; then
+  echo "  RESULT: FAIL — fatal errors emitted"
+  docker logs "$RELAY" 2>&1 | grep -E "no stake distribution available|HeaderValidationError|Invalid VRF proof|panicked" | head -5
+else
+  echo "  RESULT: INDETERMINATE — capture too short or amaru never connected"
+fi
