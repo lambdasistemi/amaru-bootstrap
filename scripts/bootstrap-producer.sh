@@ -102,6 +102,38 @@ tail_phase_log() {
     printf -- '--- end %s ---\n' "${f}" >&2
 }
 
+## ensure_era_history_input <out-path>
+##
+## Build a single-era Conway era_history JSON anchored at the
+## genesis (epoch 0, slot 0, time 0) using the genesis epochLength.
+## This is what amaru `convert-ledger-state --era-history-file` needs
+## to compute correct epoch boundaries — without it the converter
+## defaults to the network's mainnet/preprod era-history (epoch_size
+## 86400) and treats every short-epoch slot as still-in-epoch-0,
+## producing wrong active/candidate nonces in the snapshot's
+## nonces.<slot>.<hash>.json. amaru run then verifies header VRFs
+## against those wrong nonces and fails. See
+## https://github.com/lambdasistemi/amaru-bootstrap/issues/37.
+ensure_era_history_input() {
+    local out="$1"
+    cat >"${out}" <<JSON
+{
+  "stability_window": $(( 3 * EPOCH_LENGTH )),
+  "eras": [
+    {
+      "start": {"time": 0, "slot": 0, "epoch": 0},
+      "end": null,
+      "params": {
+        "epoch_size_slots": ${EPOCH_LENGTH},
+        "slot_length": 1000,
+        "era_name": "Conway"
+      }
+    }
+  ]
+}
+JSON
+}
+
 patch_converted_era_history() {
     local history tmp count=0
 
@@ -373,6 +405,8 @@ phase_emit() {
 # producer corrects that sidecar from the node genesis before import.
 phase_convert() {
     local snapshot slot rc
+    local era_history_input="${UNIQUE_TMP}/era-history.input.json"
+    ensure_era_history_input "${era_history_input}"
     for snapshot in "${LEGACY_SNAPSHOT_FILES[@]}"; do
         slot=$(basename "${snapshot}" .cbor)
         printf '+ amaru convert-ledger-state @ %s\n' "${slot}"
@@ -381,6 +415,7 @@ phase_convert() {
             --network "${NETWORK}" \
             --snapshot "${snapshot}" \
             --target-dir "${UNIQUE_TMP}/snapshots" \
+            --era-history-file "${era_history_input}" \
             || rc=$?
         if (( rc != 0 )); then
             printf 'amaru convert-ledger-state failed at slot %s (rc=%d); see %s\n' \
@@ -443,7 +478,20 @@ phase_extract() {
                "${rc}" "${BUNDLE_DIR}/.logs/extract-list.stderr" >&2
         exit 7
     fi
-    local prev_boundary=$(( ACTUAL_SLOT - EPOCH_LENGTH ))
+    # The "previous epoch boundary" we want is the LAST SLOT of the
+    # epoch BEFORE the snapshot's epoch — not "one epoch back from the
+    # snapshot slot". For ACTUAL_SLOT in epoch K, that is
+    #   prev_boundary = K * EPOCH_LENGTH - 1
+    # which is the last slot of epoch K-1. The previous code used
+    # `ACTUAL_SLOT - EPOCH_LENGTH`, which is just the slot at the same
+    # in-epoch offset one epoch earlier (e.g. slot 179 for ACTUAL_SLOT
+    # 299). The block selected from there is mid-prev-epoch, so the
+    # `tail` rewritten below pointed at the wrong header. amaru then
+    # mixed the wrong tail at each downstream epoch boundary,
+    # producing a different active nonce than cardano-node, which made
+    # VRF verification fail at every epoch boundary past the anchor.
+    local current_epoch=$(( ACTUAL_SLOT / EPOCH_LENGTH ))
+    local prev_boundary=$(( current_epoch * EPOCH_LENGTH - 1 ))
     if (( prev_boundary < 0 )); then
         prev_boundary=0
     fi
@@ -508,15 +556,28 @@ phase_nonces() {
     fi
     nonces_src="${UNIQUE_TMP}/snapshots/${nonces_name}"
     cp "${nonces_src}" "${UNIQUE_TMP}/nonces.json"
+    # nonces.tail must be the hash of the LAST block of the previous
+    # epoch (= the slot the cardano-node Praos rule would have stored
+    # as `praosStateLabNonce` AT that boundary, which becomes
+    # `praosStateLastEpochBlockNonce` for the active-nonce mix when
+    # the next boundary fires). amaru `evolve_nonce` later does:
+    #
+    #   load_header(parent.tail).parent()
+    #
+    # to recover that lab value, so the imported tail must point to
+    # the LAST header of the previous epoch — `load_header(hash_N).parent()`
+    # then yields `hash_{N-1}`, exactly the lab value cardano stored.
+    #
+    # phase_extract emits headers.csv with current-epoch headers first
+    # (last two of the snapshot's epoch) and prev-epoch headers second
+    # (last two of the previous epoch). The LAST line of the file is
+    # therefore the last block of the previous epoch — which is what
+    # we want.
     local prev_hash=""
     local headers_csv="${UNIQUE_TMP}/headers.csv"
     if [[ -s "${headers_csv}" ]]; then
-        prev_hash=$(awk -F, 'NR==3 {gsub(/"/,"",$2); print $2}' \
+        prev_hash=$(awk -F, 'END {gsub(/"/,"",$2); print $2}' \
                     "${headers_csv}" 2>/dev/null || true)
-        if [[ -z "${prev_hash}" ]]; then
-            prev_hash=$(awk -F, 'END {gsub(/"/,"",$2); print $2}' \
-                        "${headers_csv}" 2>/dev/null || true)
-        fi
     fi
     if [[ -z "${prev_hash}" ]]; then
         printf 'no previous-epoch hash to anchor nonces.tail\n' >&2
@@ -580,9 +641,20 @@ phase_import() {
 
     printf '+ amaru import-nonces\n'
     rc=0
+    # --era-history-file is mandatory for short-epoch testnets:
+    # without it, import-nonces falls back to the network default
+    # (preprod's 86400 slots/epoch) and stores the wrong `epoch` for
+    # the imported snapshot point. amaru run then sees a fake
+    # epoch-boundary crossing on the FIRST roll-forward (parent.epoch=0
+    # vs current_epoch=N from the correct era-history at run time)
+    # and recomputes a new active nonce that no longer matches what
+    # cardano-node actually used to sign the block, producing
+    # `Invalid VRF proof: VerificationFailed`. See
+    # https://github.com/lambdasistemi/amaru-bootstrap/issues/34.
     log_phase import-nonces amaru import-nonces \
         --network "${NETWORK}" \
         --nonces-file "${UNIQUE_TMP}/nonces.json" \
+        --era-history-file "${UNIQUE_TMP}/era-history.input.json" \
         --chain-dir "${chain_dir}" \
         || rc=$?
     if (( rc != 0 )); then
