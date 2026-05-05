@@ -239,12 +239,40 @@ phase_preflight() {
     # Predicate (R-010):
     #   tip.era >= Conway
     # AND
-    #   tip.slot - 2 * epochLength >= conway_first_slot
+    #   chain has crossed the boundary into epoch >= 3
+    # AND
+    #   the chain has at least one immutable block in completed epoch
+    #   (tip_epoch - 1).
+    #
+    # Rationale: amaru's bootstrap invariant
+    # (initial_stake_distributions in crates/amaru-ledger/src/state.rs,
+    #  comment "the most recent snapshot we have is necessarily `e`,
+    #  since `e + 1` designates the ongoing epoch") requires the
+    #  bundle's latest snapshot tier to represent the just-completed
+    #  epoch K-1. The chain follower's first applied slot must then
+    #  fall in epoch K so that compute_rewards in epoch K uses
+    #  for_epoch(K-1) (which exists) and the K-1->K transition creates
+    #  tier K-1 *fresh* (no-op, same data) before compute_rewards in
+    #  epoch K+1 needs for_epoch(K).
+    #
+    # That requires anchoring at the LAST IMMUTABLE BLOCK in K-1 — any
+    # earlier slot in K-1 leaves blocks of K-1 in the chain follower's
+    # path, and compute_rewards (which fires when relative_slot >=
+    # stability_window, often early on short-epoch testnets) advances
+    # the deque before the K-1->K boundary, breaking the rotation.
+    #
+    # ledger-state-emitter takes the FIRST immutable block at-or-after
+    # the requested slot (lib/LedgerStateEmitter.hs:410), so a fixed
+    # offset (e.g. K*L-1) can overshoot into epoch K on sparse chains.
+    # Pre-query the immutable block list and pick the actual highest
+    # slot < K*L: the resulting bundle is guaranteed to anchor in K-1.
     local era_deadline
     era_deadline=$(( $(date +%s) + AMARU_WAIT_DEADLINE_SECONDS ))
     poll_start=$(date +%s)
-    local info slot era tip_err
+    local info slot era tip_err tip_epoch target_slot
+    local boundary list_json
     tip_err="${BUNDLE_DIR}/.logs/tip-info.stderr"
+    list_json="${BUNDLE_DIR}/.logs/preflight-blocks.json"
     mkdir -p "${BUNDLE_DIR}/.logs"
     while :; do
         info=""
@@ -253,15 +281,34 @@ phase_preflight() {
                       --config "${config_json}" 2>"${tip_err}"); then
             slot=$(jq -r '.slot' <<<"${info}")
             era=$(jq -r '.era' <<<"${info}")
+            tip_epoch=$(( slot / EPOCH_LENGTH ))
+            boundary=$(( tip_epoch * EPOCH_LENGTH ))
             if [[ "${era}" == "Conway" ]] \
-                && (( slot - 2 * EPOCH_LENGTH >= conway_first_slot )); then
-                printf '+ era-readiness predicate satisfied - target_slot=%d era=%s\n' \
-                       "${slot}" "${era}"
-                TARGET_SLOT="${slot}"
-                return 0
+                && (( tip_epoch >= 3 )); then
+                # Pick the actual last immutable block strictly before
+                # tip_epoch * EPOCH_LENGTH. This anchors the bundle at
+                # the last block of completed epoch (tip_epoch - 1).
+                if ! header-extractor list-blocks \
+                        --db "${CHAIN_DB}" \
+                        --config "${config_json}" \
+                        >"${list_json}" 2>"${BUNDLE_DIR}/.logs/preflight-list-blocks.stderr"
+                then
+                    printf '+ preflight list-blocks failed; will retry\n'
+                else
+                    target_slot=$(jq -r --argjson boundary "${boundary}" \
+                        '.data | map(select(.[0] < $boundary)) | (max_by(.[0]) // empty) | .[0]' \
+                        "${list_json}")
+                    if [[ "${target_slot}" =~ ^[0-9]+$ ]] \
+                        && (( target_slot - 2 * EPOCH_LENGTH >= conway_first_slot )); then
+                        printf '+ era-readiness predicate satisfied - target_slot=%d (last block of completed epoch %d) tip_slot=%d era=%s\n' \
+                               "${target_slot}" "$(( tip_epoch - 1 ))" "${slot}" "${era}"
+                        TARGET_SLOT="${target_slot}"
+                        return 0
+                    fi
+                fi
             fi
-            printf '+ waiting for chain tip era-readiness - slot=%d era=%s conway_first=%d (elapsed=%ds)\n' \
-                   "${slot}" "${era}" "${conway_first_slot}" \
+            printf '+ waiting for chain to cross 3rd-epoch boundary - tip_slot=%d tip_epoch=%d (need >=3) era=%s (elapsed=%ds)\n' \
+                   "${slot}" "${tip_epoch}" "${era}" \
                    $(( $(date +%s) - poll_start ))
         else
             if grep -qiE 'FsInsufficientPermissions|Read-only file system|permission denied' "${tip_err}" 2>/dev/null; then
