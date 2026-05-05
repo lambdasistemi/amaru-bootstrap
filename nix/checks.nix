@@ -87,11 +87,13 @@ let
         -f
   '';
 
-  # ~3.5 epochs (testnet_42's epochLength = 86400). With the fixture's
-  # 5% activeSlotsCoeff the resulting tip lands well past 2*epochLength,
-  # so the era-readiness predicate (R-010) holds for T016 + T019.
+  # ~4.6 epochs (testnet_42's epochLength = 86400). With the fixture's
+  # 5% activeSlotsCoeff the resulting tip lands past 3*epochLength, so
+  # the era-readiness predicate (which now anchors TARGET_SLOT at the
+  # last slot of the latest *completed* epoch and requires
+  # tip_epoch >= 3) holds for T016 + T019.
   synthesizedChainDb =
-    mkSynthesizedChainDb "header-extractor-fixture-chain-db" 300000;
+    mkSynthesizedChainDb "header-extractor-fixture-chain-db" 400000;
 
   synthesizedBootstrapBundle =
     pkgs.runCommand "bootstrap-producer-synthesized-bundle"
