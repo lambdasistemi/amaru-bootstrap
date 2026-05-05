@@ -67,6 +67,15 @@ fi
 AMARU_NETWORK="${AMARU_NETWORK:-testnet_42}"
 AMARU_BOOTSTRAP_RETRY_SECONDS="${AMARU_BOOTSTRAP_RETRY_SECONDS:-20}"
 AMARU_LOG="${AMARU_LOG:-info}"
+# bootstrap-producer has its own internal long-poll for chain DB
+# readiness; default 90-minute deadlines cause each attempt to sit on
+# a frozen scratch instead of yielding back to this loop. Keep both
+# tight (30 s) so refresh_snapshot picks up fresher chain state on
+# each iteration. The OUTER loop is the right place to wait for the
+# chain to mature, not the producer's per-invocation deadline.
+export AMARU_WAIT_DEADLINE_SECONDS="${AMARU_WAIT_DEADLINE_SECONDS:-30}"
+export AMARU_CLUSTER_READY_DEADLINE_SECONDS="${AMARU_CLUSTER_READY_DEADLINE_SECONDS:-30}"
+export AMARU_POLL_INTERVAL_SECONDS="${AMARU_POLL_INTERVAL_SECONDS:-5}"
 final="${AMARU_RELAY_FINAL_DIR:-/srv/amaru}"
 live="${AMARU_RELAY_LIVE_DIR:-/live}"
 config="${AMARU_RELAY_CONFIG_DIR:-/cardano/config/configs}"
