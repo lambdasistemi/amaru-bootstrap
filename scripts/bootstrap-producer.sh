@@ -61,6 +61,7 @@ EPOCH_LENGTH=0
 UNIQUE_TMP=""
 ACTUAL_SLOT=0
 LEGACY_SNAPSHOT_FILES=()
+SNAPSHOT_SLOTS=()
 
 # ─── Internal-error trap ──────────────────────────────────────────
 
@@ -270,7 +271,7 @@ phase_preflight() {
     era_deadline=$(( $(date +%s) + AMARU_WAIT_DEADLINE_SECONDS ))
     poll_start=$(date +%s)
     local info slot era tip_err tip_epoch target_slot
-    local boundary list_json
+    local list_json
     tip_err="${BUNDLE_DIR}/.logs/tip-info.stderr"
     list_json="${BUNDLE_DIR}/.logs/preflight-blocks.json"
     mkdir -p "${BUNDLE_DIR}/.logs"
@@ -282,12 +283,8 @@ phase_preflight() {
             slot=$(jq -r '.slot' <<<"${info}")
             era=$(jq -r '.era' <<<"${info}")
             tip_epoch=$(( slot / EPOCH_LENGTH ))
-            boundary=$(( tip_epoch * EPOCH_LENGTH ))
             if [[ "${era}" == "Conway" ]] \
                 && (( tip_epoch >= 3 )); then
-                # Pick the actual last immutable block strictly before
-                # tip_epoch * EPOCH_LENGTH. This anchors the bundle at
-                # the last block of completed epoch (tip_epoch - 1).
                 if ! header-extractor list-blocks \
                         --db "${CHAIN_DB}" \
                         --config "${config_json}" \
@@ -295,14 +292,35 @@ phase_preflight() {
                 then
                     printf '+ preflight list-blocks failed; will retry\n'
                 else
-                    target_slot=$(jq -r --argjson boundary "${boundary}" \
-                        '.data | map(select(.[0] < $boundary)) | (max_by(.[0]) // empty) | .[0]' \
-                        "${list_json}")
-                    if [[ "${target_slot}" =~ ^[0-9]+$ ]] \
-                        && (( target_slot - 2 * EPOCH_LENGTH >= conway_first_slot )); then
-                        printf '+ era-readiness predicate satisfied - target_slot=%d (last block of completed epoch %d) tip_slot=%d era=%s\n' \
-                               "${target_slot}" "$(( tip_epoch - 1 ))" "${slot}" "${era}"
+                    local completed_epoch=$(( tip_epoch - 1 ))
+                    local first_epoch=$(( completed_epoch - 2 ))
+                    local snapshot_slots=()
+                    local snapshot_epoch snapshot_start snapshot_end snapshot_slot
+                    if (( first_epoch >= 0 )); then
+                        for snapshot_epoch in "${first_epoch}" "$(( first_epoch + 1 ))" "${completed_epoch}"; do
+                            snapshot_start=$(( snapshot_epoch * EPOCH_LENGTH ))
+                            snapshot_end=$(( (snapshot_epoch + 1) * EPOCH_LENGTH ))
+                            snapshot_slot=$(jq -r \
+                                --argjson start "${snapshot_start}" \
+                                --argjson end "${snapshot_end}" \
+                                '.data
+                                 | map(select(.[0] >= $start and .[0] < $end))
+                                 | (max_by(.[0]) // empty)
+                                 | .[0]' \
+                                "${list_json}")
+                            [[ "${snapshot_slot}" =~ ^[0-9]+$ ]] || break
+                            snapshot_slots+=("${snapshot_slot}")
+                        done
+                    fi
+                    if (( ${#snapshot_slots[@]} == 3 )) \
+                        && (( snapshot_slots[0] >= conway_first_slot )); then
+                        target_slot="${snapshot_slots[2]}"
+                        printf '+ era-readiness predicate satisfied - target_slot=%d (last block of completed epoch %d) snapshot_slots=%s,%s,%s tip_slot=%d era=%s\n' \
+                               "${target_slot}" "${completed_epoch}" \
+                               "${snapshot_slots[0]}" "${snapshot_slots[1]}" "${snapshot_slots[2]}" \
+                               "${slot}" "${era}"
                         TARGET_SLOT="${target_slot}"
+                        SNAPSHOT_SLOTS=("${snapshot_slots[@]}")
                         return 0
                     fi
                 fi
@@ -360,16 +378,22 @@ bundle_complete() {
     [[ "${snapshot_slot}" =~ ^[0-9]+$ ]] || return 1
     [[ -n "${snapshot_hash}" && "${snapshot_hash}" != "${snapshot_base}" ]] || return 1
     [[ -f "${b}/headers/header.${snapshot_slot}.${snapshot_hash}.cbor" ]] || return 1
-    local snapshot_count=0
+    local snapshots=()
     local d base
     for d in "${b}/ledger.${NETWORK}.db"/*; do
         [[ -d "${d}" ]] || continue
         base=$(basename "${d}")
         if [[ "${base}" =~ ^[0-9]+$ ]]; then
-            snapshot_count=$(( snapshot_count + 1 ))
+            snapshots+=("${base}")
         fi
     done
-    (( snapshot_count >= 3 )) || return 1
+    (( ${#snapshots[@]} >= 3 )) || return 1
+    mapfile -t snapshots < <(printf '%s\n' "${snapshots[@]}" | sort -n)
+    local latest="${snapshots[$(( ${#snapshots[@]} - 1 ))]}"
+    (( latest >= 2 )) || return 1
+    [[ -d "${b}/ledger.${NETWORK}.db/$(( latest - 2 ))" ]] || return 1
+    [[ -d "${b}/ledger.${NETWORK}.db/$(( latest - 1 ))" ]] || return 1
+    [[ -d "${b}/ledger.${NETWORK}.db/${latest}" ]] || return 1
     return 0
 }
 
@@ -408,11 +432,14 @@ phase_emit() {
     mkdir -p "${legacy_dir}"
     LEGACY_SNAPSHOT_FILES=()
 
-    local slots=(
-        $(( TARGET_SLOT - (2 * EPOCH_LENGTH) ))
-        $(( TARGET_SLOT - EPOCH_LENGTH ))
-        "${TARGET_SLOT}"
-    )
+    local slots=("${SNAPSHOT_SLOTS[@]}")
+    if (( ${#slots[@]} == 0 )); then
+        slots=(
+            $(( TARGET_SLOT - (2 * EPOCH_LENGTH) ))
+            $(( TARGET_SLOT - EPOCH_LENGTH ))
+            "${TARGET_SLOT}"
+        )
+    fi
     local slot out rc
     for slot in "${slots[@]}"; do
         if (( slot < 0 )); then

@@ -143,9 +143,11 @@ import Ouroboros.Consensus.Ledger.SupportsProtocol (
  )
 import Ouroboros.Consensus.Ledger.Tables (
     CanStowLedgerTables (stowLedgerTables),
+    LedgerTables,
     ValuesMK,
+    ltliftA2,
  )
-import Ouroboros.Consensus.Ledger.Tables.Utils (applyDiffs)
+import Ouroboros.Consensus.Ledger.Tables.Utils (applyDiffs, emptyLedgerTables, unionValues)
 import Ouroboros.Consensus.Node qualified as Node
 import Ouroboros.Consensus.Node.InitStorage qualified as Node
 import Ouroboros.Consensus.Node.ProtocolInfo (
@@ -398,18 +400,43 @@ replayLoop cfg registry immutableDB ledgerDB targetSlot = do
                         newLedgerWithValues =
                             applyDiffs oldLedgerWithTables newLedger
                     LedgerDB.forkerPush forker newLedger
-                    join $ atomically $ LedgerDB.forkerCommit forker
-                    -- Keep replay in-memory. Flushing here can prune
-                    -- snapshots from a live cardano-node LedgerDB.
-                    when ((unBlockNo $ blockNo block) `mod` 1000 == 0) $
-                        putStrLn $
-                            "ledger-state-emitter: replayed block "
-                                <> show (blockNo block)
-                                <> " at slot "
-                                <> show (blockSlot block)
                     if blockSlot block >= targetSlot
-                        then pure newLedgerWithValues
-                        else go (stowLedgerTables newLedgerWithValues) iterator
+                        then do
+                            fullLedger <- hydrateForkerState forker
+                            join $ atomically $ LedgerDB.forkerCommit forker
+                            pure fullLedger
+                        else do
+                            join $ atomically $ LedgerDB.forkerCommit forker
+                            -- Keep replay in-memory. Flushing here can prune
+                            -- snapshots from a live cardano-node LedgerDB.
+                            when ((unBlockNo $ blockNo block) `mod` 1000 == 0) $
+                                putStrLn $
+                                    "ledger-state-emitter: replayed block "
+                                        <> show (blockNo block)
+                                        <> " at slot "
+                                        <> show (blockSlot block)
+                            go (stowLedgerTables newLedgerWithValues) iterator
+
+hydrateForkerState ::
+    LedgerDB.Forker IO (ExtLedgerState (CardanoBlock StandardCrypto)) ->
+    IO (ExtLedgerState (CardanoBlock StandardCrypto) ValuesMK)
+hydrateForkerState forker = do
+    ledgerState <- atomically $ LedgerDB.forkerGetLedgerState forker
+    tables <- readAllForkerTables forker
+    pure $ ledgerState `withLedgerTables` tables
+
+readAllForkerTables ::
+    LedgerDB.Forker IO (ExtLedgerState (CardanoBlock StandardCrypto)) ->
+    IO (LedgerTables (ExtLedgerState (CardanoBlock StandardCrypto)) ValuesMK)
+readAllForkerTables forker =
+    go LedgerDB.NoPreviousQuery emptyLedgerTables
+  where
+    go previous acc = do
+        (batch, next) <- LedgerDB.forkerRangeReadTables forker previous
+        let acc' = ltliftA2 unionValues acc batch
+        case next of
+            Nothing -> pure acc'
+            Just key -> go (LedgerDB.PreviousQueryWasUpTo key) acc'
 
 {- | The stock extended-ledger-state envelope, but with the ledger-state
 branch using canonical UTxO encoding.

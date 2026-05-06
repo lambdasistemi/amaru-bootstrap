@@ -56,11 +56,11 @@ RELAY_NAME="${RELAY_NAME:-${1:-}}"
 AMARU_PEER="${AMARU_PEER:-${2:-}}"
 
 if [[ -z "$RELAY_NAME" ]]; then
-  printf 'amaru-relay-bootstrap: RELAY_NAME is required (env or $1)\n' >&2
+  printf "amaru-relay-bootstrap: RELAY_NAME is required (env or \$1)\n" >&2
   exit 64
 fi
 if [[ -z "$AMARU_PEER" ]]; then
-  printf 'amaru-relay-bootstrap: AMARU_PEER is required (env or $2)\n' >&2
+  printf "amaru-relay-bootstrap: AMARU_PEER is required (env or \$2)\n" >&2
   exit 64
 fi
 
@@ -76,6 +76,8 @@ AMARU_LOG="${AMARU_LOG:-info}"
 export AMARU_WAIT_DEADLINE_SECONDS="${AMARU_WAIT_DEADLINE_SECONDS:-30}"
 export AMARU_CLUSTER_READY_DEADLINE_SECONDS="${AMARU_CLUSTER_READY_DEADLINE_SECONDS:-30}"
 export AMARU_POLL_INTERVAL_SECONDS="${AMARU_POLL_INTERVAL_SECONDS:-5}"
+BOOTSTRAP_PRODUCER_BIN="${BOOTSTRAP_PRODUCER_BIN:-/bin/bootstrap-producer}"
+AMARU_BIN="${AMARU_BIN:-/bin/amaru}"
 final="${AMARU_RELAY_FINAL_DIR:-/srv/amaru}"
 live="${AMARU_RELAY_LIVE_DIR:-/live}"
 config="${AMARU_RELAY_CONFIG_DIR:-/cardano/config/configs}"
@@ -101,17 +103,30 @@ log "config: network=$AMARU_NETWORK peer=$AMARU_PEER amaru_log=$AMARU_LOG"
 log "paths: final=$final live=$live config=$config runtime=$runtime"
 
 bundle_complete() {
+  local snapshots=()
+  local d base latest
+
   test -f "$sentinel" || return 1
-  test -d "$final/chain.$AMARU_NETWORK.db" || return 1
+  test -f "$final/chain.$AMARU_NETWORK.db/CURRENT" || return 1
   test -f "$final/nonces.json" || return 1
-  # The ledger DB needs a `live/` rocksdb plus at least one GO
-  # snapshot tier (`0/CURRENT`); otherwise `amaru run` exits with
-  # "Failed to create ledger ... 0/CURRENT does not exist". The
-  # producer emits one snapshot tier per past Conway epoch
-  # available on the immutable chain, so a thin chain produces a
-  # bundle that passes a live/-only check but fails amaru's open.
-  test -d "$final/ledger.$AMARU_NETWORK.db/live" || return 1
-  test -f "$final/ledger.$AMARU_NETWORK.db/0/CURRENT" || return 1
+  # Amaru opens ledger.<network>.db/live, then loads the two epochs
+  # before the most recent historical snapshot. Snapshot directory
+  # names are epochs observed by Amaru, not guaranteed to start at 0.
+  test -f "$final/ledger.$AMARU_NETWORK.db/live/CURRENT" || return 1
+  for d in "$final/ledger.$AMARU_NETWORK.db"/*; do
+    test -d "$d" || continue
+    base="$(basename "$d")"
+    if [[ "$base" =~ ^[0-9]+$ ]] && test -f "$d/CURRENT"; then
+      snapshots+=("$base")
+    fi
+  done
+  test "${#snapshots[@]}" -ge 3 || return 1
+  mapfile -t snapshots < <(printf '%s\n' "${snapshots[@]}" | sort -n)
+  latest="${snapshots[$(( ${#snapshots[@]} - 1 ))]}"
+  test "$latest" -ge 2 || return 1
+  test -f "$final/ledger.$AMARU_NETWORK.db/$((latest - 2))/CURRENT" || return 1
+  test -f "$final/ledger.$AMARU_NETWORK.db/$((latest - 1))/CURRENT" || return 1
+  test -f "$final/ledger.$AMARU_NETWORK.db/$latest/CURRENT" || return 1
 }
 
 refresh_snapshot() {
@@ -136,15 +151,15 @@ refresh_snapshot() {
 
 promote() {
   local stage="$final/.staged"
+  rm -f "$sentinel"
   rm -rf "$stage"
   mkdir -p "$stage"
   cp -rL "$scratch_out/$AMARU_NETWORK/." "$stage/" || return 1
 
-  # Sweep stale top-level entries except our scratch + sentinel.
+  # Sweep stale top-level entries except our scratch + stage.
   find "$final" -mindepth 1 -maxdepth 1 \
       ! -path "$work" \
       ! -path "$stage" \
-      ! -path "$sentinel" \
       -exec rm -rf {} +
 
   for entry in "$stage"/*; do
@@ -170,7 +185,7 @@ while :; do
     mkdir -p "$scratch_out"
     log "bootstrap attempt #$attempt: invoking bootstrap-producer"
     rc=0
-    /bin/bootstrap-producer "$scratch_state" "$config" "$scratch_out" \
+    "$BOOTSTRAP_PRODUCER_BIN" "$scratch_state" "$config" "$scratch_out" \
         "$AMARU_NETWORK" 2>&1 | sed -u "s/^/[$RELAY_NAME bootstrap-producer] /" \
         || rc=${PIPESTATUS[0]}
     case "$rc" in
@@ -204,7 +219,7 @@ done
 # the indexer sees it directly with no further wrapping.
 log "bundle ready at $final, exec'ing amaru run"
 export AMARU_LOG
-exec /bin/amaru run \
+exec "$AMARU_BIN" run \
   --network "$AMARU_NETWORK" \
   --ledger-dir "$final/ledger.$AMARU_NETWORK.db" \
   --chain-dir "$final/chain.$AMARU_NETWORK.db" \
