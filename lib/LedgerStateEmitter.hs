@@ -47,7 +47,7 @@ module LedgerStateEmitter (
     emitLedgerSnapshot,
 ) where
 
-import Cardano.Ledger.BaseTypes (Network, knownNonZeroBounded, networkId)
+import Cardano.Ledger.BaseTypes (Globals, Network, knownNonZeroBounded, networkId)
 import Cardano.Ledger.Binary.Encoding (
     EncCBOR (encCBOR),
     Encoding,
@@ -77,6 +77,7 @@ import Control.Concurrent.STM (atomically)
 import Control.Exception (bracket)
 import Control.Monad (join, when)
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Reader (runReaderT)
 import Control.ResourceRegistry (
     ResourceRegistry,
     runWithTempRegistry,
@@ -84,6 +85,7 @@ import Control.ResourceRegistry (
  )
 import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant ((>$<))
+import Data.Functor.Identity (runIdentity)
 import Data.Map.Strict qualified as Map
 import Data.Maybe.Strict (StrictMaybe (..))
 import Data.Proxy (Proxy (Proxy))
@@ -469,18 +471,25 @@ encodeCardanoLedgerStateCanonical
         )
     ( CardanoLedgerConfig
             _ledgerByron
-            _ledgerShelley
-            _ledgerAllegra
-            _ledgerMary
-            _ledgerAlonzo
-            _ledgerBabbage
+            ledgerShelley
+            ledgerAllegra
+            ledgerMary
+            ledgerAlonzo
+            ledgerBabbage
             ledgerConway
             ledgerDijkstra
         ) =
         encodeTelescope encoders . hardForkLedgerStatePerEra
       where
-        conwayNetwork = partialLedgerConfigNetwork ledgerConway
-        dijkstraNetwork = partialLedgerConfigNetwork ledgerDijkstra
+        shelleyGlobals = partialLedgerConfigGlobals ledgerShelley
+        allegraGlobals = partialLedgerConfigGlobals ledgerAllegra
+        maryGlobals = partialLedgerConfigGlobals ledgerMary
+        alonzoGlobals = partialLedgerConfigGlobals ledgerAlonzo
+        babbageGlobals = partialLedgerConfigGlobals ledgerBabbage
+        conwayGlobals = partialLedgerConfigGlobals ledgerConway
+        dijkstraGlobals = partialLedgerConfigGlobals ledgerDijkstra
+        conwayNetwork = networkId conwayGlobals
+        dijkstraNetwork = networkId dijkstraGlobals
 
         encoders ::
             NP
@@ -488,30 +497,31 @@ encodeCardanoLedgerStateCanonical
                 (CardanoEras StandardCrypto)
         encoders =
             fn (K . encodeDisk cfgByron . unFlip)
-                :* fn (K . encodeShelleyLedgerStateCanonical . unFlip)
-                :* fn (K . encodeShelleyLedgerStateCanonical . unFlip)
-                :* fn (K . encodeShelleyLedgerStateCanonical . unFlip)
-                :* fn (K . encodeShelleyLedgerStateCanonical . unFlip)
-                :* fn (K . encodeShelleyLedgerStateCanonical . unFlip)
-                :* fn (K . encodeConwayLedgerStateCanonical conwayNetwork . unFlip)
-                :* fn (K . encodeConwayLedgerStateCanonical dijkstraNetwork . unFlip)
+                :* fn (K . encodeShelleyLedgerStateCanonical shelleyGlobals . unFlip)
+                :* fn (K . encodeShelleyLedgerStateCanonical allegraGlobals . unFlip)
+                :* fn (K . encodeShelleyLedgerStateCanonical maryGlobals . unFlip)
+                :* fn (K . encodeShelleyLedgerStateCanonical alonzoGlobals . unFlip)
+                :* fn (K . encodeShelleyLedgerStateCanonical babbageGlobals . unFlip)
+                :* fn (K . encodeConwayLedgerStateCanonical conwayNetwork conwayGlobals . unFlip)
+                :* fn (K . encodeConwayLedgerStateCanonical dijkstraNetwork dijkstraGlobals . unFlip)
                 :* Nil
 
-partialLedgerConfigNetwork ::
+partialLedgerConfigGlobals ::
     ShelleyPartialLedgerConfig era ->
-    Network
-partialLedgerConfigNetwork =
-    networkId . shelleyLedgerGlobals . shelleyLedgerConfig
+    Globals
+partialLedgerConfigGlobals =
+    shelleyLedgerGlobals . shelleyLedgerConfig
 
 encodeShelleyLedgerStateCanonical ::
     forall proto era.
     ( ShelleyCompatible proto era
     , CanonicalShelleyLedgerCbor era
     ) =>
+    Globals ->
     LedgerState (ShelleyBlock proto era) EmptyMK ->
     CBOR.Encoding
-encodeShelleyLedgerStateCanonical =
-    encodeShelleyLedgerStateCanonicalWith encodeNewEpochStateCanonical
+encodeShelleyLedgerStateCanonical globals =
+    encodeShelleyLedgerStateCanonicalWith (encodeNewEpochStateCanonical globals)
 
 encodeConwayLedgerStateCanonical ::
     forall proto era.
@@ -519,11 +529,12 @@ encodeConwayLedgerStateCanonical ::
     , ConwayCompatibleLedgerCbor era
     ) =>
     Network ->
+    Globals ->
     LedgerState (ShelleyBlock proto era) EmptyMK ->
     CBOR.Encoding
-encodeConwayLedgerStateCanonical network =
+encodeConwayLedgerStateCanonical network globals =
     encodeShelleyLedgerStateCanonicalWith $
-        encodeNewEpochStateCanonicalWith (encodeConwayCertStateAmaru network)
+        encodeNewEpochStateCanonicalWith globals (encodeConwayCertStateAmaru network)
 
 encodeShelleyLedgerStateCanonicalWith ::
     forall proto era.
@@ -567,48 +578,60 @@ encodeShelleyTransition ShelleyTransitionInfo{shelleyAfterVoting} =
 encodeNewEpochStateCanonical ::
     forall era.
     (CanonicalShelleyLedgerCbor era) =>
+    Globals ->
     SL.NewEpochState era ->
     CBOR.Encoding
-encodeNewEpochStateCanonical =
-    encodeNewEpochStateCanonicalWith encCBOR
+encodeNewEpochStateCanonical globals =
+    encodeNewEpochStateCanonicalWith globals encCBOR
 
 encodeNewEpochStateCanonicalWith ::
     forall era.
     (CanonicalShelleyLedgerCbor era) =>
+    Globals ->
     (SL.CertState era -> LedgerEncoding) ->
     SL.NewEpochState era ->
     CBOR.Encoding
-encodeNewEpochStateCanonicalWith encodeCertState =
+encodeNewEpochStateCanonicalWith globals encodeCertState =
     toPlainEncoding (Core.eraProtVerLow @era)
-        . encodeNewEpochStateCanonicalLedgerWith encodeCertState
+        . encodeNewEpochStateCanonicalLedgerWith globals encodeCertState
 
 encodeNewEpochStateCanonicalLedgerWith ::
     forall era.
     (CanonicalShelleyLedgerCbor era) =>
+    Globals ->
     (SL.CertState era -> LedgerEncoding) ->
     SL.NewEpochState era ->
     LedgerEncoding
-encodeNewEpochStateCanonicalLedgerWith encodeCertState (SL.NewEpochState e bp bc es ru pd av) =
+encodeNewEpochStateCanonicalLedgerWith globals encodeCertState (SL.NewEpochState e bp bc es ru pd av) =
     mconcat
         [ fromPlainEncoding $ CBOR.encodeListLen 7
         , encCBOR e
         , encCBOR bp
         , encCBOR bc
         , encodeEpochStateCanonicalWith encodeCertState es
-        , encodeRewardUpdateAmaru ru
+        , encodeRewardUpdateAmaru globals ru
         , encCBOR pd
         , encCBOR av
         ]
 
 encodeRewardUpdateAmaru ::
+    Globals ->
     StrictMaybe ShelleyReward.PulsingRewUpdate ->
     LedgerEncoding
-encodeRewardUpdateAmaru =
+encodeRewardUpdateAmaru globals =
     encCBOR . \case
         SNothing ->
             SJust $
                 ShelleyReward.Complete ShelleyReward.emptyRewardUpdate
-        SJust ru -> SJust ru
+        SJust (ShelleyReward.Complete ru) ->
+            SJust $
+                ShelleyReward.Complete ru
+        SJust pulsing@(ShelleyReward.Pulsing _ _) ->
+            SJust $
+                ShelleyReward.Complete $
+                    fst $
+                        runIdentity $
+                            runReaderT (SL.completeRupd pulsing) globals
 
 encodeEpochStateCanonicalWith ::
     forall era.
