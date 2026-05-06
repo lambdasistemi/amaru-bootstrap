@@ -36,11 +36,11 @@
     "amaru": {
       "flake": false,
       "locked": {
-        "lastModified": 1778068363,
-        "narHash": "sha256-rjWYmdMM5G8TD+3bHSfRnI5HTdVc8/MNJ0rgYEDC4DA=",
+        "lastModified": 1778075224,
+        "narHash": "sha256-TdFpfG0hRTw++k7sloM0YTuyqgncfh8m2F2IG8Qw/kE=",
         "owner": "lambdasistemi",
         "repo": "amaru",
-        "rev": "36ea009c594d3e5de0498beb6f5dab790fc20c19",
+        "rev": "71641a64f587597b47d57a1d684d1869eade5d0b",
         "type": "github"
       },
       "original": {
