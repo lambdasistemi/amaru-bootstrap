@@ -41,6 +41,7 @@ let
   # T012-T016: bats sees the orchestrator script + fixtures + tests/.
   bootstrapProducerTestTree = pkgs.linkFarm "bootstrap-producer-test-tree" [
     { name = "scripts/bootstrap-producer.sh"; path = ../scripts/bootstrap-producer.sh; }
+    { name = "scripts/amaru-relay-bootstrap.sh"; path = ../scripts/amaru-relay-bootstrap.sh; }
     { name = "tests"; path = ../tests; }
     {
       name = "specs/001-snapshot-format-smoke/fixtures";
@@ -87,11 +88,13 @@ let
         -f
   '';
 
-  # ~3.5 epochs (testnet_42's epochLength = 86400). With the fixture's
-  # 5% activeSlotsCoeff the resulting tip lands well past 2*epochLength,
-  # so the era-readiness predicate (R-010) holds for T016 + T019.
+  # ~4.6 epochs (testnet_42's epochLength = 86400). With the fixture's
+  # 5% activeSlotsCoeff the resulting tip lands past 3*epochLength, so
+  # the era-readiness predicate (which now anchors TARGET_SLOT at the
+  # last slot of the latest *completed* epoch and requires
+  # tip_epoch >= 3) holds for T016 + T019.
   synthesizedChainDb =
-    mkSynthesizedChainDb "header-extractor-fixture-chain-db" 300000;
+    mkSynthesizedChainDb "header-extractor-fixture-chain-db" 400000;
 
   synthesizedBootstrapBundle =
     pkgs.runCommand "bootstrap-producer-synthesized-bundle"
@@ -264,6 +267,7 @@ in
     } ''
     shellcheck -s bash -e SC1091 ${scriptSrc}
     shellcheck -s bash -e SC1091 ${../scripts/bootstrap-producer.sh}
+    shellcheck -s bash -e SC1091 ${../scripts/amaru-relay-bootstrap.sh}
     mkdir -p $out
   '';
 
@@ -346,6 +350,8 @@ in
       export PATH="${producerRuntimePath}:$PATH"
 
       bats --tap \
+        tests/test-amaru-relay-bootstrap.bats \
+        tests/test-bootstrap-producer-sparse-boundaries.bats \
         tests/test-bootstrap-producer-config.bats \
         tests/test-bootstrap-producer-cluster.bats \
         tests/test-bootstrap-producer-idempotent.bats

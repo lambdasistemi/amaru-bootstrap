@@ -22,20 +22,35 @@
 # avoids relying on /usr/bin/env inside the minimal dockerTools root.
 
 let
+  runtimeInputs = [
+    pkgs.bash
+    pkgs.coreutils
+    pkgs.findutils
+    pkgs.gawk
+    pkgs.gnused
+    pkgs.jq
+    ledgerStateEmitter
+    headerExtractor
+    amaruPkg
+  ];
+
   bootstrapProducer = pkgs.writeShellApplication {
     name = "bootstrap-producer";
-    runtimeInputs = [
-      pkgs.bash
-      pkgs.coreutils
-      pkgs.findutils
-      pkgs.gawk
-      pkgs.jq
-      ledgerStateEmitter
-      headerExtractor
-      amaruPkg
-    ];
+    runtimeInputs = runtimeInputs;
     text = ''
       exec ${pkgs.bash}/bin/bash ${../scripts/bootstrap-producer.sh} "$@"
+    '';
+  };
+
+  # Antithesis amaru-relay-N container entrypoint. Lives in the image
+  # so the cardano-node-antithesis docker-compose doesn't have to inline
+  # 90 lines of bash. See scripts/amaru-relay-bootstrap.sh for the
+  # env-var contract and behaviour.
+  amaruRelayBootstrap = pkgs.writeShellApplication {
+    name = "amaru-relay-bootstrap";
+    runtimeInputs = runtimeInputs;
+    text = ''
+      exec ${pkgs.bash}/bin/bash ${../scripts/amaru-relay-bootstrap.sh} "$@"
     '';
   };
 
@@ -50,13 +65,19 @@ pkgs.dockerTools.buildLayeredImage {
     pkgs.coreutils
     pkgs.findutils
     pkgs.gawk
+    pkgs.gnused
     pkgs.jq
     ledgerStateEmitter
     headerExtractor
     amaruPkg
     bootstrapProducer
+    amaruRelayBootstrap
   ];
 
+  # Default entrypoint stays bootstrap-producer (the existing
+  # consumer contract). Antithesis testnets that want the relay
+  # wrapper override entrypoint to amaru-relay-bootstrap and pass
+  # config via env (RELAY_NAME, AMARU_PEER, …).
   config = {
     Entrypoint = [ "${bootstrapProducer}/bin/bootstrap-producer" ];
     Cmd = [ ];

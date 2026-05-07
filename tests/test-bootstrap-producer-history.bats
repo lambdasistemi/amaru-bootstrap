@@ -45,7 +45,7 @@ cmd="\$1"
 shift
 case "\$cmd" in
   tip-info)
-    printf '{"slot":249,"era":"Conway"}\n'
+    printf '{"slot":370,"era":"Conway"}\n'
     ;;
   list-blocks)
     h8="\$(printf '%064x' 8)"
@@ -54,8 +54,10 @@ case "\$cmd" in
     h129="\$(printf '%064x' 129)"
     h248="\$(printf '%064x' 248)"
     h249="\$(printf '%064x' 249)"
-    printf '{"data":[[8,"%s"],[9,"%s"],[120,"%s"],[129,"%s"],[248,"%s"],[249,"%s"]]}\n' \
-      "\$h8" "\$h9" "\$h120" "\$h129" "\$h248" "\$h249"
+    h360="\$(printf '%064x' 360)"
+    h370="\$(printf '%064x' 370)"
+    printf '{"data":[[8,"%s"],[9,"%s"],[120,"%s"],[129,"%s"],[248,"%s"],[249,"%s"],[360,"%s"],[370,"%s"]]}\n' \
+      "\$h8" "\$h9" "\$h120" "\$h129" "\$h248" "\$h249" "\$h360" "\$h370"
     ;;
   get-header)
     printf 'header'

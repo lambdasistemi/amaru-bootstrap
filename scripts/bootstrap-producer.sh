@@ -61,6 +61,7 @@ EPOCH_LENGTH=0
 UNIQUE_TMP=""
 ACTUAL_SLOT=0
 LEGACY_SNAPSHOT_FILES=()
+SNAPSHOT_SLOTS=()
 
 # ─── Internal-error trap ──────────────────────────────────────────
 
@@ -100,6 +101,38 @@ tail_phase_log() {
     printf -- '--- last 50 lines of %s ---\n' "${f}" >&2
     tail -n 50 "${f}" >&2 || true
     printf -- '--- end %s ---\n' "${f}" >&2
+}
+
+## ensure_era_history_input <out-path>
+##
+## Build a single-era Conway era_history JSON anchored at the
+## genesis (epoch 0, slot 0, time 0) using the genesis epochLength.
+## This is what amaru `convert-ledger-state --era-history-file` needs
+## to compute correct epoch boundaries — without it the converter
+## defaults to the network's mainnet/preprod era-history (epoch_size
+## 86400) and treats every short-epoch slot as still-in-epoch-0,
+## producing wrong active/candidate nonces in the snapshot's
+## nonces.<slot>.<hash>.json. amaru run then verifies header VRFs
+## against those wrong nonces and fails. See
+## https://github.com/lambdasistemi/amaru-bootstrap/issues/37.
+ensure_era_history_input() {
+    local out="$1"
+    cat >"${out}" <<JSON
+{
+  "stability_window": $(( 3 * EPOCH_LENGTH )),
+  "eras": [
+    {
+      "start": {"time": 0, "slot": 0, "epoch": 0},
+      "end": null,
+      "params": {
+        "epoch_size_slots": ${EPOCH_LENGTH},
+        "slot_length": 1000,
+        "era_name": "Conway"
+      }
+    }
+  ]
+}
+JSON
 }
 
 patch_converted_era_history() {
@@ -207,12 +240,40 @@ phase_preflight() {
     # Predicate (R-010):
     #   tip.era >= Conway
     # AND
-    #   tip.slot - 2 * epochLength >= conway_first_slot
+    #   chain has crossed the boundary into epoch >= 3
+    # AND
+    #   the chain has at least one immutable block in completed epoch
+    #   (tip_epoch - 1).
+    #
+    # Rationale: amaru's bootstrap invariant
+    # (initial_stake_distributions in crates/amaru-ledger/src/state.rs,
+    #  comment "the most recent snapshot we have is necessarily `e`,
+    #  since `e + 1` designates the ongoing epoch") requires the
+    #  bundle's latest snapshot tier to represent the just-completed
+    #  epoch K-1. The chain follower's first applied slot must then
+    #  fall in epoch K so that compute_rewards in epoch K uses
+    #  for_epoch(K-1) (which exists) and the K-1->K transition creates
+    #  tier K-1 *fresh* (no-op, same data) before compute_rewards in
+    #  epoch K+1 needs for_epoch(K).
+    #
+    # That requires anchoring at the LAST IMMUTABLE BLOCK in K-1 — any
+    # earlier slot in K-1 leaves blocks of K-1 in the chain follower's
+    # path, and compute_rewards (which fires when relative_slot >=
+    # stability_window, often early on short-epoch testnets) advances
+    # the deque before the K-1->K boundary, breaking the rotation.
+    #
+    # ledger-state-emitter takes the FIRST immutable block at-or-after
+    # the requested slot (lib/LedgerStateEmitter.hs:410), so a fixed
+    # offset (e.g. K*L-1) can overshoot into epoch K on sparse chains.
+    # Pre-query the immutable block list and pick the actual highest
+    # slot < K*L: the resulting bundle is guaranteed to anchor in K-1.
     local era_deadline
     era_deadline=$(( $(date +%s) + AMARU_WAIT_DEADLINE_SECONDS ))
     poll_start=$(date +%s)
-    local info slot era tip_err
+    local info slot era tip_err tip_epoch target_slot
+    local list_json
     tip_err="${BUNDLE_DIR}/.logs/tip-info.stderr"
+    list_json="${BUNDLE_DIR}/.logs/preflight-blocks.json"
     mkdir -p "${BUNDLE_DIR}/.logs"
     while :; do
         info=""
@@ -221,15 +282,51 @@ phase_preflight() {
                       --config "${config_json}" 2>"${tip_err}"); then
             slot=$(jq -r '.slot' <<<"${info}")
             era=$(jq -r '.era' <<<"${info}")
+            tip_epoch=$(( slot / EPOCH_LENGTH ))
             if [[ "${era}" == "Conway" ]] \
-                && (( slot - 2 * EPOCH_LENGTH >= conway_first_slot )); then
-                printf '+ era-readiness predicate satisfied - target_slot=%d era=%s\n' \
-                       "${slot}" "${era}"
-                TARGET_SLOT="${slot}"
-                return 0
+                && (( tip_epoch >= 3 )); then
+                if ! header-extractor list-blocks \
+                        --db "${CHAIN_DB}" \
+                        --config "${config_json}" \
+                        >"${list_json}" 2>"${BUNDLE_DIR}/.logs/preflight-list-blocks.stderr"
+                then
+                    printf '+ preflight list-blocks failed; will retry\n'
+                else
+                    local completed_epoch=$(( tip_epoch - 1 ))
+                    local first_epoch=$(( completed_epoch - 2 ))
+                    local snapshot_slots=()
+                    local snapshot_epoch snapshot_start snapshot_end snapshot_slot
+                    if (( first_epoch >= 0 )); then
+                        for snapshot_epoch in "${first_epoch}" "$(( first_epoch + 1 ))" "${completed_epoch}"; do
+                            snapshot_start=$(( snapshot_epoch * EPOCH_LENGTH ))
+                            snapshot_end=$(( (snapshot_epoch + 1) * EPOCH_LENGTH ))
+                            snapshot_slot=$(jq -r \
+                                --argjson start "${snapshot_start}" \
+                                --argjson end "${snapshot_end}" \
+                                '.data
+                                 | map(select(.[0] >= $start and .[0] < $end))
+                                 | (max_by(.[0]) // empty)
+                                 | .[0]' \
+                                "${list_json}")
+                            [[ "${snapshot_slot}" =~ ^[0-9]+$ ]] || break
+                            snapshot_slots+=("${snapshot_slot}")
+                        done
+                    fi
+                    if (( ${#snapshot_slots[@]} == 3 )) \
+                        && (( snapshot_slots[0] >= conway_first_slot )); then
+                        target_slot="${snapshot_slots[2]}"
+                        printf '+ era-readiness predicate satisfied - target_slot=%d (last block of completed epoch %d) snapshot_slots=%s,%s,%s tip_slot=%d era=%s\n' \
+                               "${target_slot}" "${completed_epoch}" \
+                               "${snapshot_slots[0]}" "${snapshot_slots[1]}" "${snapshot_slots[2]}" \
+                               "${slot}" "${era}"
+                        TARGET_SLOT="${target_slot}"
+                        SNAPSHOT_SLOTS=("${snapshot_slots[@]}")
+                        return 0
+                    fi
+                fi
             fi
-            printf '+ waiting for chain tip era-readiness - slot=%d era=%s conway_first=%d (elapsed=%ds)\n' \
-                   "${slot}" "${era}" "${conway_first_slot}" \
+            printf '+ waiting for chain to cross 3rd-epoch boundary - tip_slot=%d tip_epoch=%d (need >=3) era=%s (elapsed=%ds)\n' \
+                   "${slot}" "${tip_epoch}" "${era}" \
                    $(( $(date +%s) - poll_start ))
         else
             if grep -qiE 'FsInsufficientPermissions|Read-only file system|permission denied' "${tip_err}" 2>/dev/null; then
@@ -281,16 +378,22 @@ bundle_complete() {
     [[ "${snapshot_slot}" =~ ^[0-9]+$ ]] || return 1
     [[ -n "${snapshot_hash}" && "${snapshot_hash}" != "${snapshot_base}" ]] || return 1
     [[ -f "${b}/headers/header.${snapshot_slot}.${snapshot_hash}.cbor" ]] || return 1
-    local snapshot_count=0
+    local snapshots=()
     local d base
     for d in "${b}/ledger.${NETWORK}.db"/*; do
         [[ -d "${d}" ]] || continue
         base=$(basename "${d}")
         if [[ "${base}" =~ ^[0-9]+$ ]]; then
-            snapshot_count=$(( snapshot_count + 1 ))
+            snapshots+=("${base}")
         fi
     done
-    (( snapshot_count >= 3 )) || return 1
+    (( ${#snapshots[@]} >= 3 )) || return 1
+    mapfile -t snapshots < <(printf '%s\n' "${snapshots[@]}" | sort -n)
+    local latest="${snapshots[$(( ${#snapshots[@]} - 1 ))]}"
+    (( latest >= 2 )) || return 1
+    [[ -d "${b}/ledger.${NETWORK}.db/$(( latest - 2 ))" ]] || return 1
+    [[ -d "${b}/ledger.${NETWORK}.db/$(( latest - 1 ))" ]] || return 1
+    [[ -d "${b}/ledger.${NETWORK}.db/${latest}" ]] || return 1
     return 0
 }
 
@@ -329,11 +432,14 @@ phase_emit() {
     mkdir -p "${legacy_dir}"
     LEGACY_SNAPSHOT_FILES=()
 
-    local slots=(
-        $(( TARGET_SLOT - (2 * EPOCH_LENGTH) ))
-        $(( TARGET_SLOT - EPOCH_LENGTH ))
-        "${TARGET_SLOT}"
-    )
+    local slots=("${SNAPSHOT_SLOTS[@]}")
+    if (( ${#slots[@]} == 0 )); then
+        slots=(
+            $(( TARGET_SLOT - (2 * EPOCH_LENGTH) ))
+            $(( TARGET_SLOT - EPOCH_LENGTH ))
+            "${TARGET_SLOT}"
+        )
+    fi
     local slot out rc
     for slot in "${slots[@]}"; do
         if (( slot < 0 )); then
@@ -373,6 +479,8 @@ phase_emit() {
 # producer corrects that sidecar from the node genesis before import.
 phase_convert() {
     local snapshot slot rc
+    local era_history_input="${UNIQUE_TMP}/era-history.input.json"
+    ensure_era_history_input "${era_history_input}"
     for snapshot in "${LEGACY_SNAPSHOT_FILES[@]}"; do
         slot=$(basename "${snapshot}" .cbor)
         printf '+ amaru convert-ledger-state @ %s\n' "${slot}"
@@ -381,6 +489,7 @@ phase_convert() {
             --network "${NETWORK}" \
             --snapshot "${snapshot}" \
             --target-dir "${UNIQUE_TMP}/snapshots" \
+            --era-history-file "${era_history_input}" \
             || rc=$?
         if (( rc != 0 )); then
             printf 'amaru convert-ledger-state failed at slot %s (rc=%d); see %s\n' \
@@ -443,7 +552,20 @@ phase_extract() {
                "${rc}" "${BUNDLE_DIR}/.logs/extract-list.stderr" >&2
         exit 7
     fi
-    local prev_boundary=$(( ACTUAL_SLOT - EPOCH_LENGTH ))
+    # The "previous epoch boundary" we want is the LAST SLOT of the
+    # epoch BEFORE the snapshot's epoch — not "one epoch back from the
+    # snapshot slot". For ACTUAL_SLOT in epoch K, that is
+    #   prev_boundary = K * EPOCH_LENGTH - 1
+    # which is the last slot of epoch K-1. The previous code used
+    # `ACTUAL_SLOT - EPOCH_LENGTH`, which is just the slot at the same
+    # in-epoch offset one epoch earlier (e.g. slot 179 for ACTUAL_SLOT
+    # 299). The block selected from there is mid-prev-epoch, so the
+    # `tail` rewritten below pointed at the wrong header. amaru then
+    # mixed the wrong tail at each downstream epoch boundary,
+    # producing a different active nonce than cardano-node, which made
+    # VRF verification fail at every epoch boundary past the anchor.
+    local current_epoch=$(( ACTUAL_SLOT / EPOCH_LENGTH ))
+    local prev_boundary=$(( current_epoch * EPOCH_LENGTH - 1 ))
     if (( prev_boundary < 0 )); then
         prev_boundary=0
     fi
@@ -508,15 +630,28 @@ phase_nonces() {
     fi
     nonces_src="${UNIQUE_TMP}/snapshots/${nonces_name}"
     cp "${nonces_src}" "${UNIQUE_TMP}/nonces.json"
+    # nonces.tail must be the hash of the LAST block of the previous
+    # epoch (= the slot the cardano-node Praos rule would have stored
+    # as `praosStateLabNonce` AT that boundary, which becomes
+    # `praosStateLastEpochBlockNonce` for the active-nonce mix when
+    # the next boundary fires). amaru `evolve_nonce` later does:
+    #
+    #   load_header(parent.tail).parent()
+    #
+    # to recover that lab value, so the imported tail must point to
+    # the LAST header of the previous epoch — `load_header(hash_N).parent()`
+    # then yields `hash_{N-1}`, exactly the lab value cardano stored.
+    #
+    # phase_extract emits headers.csv with current-epoch headers first
+    # (last two of the snapshot's epoch) and prev-epoch headers second
+    # (last two of the previous epoch). The LAST line of the file is
+    # therefore the last block of the previous epoch — which is what
+    # we want.
     local prev_hash=""
     local headers_csv="${UNIQUE_TMP}/headers.csv"
     if [[ -s "${headers_csv}" ]]; then
-        prev_hash=$(awk -F, 'NR==3 {gsub(/"/,"",$2); print $2}' \
+        prev_hash=$(awk -F, 'END {gsub(/"/,"",$2); print $2}' \
                     "${headers_csv}" 2>/dev/null || true)
-        if [[ -z "${prev_hash}" ]]; then
-            prev_hash=$(awk -F, 'END {gsub(/"/,"",$2); print $2}' \
-                        "${headers_csv}" 2>/dev/null || true)
-        fi
     fi
     if [[ -z "${prev_hash}" ]]; then
         printf 'no previous-epoch hash to anchor nonces.tail\n' >&2
@@ -580,9 +715,20 @@ phase_import() {
 
     printf '+ amaru import-nonces\n'
     rc=0
+    # --era-history-file is mandatory for short-epoch testnets:
+    # without it, import-nonces falls back to the network default
+    # (preprod's 86400 slots/epoch) and stores the wrong `epoch` for
+    # the imported snapshot point. amaru run then sees a fake
+    # epoch-boundary crossing on the FIRST roll-forward (parent.epoch=0
+    # vs current_epoch=N from the correct era-history at run time)
+    # and recomputes a new active nonce that no longer matches what
+    # cardano-node actually used to sign the block, producing
+    # `Invalid VRF proof: VerificationFailed`. See
+    # https://github.com/lambdasistemi/amaru-bootstrap/issues/34.
     log_phase import-nonces amaru import-nonces \
         --network "${NETWORK}" \
         --nonces-file "${UNIQUE_TMP}/nonces.json" \
+        --era-history-file "${UNIQUE_TMP}/era-history.input.json" \
         --chain-dir "${chain_dir}" \
         || rc=$?
     if (( rc != 0 )); then

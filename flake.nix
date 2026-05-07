@@ -47,9 +47,10 @@
 
     # lambdasistemi/amaru consumed as a non-flake input; SHA pinned via
     # flake.lock per constitution Principle III. This fork carries the
-    # runtime-parameter flags needed for generated Antithesis testnets.
+    # runtime-parameter flags needed for generated Antithesis testnets,
+    # plus the relay restart/epoch-transition ledger fixes under test.
     amaru = {
-      url = "github:lambdasistemi/amaru/feat/runtime-testnet-parameters";
+      url = "github:lambdasistemi/amaru/main";
       flake = false;
     };
   };

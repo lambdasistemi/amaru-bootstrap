@@ -60,7 +60,7 @@ setup() {
   NODE_MONITOR_PID=""
 
   make_live_node_inputs "$TMP_DIR"
-  synthesize_live_chain_db "$TMP_DIR" "${BOOTSTRAP_LIVE_SLOTS:-300000}"
+  synthesize_live_chain_db "$TMP_DIR" "${BOOTSTRAP_LIVE_SLOTS:-400000}"
 }
 
 teardown() {
