@@ -50,7 +50,7 @@
     # runtime-parameter flags needed for generated Antithesis testnets,
     # plus the relay restart/epoch-transition ledger fixes under test.
     amaru = {
-      url = "github:lambdasistemi/amaru/fix/runtime-volatile-rollback";
+      url = "github:lambdasistemi/amaru/main";
       flake = false;
     };
   };
