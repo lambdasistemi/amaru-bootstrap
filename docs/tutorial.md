@@ -1,140 +1,177 @@
-# Tutorial: Use the Bootstrap Producer
+# Tutorial: Run an Amaru Relay Bootstrap Container
 
-This tutorial is for operators and downstream integrators who already
-have a cardano-node chain database and want to start Amaru from a
-produced bootstrap bundle.
+This tutorial shows the current Antithesis-style integration: run the
+published image as a long-lived `amaru-relay-N` service. The relay
+container bootstraps itself from a paired cardano-node, then replaces the
+shell wrapper with `amaru run`.
 
-The producer is a one-shot worker. It waits until the node ChainDB is
-usable, produces the bundle, imports it into Amaru stores, exits 0, and
-lets downstream Amaru services start through normal Compose dependency
-semantics.
+For the lower-level one-shot producer CLI, see
+[Bootstrap producer](bootstrap-producer.md).
 
 ## Prerequisites
 
-- A Linux x86_64 host or CI runner.
-- A cardano-node 10.7.1 ChainDB and matching node config directory.
-- A writable bundle volume shared between `bootstrap-producer` and
-  Amaru.
-- A published producer image pinned by full commit SHA:
+- A Compose testnet with cardano-node producers already configured.
+- One state volume per cardano-node producer.
+- One config volume per cardano-node producer.
+- One private `/srv/amaru` state volume per Amaru relay.
+- A shared startup-marker volume for the Antithesis sidecar.
+- An `amaru-runtime/` directory containing `era-history.json` and
+  `global-parameters.json`.
+- A published image pinned by full commit SHA:
   `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>`.
 
 Do not use a moving tag as the integration contract. Pick the commit SHA
-that passed this repository's CI and pin that exact image in the
-downstream stack. The matching `Publish bootstrap-producer image`
-workflow run pushes the GHCR tag after `main` CI or same-repository PR CI
-succeeds. PR builds also publish a human-identifiable immutable tag:
-`ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>`.
-
-The same image tarball is also exposed as the flake package
-`.#packages.x86_64-linux.bootstrap-producer-image` and uploaded by CI as
-the `bootstrap-producer-image-<github-sha>` artifact. The artifact file
-inside the CI run is named
-`amaru-bootstrap-producer-<github-sha>.tar.gz`.
-
-## Step 1: Wire the Producer into Compose
-
-The image entrypoint is `bootstrap-producer`, and it requires four
-arguments:
+that passed this repository's CI and pin that exact tag in the
+downstream stack. Same-repository PRs also publish immutable preview tags
+of the form:
 
 ```text
-bootstrap-producer <chain-db> <config-dir> <bundle-dir> <network>
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>
 ```
 
-Example service:
+## Step 1: Add Runtime Parameters
+
+Place the custom testnet runtime files next to the Compose file:
+
+```text
+testnets/cardano_amaru_epoch360/
+|-- amaru-runtime/
+|   |-- era-history.json
+|   `-- global-parameters.json
+`-- docker-compose.yaml
+```
+
+The relay entrypoint passes these files to `amaru run` with:
+
+```text
+--era-history-file /amaru-runtime/era-history.json
+--global-parameters-file /amaru-runtime/global-parameters.json
+```
+
+Keep them aligned with the genesis/config emitted by the cardano-node
+configurator. For short-epoch generated networks, stale runtime files can
+make Amaru compute epoch boundaries or Praos parameters differently from
+cardano-node.
+
+## Step 2: Define the Relay Service
+
+The image default entrypoint is `bootstrap-producer`, so relay services
+must override it:
 
 ```yaml
+x-amaru: &amaru
+  image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
+  entrypoint: amaru-relay-bootstrap
+  environment:
+    AMARU_LOG: info
+    AMARU_COLOR: never
+    AMARU_NETWORK: testnet_42
+    AMARU_BOOTSTRAP_RETRY_SECONDS: "5"
+  restart: always
+
 services:
-  cardano-node:
-    image: ghcr.io/intersectmbo/cardano-node:10.7.1-amd64
+  p1:
+    image: ghcr.io/intersectmbo/cardano-node@sha256:<digest>
+    # normal cardano-node service omitted
     volumes:
-      - node-state:/state
-      - node-configs:/config:ro
-    restart: always
+      - p1-configs:/configs:ro
+      - p1-state:/state
 
-  bootstrap-producer:
-    image: ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
-    command:
-      - /cardano/state/db
-      - /cardano/config
-      - /srv/amaru
-      - testnet_42
-    environment:
-      AMARU_NETWORK: testnet_42
-    volumes:
-      - node-state:/cardano/state
-      - node-configs:/cardano/config:ro
-      - amaru-bundle:/srv/amaru
+  amaru-relay-1:
+    <<: *amaru
+    container_name: amaru-relay-1
+    hostname: amaru-relay-1.example
     depends_on:
-      cardano-node:
+      p1:
         condition: service_started
-    restart: "no"
-
-  amaru:
-    image: ghcr.io/pragma-org/amaru/amaru:<sha>
-    command:
-      - run
-      - --network
-      - testnet_42
-      - --ledger-dir
-      - /srv/amaru/testnet_42/ledger.testnet_42.db
-      - --chain-dir
-      - /srv/amaru/testnet_42/chain.testnet_42.db
-      - --peer-address
-      - cardano-node:3001
+    environment:
+      AMARU_LOG: info
+      AMARU_COLOR: never
+      AMARU_NETWORK: testnet_42
+      AMARU_BOOTSTRAP_RETRY_SECONDS: "5"
+      RELAY_NAME: amaru-relay-1
+      AMARU_PEER: p1.example:3001
     volumes:
-      - amaru-bundle:/srv/amaru
-    depends_on:
-      bootstrap-producer:
-        condition: service_completed_successfully
-    restart: always
+      - p1-state:/live:ro
+      - p1-configs:/cardano/config:ro
+      - ./amaru-runtime:/amaru-runtime:ro
+      - amaru-startup:/startup
+      - a1-state:/srv/amaru
 
 volumes:
-  node-state:
-  node-configs:
-  amaru-bundle:
+  p1-configs:
+  p1-state:
+  amaru-startup:
+  a1-state:
 ```
 
-The first producer argument must be the actual ChainDB path inside the
-container. In the example the node stores its database at `/state/db`,
-the producer mounts the same volume at `/cardano/state`, and therefore
-the producer receives `/cardano/state/db`.
+Repeat the relay service for each paired producer, changing
+`RELAY_NAME`, `AMARU_PEER`, and the mounted state/config volumes.
 
-## Step 2: Start the Stack
+## Step 3: Gate Antithesis Setup On Relay Markers
+
+The relay writes:
+
+```text
+/startup/$RELAY_NAME.started
+```
+
+It writes that file immediately, before the bootstrap loop. The sidecar
+can gate setup-complete on these markers:
+
+```yaml
+sidecar:
+  image: ghcr.io/cardano-foundation/cardano-node-antithesis/sidecar:<tag>
+  entrypoint: /bin/bash
+  command:
+    - -ec
+    - |
+      for relay in amaru-relay-1 amaru-relay-2; do
+        while [ ! -f "/amaru-startup/$${relay}.started" ]; do
+          sleep 1
+        done
+      done
+      exec /bin/sidecar
+  volumes:
+    - amaru-startup:/amaru-startup:ro
+```
+
+Composer checks should still assert later Amaru progress. The startup
+marker only proves that the relay container entered its contract.
+
+## Step 4: Start The Stack
 
 ```bash
-docker compose up -d
-docker compose logs -f bootstrap-producer
+INTERNAL_NETWORK=false docker compose -f testnets/cardano_amaru_epoch360/docker-compose.yaml config
+docker compose -f testnets/cardano_amaru_epoch360/docker-compose.yaml up -d
+docker compose -f testnets/cardano_amaru_epoch360/docker-compose.yaml logs -f amaru-relay-1
 ```
 
-On a mature chain, the producer should quickly report that the
-era-readiness predicate is satisfied, then run the snapshot/import
-pipeline:
+Expected relay log shape:
 
 ```text
-+ era-readiness predicate satisfied - target_slot=259018 era=Conway
-+ ledger-state-emitter @ 86218
-+ ledger-state-emitter @ 172618
-+ ledger-state-emitter @ 259018
-+ amaru convert-ledger-state @ 86218
-+ amaru convert-ledger-state @ 172618
-+ amaru convert-ledger-state @ 259018
-+ header-extractor list-blocks
-+ amaru import-ledger-state
-+ amaru import-headers
-+ amaru import-nonces
-wrote /srv/amaru/testnet_42
+[amaru-relay-1] startup marker written: /startup/amaru-relay-1.started
+[amaru-relay-1] bootstrap attempt #1: refreshing snapshot from /live
+[amaru-relay-1] bootstrap attempt #1: invoking bootstrap-producer
+[amaru-relay-1 bootstrap-producer] + era-readiness predicate satisfied - target_slot=...
+[amaru-relay-1 bootstrap-producer] + ledger-state-emitter @ ...
+[amaru-relay-1 bootstrap-producer] + amaru import-ledger-state
+[amaru-relay-1] bootstrap attempt #1: committed bundle to /srv/amaru
+[amaru-relay-1] bundle already complete at /srv/amaru, skipping bootstrap loop
+[amaru-relay-1] bundle ready at /srv/amaru, exec'ing amaru run
 ```
 
-On a fresh Conway testnet, the producer stays in pre-flight until the
-immutable tip has at least two complete Conway epochs behind it. Amaru
-services remain in `Created` state until the producer exits 0.
+Transient producer exits are normal while the paired cardano-node is
+still growing enough immutable history. The relay refreshes `/live` and
+tries again after `AMARU_BOOTSTRAP_RETRY_SECONDS`.
 
-## Step 3: Check the Bundle
+## Step 5: Inspect The Relay State
 
-A complete bundle is written under `<bundle-dir>/<network>`:
+After promotion, the relay's private `/srv/amaru` volume contains:
 
 ```text
-/srv/amaru/testnet_42/
+/srv/amaru/
+|-- .bootstrap-complete
 |-- chain.testnet_42.db/
 |-- ledger.testnet_42.db/
 |-- snapshots/
@@ -142,14 +179,39 @@ A complete bundle is written under `<bundle-dir>/<network>`:
 `-- headers/
 ```
 
+`amaru run` opens the stores directly from that directory:
+
+```text
+--ledger-dir /srv/amaru/ledger.testnet_42.db
+--chain-dir /srv/amaru/chain.testnet_42.db
+```
+
 The ledger store must include `live/` and at least three numeric
-historical snapshots. The latest converted snapshot must also have an
-exact matching header in `headers/header.<slot>.<hash>.cbor`; Amaru
-uses that header to align the chain store to the ledger tip at startup.
+historical snapshots. The chain store must include the exact header for
+the latest ledger snapshot.
 
-## Step 4: Run Locally Without Docker
+## Failure Diagnosis
 
-From a checkout:
+Relay failures are usually visible in the wrapper prefix:
+
+| Symptom | What to check |
+|---------|---------------|
+| `RELAY_NAME is required` | Set `RELAY_NAME` or pass it as the first positional argument. |
+| `AMARU_PEER is required` | Set `AMARU_PEER` or pass it as the second positional argument. |
+| `cardano-node /live not yet usable` | Check the paired state volume and whether cardano-node created `immutable`, `ledger`, `volatile`, `protocolMagicId`, and `lock`. |
+| repeated `transient rc=1` | ChainDB is not ready or the snapshot copy is too early. |
+| repeated `transient rc=2` | The chain has not reached the producer's era-readiness window. |
+| `fatal rc=3` | Config/genesis files are missing or invalid. |
+| `fatal rc=9` | One of the Amaru import commands failed. Check the prefixed producer output. |
+| Amaru starts then fails VRF/nonce checks | Check `amaru-runtime/era-history.json` and `global-parameters.json` against the generated testnet. |
+
+In relay mode, avoid `depends_on: service_completed_successfully` for
+Amaru. The relay container is expected to keep running as `amaru run`;
+waiting for it to complete creates a deadlock.
+
+## Local One-Shot Producer
+
+For development, the lower-level producer is still available:
 
 ```bash
 nix run .#bootstrap-producer -- \
@@ -159,34 +221,6 @@ nix run .#bootstrap-producer -- \
   testnet_42
 ```
 
-The local app uses the same script and tools as the Docker image.
-
-## Failure Diagnosis
-
-The process exit code is the first diagnostic signal:
-
-| Code | Class | What to check |
-|------|-------|---------------|
-| `1` | cluster-not-ready | The ChainDB never appeared or has no immutable chunks. Check the node service and volume path. |
-| `2` | chain-not-era-ready | The chain did not reach the required Conway history before the wait deadline. Check node progress. |
-| `3` | configuration-error | `config.json`, genesis files, or `epochLength` are missing or invalid. |
-| `5` | tool-error: emit | `ledger-state-emitter` could not replay or write the snapshot projection. |
-| `6` | tool-error: convert | `amaru convert-ledger-state` rejected an emitted snapshot. |
-| `7` | tool-error: extract | Header extraction failed. If the ChainDB mount is read-only, make it read-write. |
-| `8` | tool-error: nonces | `nonces.json` composition failed. |
-| `9` | tool-error: import | One of the Amaru imports failed. |
-| `10` | output-write-error | The final atomic bundle commit failed. |
-
-Per-phase stderr is preserved at `<bundle-dir>/.logs/*.stderr`.
-
-## What CI Proves
-
-The Build Gate includes `amaru-run-bootstrap`. That check produces a
-bundle, copies it into a writable directory, starts `amaru run` without
-a useful live peer, and requires Amaru to reach ledger startup before
-the expected timeout.
-
-This proves the produced stores are self-consistent enough for Amaru to
-open its ledger and chain state. It does not prove live peer
-synchronisation, nor does the synthesized fixture cover every mainnet
-transaction, UTxO, script, stake, governance, or reward shape.
+That command writes `/tmp/amaru-bundle/testnet_42` and exits. It is the
+primitive used by the relay wrapper, not the recommended Antithesis
+Compose shape.
