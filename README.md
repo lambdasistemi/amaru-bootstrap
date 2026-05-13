@@ -1,77 +1,113 @@
 # amaru-bootstrap
 
-Bootstrap data pipeline for [Amaru](https://github.com/pragma-org/amaru) on
-custom Cardano testnets.
+Bootstrap image and tools for running [Amaru](https://github.com/pragma-org/amaru)
+on custom Cardano testnets.
 
-## Why this repo exists
+## What this repo provides
 
-Amaru cannot synchronise from genesis. To run on a custom (non-`mainnet` /
-non-`preprod` / non-`preview`) testnet it needs a *bootstrap bundle*:
+Amaru cannot currently synchronise from genesis on arbitrary custom
+testnets. It must start from prepared ledger and chain stores, plus the
+testnet runtime parameters that tell `amaru run` how to interpret slots,
+epochs, and Praos constants.
 
-- ledger-state snapshots at epoch boundaries (CBOR)
-- nonces JSON with a `tail` field
-- a handful of header CBORs
+This repository builds the `ghcr.io/lambdasistemi/amaru-bootstrap-producer`
+image used by the Antithesis Amaru testnets. The image carries two
+entrypoints:
 
-[`pragma-org/amaru/docker/testnet`](https://github.com/pragma-org/amaru/tree/main/docker/testnet)
-produces this bundle today, but it depends on a personal fork of
-`ouroboros-consensus` (`abailly/snapshot-generator`) that is 1300+ commits
-behind upstream. That fork is unsustainable.
+- `amaru-relay-bootstrap`: the Antithesis relay entrypoint. It runs as
+  the long-lived `amaru-relay-N` container, writes the Antithesis startup
+  marker, bootstraps from its paired `cardano-node`, then `exec`s
+  `amaru run`.
+- `bootstrap-producer`: the lower-level one-shot bundle producer used by
+  the relay entrypoint and by local verification. It reads a cardano-node
+  ChainDB, emits the Amaru ledger projection, imports headers and nonces,
+  then exits with a classed status code.
 
-This repo now produces the same kind of bundle without carrying a fork of
-`ouroboros-consensus`:
+The image default Docker entrypoint remains `bootstrap-producer` for
+standalone compatibility. Antithesis Compose stacks must override it to
+`amaru-relay-bootstrap`.
 
-1. [`db-synthesizer`](https://github.com/IntersectMBO/ouroboros-consensus/tree/main/ouroboros-consensus-cardano/app)
-   (upstream) — fabricate test chain DBs for fixtures and checks
-2. `ledger-state-emitter` (in this repo) — read a cardano-node 10.7.1
-   chain DB and emit the Amaru bootstrap projection of the ledger state
-3. `header-extractor` (in this repo) — extract the headers Amaru needs
-4. `amaru convert-ledger-state` / `import-*` — load the bundle
+## Production data flow
 
-## Status
+The production path does not use `db-synthesizer`. It reads a live
+cardano-node ChainDB and runs:
 
-The current `main` branch builds the producer image and verifies the
-full bootstrap path. CI runs a synthesized Conway-ready chain DB through
-emit, convert, header extraction, nonce composition, Amaru imports, and
-an `amaru run` startup proof from the produced bundle. A Docker-level
-verifier also runs the image against a `testnet_42` ChainDB held open by
-the official `ghcr.io/intersectmbo/cardano-node:10.7.1-amd64` image on
-the x86_64 runner.
+1. `ledger-state-emitter` - reads the pinned cardano-node 10.7.1 ledger
+   state and emits the Amaru bootstrap projection.
+2. `amaru convert-ledger-state` - converts the projected ledger states
+   into Amaru snapshot artifacts.
+3. `header-extractor` - extracts the headers needed by Amaru's chain
+   store and nonce alignment.
+4. `amaru import-ledger-state`, `amaru import-headers`, and
+   `amaru import-nonces` - populate the stores that `amaru run` opens.
 
-After CI succeeds on `main`, GitHub Actions publishes the producer image
-as:
+`db-synthesizer` remains in this repository only for fixtures and checks.
+It fabricates ChainDB inputs for CI; it is not in the Antithesis runtime
+path.
+
+## Antithesis relay contract
+
+In the downstream
+[`cardano-foundation/cardano-node-antithesis`](https://github.com/cardano-foundation/cardano-node-antithesis)
+Amaru testnets, each `amaru-relay-N` container is an instance of this
+image with:
+
+```yaml
+entrypoint: amaru-relay-bootstrap
+environment:
+  RELAY_NAME: amaru-relay-1
+  AMARU_PEER: p1.example:3001
+  AMARU_NETWORK: testnet_42
+  AMARU_BOOTSTRAP_RETRY_SECONDS: "5"
+volumes:
+  - p1-state:/live:ro
+  - p1-configs:/cardano/config:ro
+  - ./amaru-runtime:/amaru-runtime:ro
+  - amaru-startup:/startup
+  - a1-state:/srv/amaru
+```
+
+The relay entrypoint writes `/startup/$RELAY_NAME.started` immediately so
+the Antithesis sidecar can emit setup-complete inside the setup window.
+Bootstrap then continues during the test phase. The relay loops over
+`bootstrap-producer`, promotes a complete bundle into `/srv/amaru`, and
+finally runs:
+
+```text
+amaru run \
+  --network "$AMARU_NETWORK" \
+  --ledger-dir /srv/amaru/ledger.$AMARU_NETWORK.db \
+  --chain-dir /srv/amaru/chain.$AMARU_NETWORK.db \
+  --era-history-file /amaru-runtime/era-history.json \
+  --global-parameters-file /amaru-runtime/global-parameters.json \
+  --peer-address "$AMARU_PEER"
+```
+
+The `amaru-runtime/` directory is part of the deployment contract. It
+must contain:
+
+- `era-history.json`: the custom testnet era history passed to
+  `--era-history-file`.
+- `global-parameters.json`: the custom testnet consensus parameters
+  passed to `--global-parameters-file`.
+
+## Published images
+
+After CI succeeds on `main`, GitHub Actions publishes:
 
 ```text
 ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
 ```
 
-After CI succeeds on a same-repository pull request, GitHub Actions also
-publishes immutable PR test images:
+After CI succeeds on a same-repository pull request, it also publishes:
 
 ```text
 ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-pr-head-sha>
 ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>
 ```
 
-Downstream compose files should pin that full commit-SHA tag. The
-project does not publish moving runtime tags as the integration
-contract.
-
-To select a runtime image, use the full commit SHA from the successful
-`main` or same-repository PR CI run you want to consume. The matching
-publish workflow pushes that same SHA as the GHCR tag, and the Build Gate
-uploads `bootstrap-producer-image-<github-sha>` for the same commit.
-
-## Build artifacts
-
-The producer image is intentionally available in four places:
-
-| Surface | Name | Use |
-|---------|------|-----|
-| Flake package | `.#packages.x86_64-linux.bootstrap-producer-image` | Build the Docker image tarball locally. |
-| Flake check | `.#checks.x86_64-linux.bootstrap-producer-image` | Prove the image still builds in CI's Build Gate. |
-| GitHub Actions artifact | `bootstrap-producer-image-<github-sha>` | Download the CI-built tarball from a PR or `main` CI run. |
-| GHCR image | `ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>` | Runtime image for downstream Compose stacks after `main` or same-repository PR CI passes. |
-| GHCR PR image | `ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>` | Human-identifiable test image for downstream PR validation before merge. |
+Downstream Compose files should pin a full commit-SHA tag. The project
+does not publish moving runtime tags such as `latest`.
 
 Local build:
 
@@ -81,112 +117,17 @@ nix build .#packages.x86_64-linux.bootstrap-producer-image \
 docker load -i result-bootstrap-producer-image
 ```
 
-In GitHub Actions, the uploaded artifact contains:
-
-```text
-amaru-bootstrap-producer-<github-sha>.tar.gz
-```
-
-## What this provides
-
-- `bootstrap-producer`: a one-shot container/local app that waits until a
-  cardano-node chain DB is mature enough for Amaru, writes a complete
-  bootstrap bundle, then exits 0.
-- `header-extractor`: an in-repo Haskell executable for `tip-info`,
-  `list-blocks`, and `get-header` against a node ChainDB.
-- `ledger-state-emitter`: an in-repo Haskell executable that emits the
-  Amaru bootstrap projection of a node ledger state.
-- Nix checks for the full synthesized producer path and the concurrent
-  producer race.
-- A CI-gated `amaru-run-bootstrap` proof that Amaru can open the
-  produced ledger/chain stores and reach ledger startup.
-- A short-epoch Antithesis golden gate that samples slots `9`, `129`,
-  and `249` from a generated 120-slot-epoch ChainDB and imports them
-  through Amaru.
-
-The architecture, state machine, release boundary, and concurrency model
-are documented with diagrams in `docs/architecture.md`.
-
-## Tutorial
-
-The operator tutorial is in [`docs/tutorial.md`](docs/tutorial.md). It
-covers:
-
-- using the published Docker image from Compose
-- the required four producer arguments
-- read-write ChainDB mount requirements
-- local runs with `nix run .#bootstrap-producer`
-- failure diagnosis and CI evidence
-
-The image entrypoint is `bootstrap-producer`; it does not infer paths
-from environment alone. A Compose service must pass:
-
-```yaml
-command:
-  - /cardano/state/db
-  - /cardano/config
-  - /srv/amaru
-  - testnet_42
-```
+The matching CI artifact is named `bootstrap-producer-image-<github-sha>`
+and contains `amaru-bootstrap-producer-<github-sha>.tar.gz`.
 
 ## Compatibility target
 
 This repository currently targets `cardano-node 10.7.1`. That is
 deliberate: Cardano ledger-state CBOR changes across node releases, so
 compiling against a random ledger package set is not enough. Retargeting
-this producer to a new node release means updating `cabal.project`,
-`flake.lock`, and the documented projection in
+the producer means updating `cabal.project`, `flake.lock`, and the
+documented projection in
 `specs/003-amaru-bootstrap-producer/research.md#r-011`.
-
-`ledger-state-emitter` does not write raw node ledger CBOR. It writes
-the Amaru bootstrap projection of the node-10.7.1 state:
-
-- canonical UTxO entries instead of consensus `MemPack` ledger-table
-  entries
-- pre-Peras Shelley ledger wrapper shape for Amaru's converter
-- Conway/Dijkstra pool state projected to the fields Amaru imports
-- Conway/Dijkstra account state projected to Amaru's legacy delegation
-  wrapper
-- empty reward-update state projected as a completed zero reward update,
-  matching Amaru's `has_rewards=true` import path
-
-## Inputs / outputs
-
-**Inputs**
-
-- a live or mature cardano-node chain DB, mounted read-write into the
-  producer container
-- a node config directory containing `config.json` and the genesis files
-- a target network name, for example `testnet_42` or `mainnet`
-
-The read-write ChainDB mount is an API requirement of node 10.7.1's
-consensus ImmutableDB validation path. The bootstrap-producer still
-consults only immutable chunks; it does not use volatile DB state as a
-readiness source. `ledger-state-emitter` replays with an in-memory
-LedgerDB backend and deliberately does not flush into the node-owned
-LedgerDB, so it does not prune or mutate snapshots while cardano-node is
-running.
-
-**Outputs**
-
-```
-<bundle>/<network>/
-├── chain.<network>.db/                    # populated by amaru import-headers/import-nonces
-├── ledger.<network>.db/                   # populated by amaru import-ledger-state
-├── snapshots/<slot>.<hash>.cbor           # target plus two prior epoch snapshots
-├── snapshots/history.<slot>.<hash>.json   # testnet era history sidecars
-├── nonces.json                            # tail rewritten to previous-epoch header hash
-└── headers/header.<slot>.<hash>.cbor      # headers needed by Amaru
-```
-
-The latest snapshot's `<slot>.<hash>` must have a matching
-`headers/header.<slot>.<hash>.cbor`; Amaru uses that exact header when
-aligning its chain store to the ledger tip at startup.
-
-For custom testnets, the producer also corrects each open-ended current
-era history sidecar to the `epochLength` from the node's Shelley genesis.
-This matters for short-epoch Antithesis networks because Amaru imports
-testnet snapshots using the sidecar history file next to each snapshot.
 
 ## Local verification
 
@@ -195,42 +136,28 @@ just ci
 ```
 
 `just ci` mirrors the GitHub workflow: it runs the Build Gate, runs the
-Phase 0 smoke verdict and accepts either `PASS` or the expected
-`FAIL: format mismatch` verdict, then runs the Docker-level live
-bootstrap-producer verifier. The pure producer-specific end-to-end check
-is `.#checks.x86_64-linux.bootstrap-producer-synthesized`; the startup
-proof is `.#checks.x86_64-linux.amaru-run-bootstrap`.
-The short-epoch Antithesis regression checks are
-`.#checks.x86_64-linux.antithesis-short-epoch-samples` and
-`.#checks.x86_64-linux.antithesis-short-epoch-golden`.
-
-These checks prove bundle production, Amaru import, and Amaru startup
-alignment. They are not a full mainnet ledger-content coverage suite for
-every possible transaction, UTxO, script, stake, governance, or reward
-shape.
-
-To run the producer locally against a ChainDB:
+Phase 0 smoke verdict, and runs the Docker-level live bootstrap verifier.
+Producer-specific checks include:
 
 ```bash
-nix run .#bootstrap-producer -- \
-  /path/to/cardano-node/chain-db \
-  /path/to/cardano-node/config-dir \
-  /tmp/amaru-bundle \
-  testnet_42
-```
-
-To run the Docker-level live verifier against the official node 10.7.1
-amd64 image:
-
-```bash
+nix build .#checks.x86_64-linux.bootstrap-producer-synthesized
+nix build .#checks.x86_64-linux.amaru-run-bootstrap
+nix build .#checks.x86_64-linux.antithesis-short-epoch-samples
+nix build .#checks.x86_64-linux.antithesis-short-epoch-golden
+nix build .#checks.x86_64-linux.bootstrap-producer-bats
+nix build .#checks.x86_64-linux.bootstrap-producer-image
 just live-bootstrap-producer
 ```
 
-## Consumers
+These checks prove bundle production, Amaru import, and Amaru startup
+alignment for the pinned release boundary. They are not exhaustive
+mainnet ledger-content coverage.
 
-- [`cardano-foundation/cardano-node-antithesis`](https://github.com/cardano-foundation/cardano-node-antithesis)
-  testnets/cardano_amaru — consumes the commit-SHA-tagged producer image
-  in the follow-up integration ticket
+## Documentation
+
+The MkDocs site starts at [`docs/index.md`](docs/index.md). The current
+operator path is [`docs/tutorial.md`](docs/tutorial.md), and the
+Antithesis-specific contract is in [`docs/antithesis.md`](docs/antithesis.md).
 
 ## License
 

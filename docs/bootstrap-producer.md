@@ -1,7 +1,15 @@
 # Bootstrap Producer
 
-`bootstrap-producer` is the Phase 2 runtime deliverable. It is exposed
-both as a Docker image and as a local flake app:
+`bootstrap-producer` is the lower-level one-shot primitive inside the
+published image. The current Antithesis deployment usually runs the same
+image with `entrypoint: amaru-relay-bootstrap`; that relay wrapper calls
+`/bin/bootstrap-producer` internally and then `exec`s `amaru run`.
+
+Use this page for local debugging, CI checks, and standalone producer
+integration. Use [Tutorial](tutorial.md) or
+[Antithesis deployment](antithesis.md) for the relay container shape.
+
+The producer is also exposed as a local flake app:
 
 ```bash
 nix run .#bootstrap-producer -- \
@@ -11,11 +19,11 @@ nix run .#bootstrap-producer -- \
   <network>
 ```
 
-## Invocation
+## Standalone Invocation
 
-The Docker image entrypoint is `bootstrap-producer`. The image does not
-have a default `Cmd`, so Compose files must pass the four required
-arguments:
+The Docker image default entrypoint is `bootstrap-producer` for
+standalone compatibility. The image does not have a default `Cmd`, so a
+standalone Compose service must pass the four required arguments:
 
 ```yaml
 services:
@@ -43,8 +51,10 @@ directory, pass that path directly.
 
 ## Pipeline
 
-The producer runs once and exits. Its exit code is the synchronization
-signal for downstream Amaru services.
+The producer runs once and exits. In standalone integrations its exit
+code can be used as the synchronization signal for downstream Amaru
+services. In Antithesis relay integrations, the synchronization signal is
+the relay startup marker and the relay process continues as `amaru run`.
 
 1. Check whether `<bundle-dir>/<network>` is already complete. If so,
    exit 0.
@@ -96,6 +106,12 @@ default epoch size, so the producer rewrites that sidecar to the
 `epochLength` from the mounted Shelley genesis before import. Without
 that correction a 120-slot Antithesis testnet imports slot 9, then fails
 at slot 129 because the sidecar still maps slot 129 to epoch 0.
+
+`amaru import-nonces` also receives the producer-generated era-history
+input so imported nonce epochs match short-epoch testnets. The runtime
+`era-history.json` and `global-parameters.json` consumed later by
+`amaru run` are deployment files mounted at `/amaru-runtime` in relay
+mode; see [Antithesis deployment](antithesis.md#runtime-parameter-files).
 
 ## Node-Release Target
 

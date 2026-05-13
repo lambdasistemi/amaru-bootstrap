@@ -1,64 +1,93 @@
 # amaru-bootstrap
 
-Bootstrap data pipeline for [Amaru](https://github.com/pragma-org/amaru) on custom Cardano testnets.
+`amaru-bootstrap` builds the image and helper tools used to start
+relay-only Amaru nodes on custom Cardano testnets.
 
-## What this project is
+## Current Shape
 
-Amaru cannot synchronise from genesis. To run on a custom (non-`mainnet` / non-`preprod` / non-`preview`) testnet it needs a *bootstrap bundle*:
+The repository used to be documented as a one-shot "bundle producer"
+service. That is still a useful primitive, but it is no longer the
+primary Antithesis integration shape.
 
-- ledger-state snapshots at epoch boundaries (CBOR)
-- a `nonces.json` file with a `tail` field
-- a handful of header CBORs
+The current Antithesis path runs the published
+`ghcr.io/lambdasistemi/amaru-bootstrap-producer:<commit-sha>` image as
+each long-lived `amaru-relay-N` container. Compose overrides the image
+entrypoint to `amaru-relay-bootstrap`. That wrapper:
 
-[`pragma-org/amaru/docker/testnet`](https://github.com/pragma-org/amaru/tree/main/docker/testnet) produces this bundle today, but it depends on a personal fork of `ouroboros-consensus` (`abailly/snapshot-generator`) that is 1300+ commits behind upstream. **That fork is the failure mode this project replaces.**
+1. Writes `/startup/$RELAY_NAME.started` immediately for the Antithesis
+   setup-complete gate.
+2. Copies a fresh snapshot of the paired cardano-node `/live` state into
+   private scratch space.
+3. Invokes `/bin/bootstrap-producer` in a retry loop until the Amaru
+   stores are complete.
+4. Promotes the produced stores into `/srv/amaru`.
+5. `exec`s `amaru run` against the paired cardano-node peer.
 
-This repo now produces the same kind of bundle without carrying a fork of `ouroboros-consensus`:
+There is no downstream `depends_on: service_completed_successfully`
+consumer in this relay mode. The `amaru-relay-N` process is the
+bootstrapper and the Amaru node.
 
-1. [`db-synthesizer`](https://github.com/IntersectMBO/ouroboros-consensus/tree/main/ouroboros-consensus-cardano/app) (upstream) — fabricate test chain DBs for fixtures and checks
-2. `ledger-state-emitter` (in this repo) — read a cardano-node 10.7.1 chain DB and emit the Amaru bootstrap projection of the ledger state
-3. `header-extractor` (in this repo) — extract the headers Amaru needs
-4. `amaru convert-ledger-state` / `import-*` — load the bundle
+## Runtime Components
 
-## Status
+- `amaru-relay-bootstrap`: Antithesis relay entrypoint. It owns startup
+  marker emission, retry policy, bundle promotion, and the final
+  `amaru run` command.
+- `bootstrap-producer`: one-shot primitive used by the relay wrapper and
+  by local checks. It produces the Amaru ledger and chain stores from a
+  cardano-node ChainDB.
+- `ledger-state-emitter`: Haskell executable that projects a pinned
+  cardano-node 10.7.1 ledger state into the legacy shape Amaru imports.
+- `header-extractor`: Haskell executable for `tip-info`, `list-blocks`,
+  and `get-header` against immutable ChainDB chunks.
+- `amaru-runtime/`: deployment-provided runtime files consumed by
+  `amaru run`: `era-history.json` and `global-parameters.json`.
 
-The current `main` branch contains the bootstrap-producer
-implementation. The active spec is
-[`specs/003-amaru-bootstrap-producer/`](https://github.com/lambdasistemi/amaru-bootstrap/tree/main/specs/003-amaru-bootstrap-producer);
-the flake checks build the producer image and run a synthesized
-Conway-ready chain DB through emit, convert, header extraction, nonce
-composition, Amaru imports, and an `amaru run` startup proof. CI also
-runs a Docker-level live verifier against a `testnet_42` ChainDB held
-open by `ghcr.io/intersectmbo/cardano-node:10.7.1-amd64`.
+## Production Pipeline
 
-## Current implementation
+The production bootstrap pipeline is:
 
-The producer is a one-shot container and local flake app. It waits until
-the immutable tip is in Conway with enough history for Amaru, emits a
-node-10.7.1-compatible three-snapshot ledger window, converts it with
-Amaru, extracts headers, rewrites `nonces.json`, imports all three
-artifact classes into Amaru stores, and atomically commits the completed
-bundle.
+```text
+cardano-node ChainDB
+  -> ledger-state-emitter
+  -> amaru convert-ledger-state
+  -> header-extractor
+  -> nonce tail rewrite
+  -> amaru import-ledger-state/import-headers/import-nonces
+  -> amaru run
+```
 
-The current compatibility target is `cardano-node 10.7.1`. The
-`ledger-state-emitter` output is a release-specific Amaru bootstrap
-projection, not arbitrary raw node ledger CBOR.
+`db-synthesizer` is not part of this runtime path. It remains available
+for fixture generation and CI checks.
 
-The producer's ChainDB access is immutable-only by behavior, but the
-node-10.7.1 consensus ImmutableDB opener requires a writable filesystem
-while validating chunk files. Compose integrations therefore mount the
-node state volume read-write and keep the config volume read-only. The
-ledger replay uses an in-memory LedgerDB backend and does not flush into
-the node-owned LedgerDB.
+## Specs And History
 
-## How to read this site
+The original active Spec Kit feature is
+[`specs/003-amaru-bootstrap-producer/`](https://github.com/lambdasistemi/amaru-bootstrap/tree/main/specs/003-amaru-bootstrap-producer).
+That spec describes the one-shot producer primitive. Later Antithesis
+work layered the self-bootstrap relay contract on top of that primitive;
+the relay wrapper's source comment names that downstream contract as
+spec 080.
 
-- **[Tutorial](tutorial.md)** - start here if you want to wire the
-  producer into a Compose stack or run it locally against a ChainDB.
-- **[What Amaru needs](what-amaru-needs.md)** — reverse-engineered contract for the bootstrap bundle, drawn from Arnaud Bailly's loader scripts. Read this first if you want to understand *what* the project produces.
-- **[Architecture](architecture.md)** — diagrams for the runtime data flow, state machine, node-release boundary, ledger projection, and concurrency model.
-- **[Bootstrap producer](bootstrap-producer.md)** — current producer pipeline, node-release target, and verification commands.
-- **[Constitution](constitution.md)** — the five core principles that gate every design decision in this repo. Read this if you want to understand *why* the project is shaped the way it is.
+Historical bundle-shape notes are kept under
+[History: What Amaru needed](history/what-amaru-needs.md). They explain
+why the project originally replaced a forked `db-synthesizer`, but they
+are not the current runtime recipe.
+
+## How To Read This Site
+
+- **[Tutorial](tutorial.md)** - wire the relay bootstrap image into a
+  Compose testnet.
+- **[Antithesis deployment](antithesis.md)** - topology, environment
+  variables, startup marker contract, and runtime parameter files.
+- **[Architecture](architecture.md)** - relay flow, producer pipeline,
+  ChainDB contract, and state machines.
+- **[Bootstrap producer](bootstrap-producer.md)** - lower-level
+  one-shot producer contract and local verification commands.
+- **[Constitution](constitution.md)** - project principles that govern
+  design choices.
 
 ## Consumers
 
-- [`cardano-foundation/cardano-node-antithesis`](https://github.com/cardano-foundation/cardano-node-antithesis) `testnets/cardano_amaru/` - the downstream docker-compose stack tracked by the follow-up integration issue.
+- [`cardano-foundation/cardano-node-antithesis`](https://github.com/cardano-foundation/cardano-node-antithesis)
+  `cardano_amaru*` testnets pin commit-SHA-tagged images from this
+  repository and run them as relay-only Amaru nodes.

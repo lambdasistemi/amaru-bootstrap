@@ -1,57 +1,125 @@
 # Architecture
 
-The producer is intentionally a small orchestration layer around
-release-pinned tools. The critical design boundary is that
-`ledger-state-emitter` targets one cardano-node release at a time; the
-current branch targets `cardano-node 10.7.1`.
+The repository has two layers:
 
-## Runtime Components
+- `amaru-relay-bootstrap`: the long-lived Antithesis relay entrypoint.
+- `bootstrap-producer`: the one-shot producer primitive called by the
+  relay wrapper and by local checks.
+
+The critical code boundary is still release-pinned ledger projection:
+`ledger-state-emitter` targets one cardano-node release at a time. This
+branch targets `cardano-node 10.7.1`.
+
+## Relay Runtime
 
 ```mermaid
 flowchart LR
-    node["cardano-node\nchain DB + config"] --> mount["state mount rw\nconfig mount ro"]
-    mount --> preflight["bootstrap-producer\npre-flight"]
+    node["paired cardano-node\n/live + config"] --> relay["amaru-relay-bootstrap"]
+    runtime["/amaru-runtime\nera-history.json\nglobal-parameters.json"] --> relay
+    relay --> marker["/startup/$RELAY_NAME.started"]
+    marker --> sidecar["Antithesis sidecar\nsetup-complete"]
+
+    relay --> scratch["private scratch\n/srv/amaru/.work"]
+    scratch --> producer["bootstrap-producer\nretry attempts"]
+    producer --> produced["scratch bundle\n<scratch-out>/<network>"]
+    produced --> promote["promote complete bundle"]
+    promote --> stores["/srv/amaru\nledger.*.db\nchain.*.db\nnonces.json"]
+    stores --> amaru["exec amaru run"]
+    runtime --> amaru
+    amaru --> peer["peer cardano-node\n$AMARU_PEER"]
+```
+
+The relay writes the startup marker before bootstrap work. That lets the
+Antithesis setup phase complete while the bootstrap itself continues in
+the test phase. The marker is not an Amaru-sync proof; it is a container
+startup contract.
+
+There is no downstream Compose service waiting on
+`service_completed_successfully` in relay mode. The relay container does
+not stop after bootstrap; it `exec`s `amaru run`.
+
+## Bootstrap Producer Pipeline
+
+```mermaid
+flowchart LR
+    mount["ChainDB snapshot\nconfig"] --> preflight["pre-flight\nconfig + era readiness"]
     preflight --> emitter["ledger-state-emitter x3\nnode-10.7.1 projection"]
     emitter --> legacy["Legacy ExtLedgerState CBOR\nlatest + two prior epochs"]
     legacy --> convert["amaru convert-ledger-state x3"]
-    convert --> snapshot["snapshot CBOR\nhistory JSON\nnonces JSON"]
+    convert --> snapshots["snapshot CBOR\nhistory JSON\nnonces JSON"]
 
     mount --> headers["header-extractor\nlist-blocks/get-header"]
     headers --> headerFiles["header.*.cbor files"]
 
-    snapshot --> compose["nonce tail rewrite"]
+    snapshots --> compose["nonce tail rewrite"]
     headerFiles --> compose
     compose --> imports["amaru import-ledger-state\namaru import-headers\namaru import-nonces"]
     imports --> bundle["complete bundle\n<bundle>/<network>"]
 ```
 
-The producer's exit code is the synchronization primitive for Docker
-Compose. Downstream Amaru services depend on
-`service_completed_successfully` and start only after the bundle exists.
+In standalone mode the producer writes `<bundle>/<network>`. In relay
+mode it writes to scratch, and the wrapper promotes the contents of
+`<scratch-out>/<network>` into `/srv/amaru` so `amaru run` can open:
+
+```text
+/srv/amaru/
+|-- chain.<network>.db/
+|-- ledger.<network>.db/
+|-- snapshots/
+|-- nonces.json
+`-- headers/
+```
 
 ## Live ChainDB Contract
 
 ```mermaid
 flowchart LR
     writer["cardano-node\nlive writer"] --> state["state volume\nChainDB"]
-    state --> imm["immutable chunks\nappend-only"]
-    state --> vol["volatile DB\nignored"]
+    state --> imm["immutable chunks\nread by tools"]
+    state --> ledger["ledger DB\ncopied but not mutated"]
+    state --> vol["volatile DB\ncopied for ChainDB shape"]
     imm --> tip["header-extractor tip-info"]
     imm --> headers["header-extractor headers"]
-    state -. "mounted read-write\nfor consensus validation" .-> tip
+    state -. "mounted read-only in relay\ncopied to writable scratch" .-> relay["amaru-relay-bootstrap"]
+    relay --> scratch["scratch ChainDB\nopened read-write by producer tools"]
 ```
 
-The bootstrap-producer's semantic contract is immutable-only access:
-readiness is derived from the immutable tip and header extraction walks
-immutable chunks. The Docker mount is still read-write because
-node-10.7.1's consensus ImmutableDB validation path opens chunk files
-through APIs that reject a read-only filesystem. The producer does not
-use volatile DB state as a readiness source. The ledger replay opens a
-V2 LedgerDB with an in-memory backend and does not flush replayed state
-back into the node-owned LedgerDB; flushing there can prune snapshots
-from a live node database.
+The one-shot `bootstrap-producer` still needs a writable ChainDB path
+because node-10.7.1's consensus ImmutableDB validation path opens chunk
+files through APIs that reject a read-only filesystem. The relay wrapper
+therefore copies the paired cardano-node `/live` state into private
+writable scratch before invoking the producer. The producer behavior is
+immutable-only: readiness comes from immutable chunks, and the ledger
+replay uses an in-memory LedgerDB backend rather than flushing into the
+node-owned LedgerDB.
 
-## State Machine
+## Relay State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> ValidateInputs
+    ValidateInputs --> MarkerWritten: RELAY_NAME + AMARU_PEER valid
+    MarkerWritten --> CheckBundle
+    CheckBundle --> ExecAmaru: bundle complete
+    CheckBundle --> RefreshSnapshot: bundle missing
+    RefreshSnapshot --> ProducerAttempt: /live copied
+    RefreshSnapshot --> Sleep: /live not usable
+    ProducerAttempt --> Promote: rc=0
+    ProducerAttempt --> Sleep: transient rc=1/2/5/6/7/8
+    ProducerAttempt --> Fatal: other rc
+    Promote --> CheckBundle: committed bundle
+    Promote --> Sleep: promote failed
+    Sleep --> CheckBundle
+    ExecAmaru --> [*]
+    Fatal --> [*]
+```
+
+The retry loop belongs in the relay entrypoint, not in Compose
+dependency semantics. This matters under Antithesis faults: a short,
+failed producer attempt should refresh from a newer `/live` snapshot
+instead of blocking the whole setup behind a one-shot service.
+
+## Producer State Machine
 
 ```mermaid
 stateDiagram-v2
@@ -81,6 +149,20 @@ stateDiagram-v2
     Commit --> CommitError: final bundle incomplete
 ```
 
+## Runtime Parameters
+
+The relay passes deployment-provided runtime JSON to `amaru run`:
+
+```text
+--era-history-file /amaru-runtime/era-history.json
+--global-parameters-file /amaru-runtime/global-parameters.json
+```
+
+These files must match the custom testnet genesis/config used by the
+paired cardano-node. They are separate from the snapshot sidecar history
+files that `amaru convert-ledger-state` writes next to each converted
+snapshot.
+
 ## Node-Release Boundary
 
 ```mermaid
@@ -95,7 +177,7 @@ flowchart TB
     emitter --> projection["Amaru bootstrap projection"]
     projection --> amaru["Amaru importer"]
 
-    other["Future node release"] -. requires retargeting .-> Pinned
+    other["Future node release"] -. "requires retargeting" .-> Pinned
 ```
 
 Retargeting to another node release is an explicit project task. It is
@@ -120,29 +202,6 @@ flowchart LR
 The projection preserves the fields Amaru imports and omits node-side
 acceleration or wrapper fields that Amaru does not consume during
 bootstrap.
-
-## Concurrency
-
-```mermaid
-sequenceDiagram
-    participant A as Producer A
-    participant B as Producer B
-    participant T as Temp dirs
-    participant F as Final bundle
-
-    A->>T: write <network>.tmp.pid.random
-    B->>T: write <network>.tmp.pid.random
-    A->>F: mv -T temp final
-    F-->>A: success
-    B->>F: mv -T temp final
-    F-->>B: exists
-    B->>F: validate complete bundle
-    B-->>B: exit 0
-```
-
-There is no shared temp directory. Concurrent producers cannot corrupt
-each other's intermediate files; one wins the atomic rename and the
-others accept the completed bundle.
 
 ## CI Startup Proof
 
