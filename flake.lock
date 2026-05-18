@@ -36,16 +36,16 @@
     "amaru": {
       "flake": false,
       "locked": {
-        "lastModified": 1778156895,
-        "narHash": "sha256-iwDaNXT78PKfIOxQJYesGF8OnJrQJNKQBhh1F5yqNOY=",
+        "lastModified": 1779091771,
+        "narHash": "sha256-/lXW3iyQB8oRaFV/8VYHeREnGv53w96S1cc+yhiga4Y=",
         "owner": "lambdasistemi",
         "repo": "amaru",
-        "rev": "5b04cc72d156e106d6592eda20751fe9d63fdbdf",
+        "rev": "3ac5d14ecebc1ac6ac9a0e3b11332a319001d6ea",
         "type": "github"
       },
       "original": {
         "owner": "lambdasistemi",
-        "ref": "main",
+        "ref": "feat/antithesis-testnet-support",
         "repo": "amaru",
         "type": "github"
       }

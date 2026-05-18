@@ -49,8 +49,10 @@
     # flake.lock per constitution Principle III. This fork carries the
     # runtime-parameter flags needed for generated Antithesis testnets,
     # plus the relay restart/epoch-transition ledger fixes under test.
+    # feat/antithesis-testnet-support rebases the patch stack onto current
+    # pragma-org/amaru main (was previously on a 65-commit-older base).
     amaru = {
-      url = "github:lambdasistemi/amaru/main";
+      url = "github:lambdasistemi/amaru/feat/antithesis-testnet-support";
       flake = false;
     };
   };
