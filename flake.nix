@@ -46,13 +46,13 @@
     };
 
     # lambdasistemi/amaru consumed as a non-flake input; SHA pinned via
-    # flake.lock per constitution Principle III. This fork carries the
-    # runtime-parameter flags needed for generated Antithesis testnets,
-    # plus the relay restart/epoch-transition ledger fixes under test.
-    # feat/antithesis-testnet-support rebases the patch stack onto current
-    # pragma-org/amaru main (was previously on a 65-commit-older base).
+    # flake.lock per constitution Principle III. Pinned to feat/testnet-bootstrap:
+    # upstream pragma-org/amaru main plus a minimal, upstreamable delta —
+    # create-snapshots --targets-file/--cardano-db-dir (offline/testnet snapshots),
+    # runtime --era-history-file/--global-parameters-file, the testnet tvar
+    # era-history sidecar fix, and short-epoch ledger/consensus guards.
     amaru = {
-      url = "github:lambdasistemi/amaru/feat/antithesis-testnet-support";
+      url = "github:lambdasistemi/amaru/feat/testnet-bootstrap";
       flake = false;
     };
   };
