@@ -31,6 +31,7 @@ let
     pkgs.jq
     ledgerStateEmitter
     headerExtractor
+    iogTools.db-analyser
     amaruPkg
   ];
 
@@ -69,6 +70,7 @@ pkgs.dockerTools.buildLayeredImage {
     pkgs.jq
     ledgerStateEmitter
     headerExtractor
+    iogTools.db-analyser
     amaruPkg
     bootstrapProducer
     amaruRelayBootstrap
