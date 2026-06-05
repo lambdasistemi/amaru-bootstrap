@@ -34,6 +34,7 @@ let
     pkgs.gawk
     pkgs.jq
     amaruPkg
+    iogTools.db-analyser
     headerExtractorPkgs.header-extractor
     headerExtractorPkgs.ledger-state-emitter
   ];
@@ -180,7 +181,7 @@ let
       db-synthesizer \
         --config "$out/config/config.json" \
         --bulk-credentials-file "$bulk" \
-        -s 720 \
+        -s 3000 \
         --db "$out/chain-db" \
         -f
 
@@ -200,55 +201,41 @@ let
         >"$out/METADATA.md"
     '';
 
-  antithesisShortEpochSamples =
-    pkgs.runCommand "antithesis-short-epoch-golden-samples"
+  # Short-epoch (epochLength=120) bootstrap bundle, produced by the same
+  # upstream-bootstrap pipeline as the standard path. Exercises
+  # create-snapshots + bootstrap against a short-epoch chain and is the
+  # consume-side fixture for the antithesis golden gate.
+  shortEpochBootstrapBundle =
+    pkgs.runCommand "antithesis-short-epoch-bundle"
       {
         nativeBuildInputs = [
           pkgs.bash
           pkgs.coreutils
           pkgs.findutils
+          pkgs.gawk
           pkgs.jq
           amaruPkg
-          headerExtractorPkgs.ledger-state-emitter
+          iogTools.db-analyser
+          headerExtractorPkgs.header-extractor
         ];
       } ''
       set -euo pipefail
 
-      mkdir -p "$out/legacy" "$out/snapshots"
-      cp ${antithesisShortEpochChainDb}/METADATA.md "$out/METADATA.md"
       cp -rL ${antithesisShortEpochChainDb}/chain-db "$TMPDIR/chain-db"
       cp -rL ${antithesisShortEpochChainDb}/config "$TMPDIR/config"
       chmod -R u+w "$TMPDIR/chain-db" "$TMPDIR/config"
+      mkdir -p "$out"
 
-      for slot in 9 129 249; do
-        ledger-state-emitter \
-          --db "$TMPDIR/chain-db" \
-          --config "$TMPDIR/config/config.json" \
-          --target-slot "$slot" \
-          --out "$out/legacy/$slot.cbor"
-
-        amaru convert-ledger-state \
-          --network testnet_42 \
-          --snapshot "$out/legacy/$slot.cbor" \
-          --target-dir "$out/snapshots"
-      done
-
-      epoch_length=$(jq -r '.epochLength' \
-        "$TMPDIR/config/shelley-genesis.json")
-      for history in "$out"/snapshots/history.*.json; do
-        tmp="$history.tmp"
-        jq --argjson epochLength "$epoch_length" \
-          '(.eras[] | select(.end == null) | .params.epoch_size_slots) = $epochLength' \
-          "$history" >"$tmp"
-        mv "$tmp" "$history"
-      done
-
-      cbor_count=$(find "$out/snapshots" -maxdepth 1 \
-        -name '*.cbor' | wc -l)
-      if [ "$cbor_count" -ne 3 ]; then
-        echo "expected 3 converted short-epoch snapshots, got $cbor_count" >&2
-        exit 1
-      fi
+      export PATH="${producerRuntimePath}:$PATH"
+      AMARU_NETWORK=testnet_42 \
+      AMARU_CLUSTER_READY_DEADLINE_SECONDS=10 \
+      AMARU_WAIT_DEADLINE_SECONDS=10 \
+      AMARU_POLL_INTERVAL_SECONDS=1 \
+        ${pkgs.bash}/bin/bash ${../scripts/bootstrap-producer.sh} \
+          "$TMPDIR/chain-db" \
+          "$TMPDIR/config" \
+          "$out" \
+          testnet_42
     '';
 in
 {
@@ -259,7 +246,24 @@ in
   header-extractor = headerExtractorPkgs.header-extractor;
   ledger-state-emitter = headerExtractorPkgs.ledger-state-emitter;
   bootstrap-producer-image = bootstrapProducerImage;
-  antithesis-short-epoch-samples = antithesisShortEpochSamples;
+  antithesis-short-epoch-samples =
+    pkgs.runCommand "antithesis-short-epoch-samples"
+      {
+        nativeBuildInputs = [ pkgs.coreutils pkgs.findutils ];
+      } ''
+      set -euo pipefail
+      bundle=${shortEpochBootstrapBundle}/testnet_42
+      # The short-epoch producer materialized at least three snapshot dirs
+      # and the era-history override for consume.
+      snap_count=$(find "$bundle/snapshots/testnet_42" -mindepth 1 -maxdepth 1 -type d \
+        -regextype posix-extended -regex '.*/[0-9]+\.[0-9a-f]+' | wc -l)
+      if [ "$snap_count" -lt 3 ]; then
+        echo "expected >=3 short-epoch snapshot dirs, found $snap_count" >&2
+        exit 1
+      fi
+      test -f "$bundle/era-history.json"
+      mkdir -p $out
+    '';
 
   shellcheck = pkgs.runCommand "smoke-test-shellcheck"
     {
@@ -394,13 +398,10 @@ in
       final=${synthesizedBootstrapBundle}/testnet_42
       test -d "$final/ledger.testnet_42.db"
       test -d "$final/chain.testnet_42.db"
-      test -f "$final/nonces.json"
-      test -n "$(find "$final/snapshots" -name '*.cbor' -print -quit)"
-      header_count=$(find "$final/headers" -name 'header.*.cbor' | wc -l)
-      if [ "$header_count" -lt 4 ]; then
-        echo "expected at least 4 imported headers, found $header_count" >&2
-        exit 1
-      fi
+      # nonces + bootstrap headers are baked into chain.<net>.db by
+      # `amaru bootstrap`; the bundle ships the era-history override for
+      # `amaru run --era-history-file` at consume time.
+      test -f "$final/era-history.json"
       test -d "$final/ledger.testnet_42.db/live"
       snapshot_count=0
       for d in "$final"/ledger.testnet_42.db/*; do
@@ -469,31 +470,54 @@ in
       mkdir -p $out
     '';
 
-  # Issue #29 regression gate. This intentionally exercises the exact
-  # failure boundary seen in the Antithesis short-epoch experiment:
-  # convert succeeds, then `amaru import-ledger-state` must be able to
-  # consume the generated snapshots. On the current projection this
-  # fails with "unexpected type map at position 2: expected u32".
+  # Issue #29 regression gate. Exercises the Antithesis short-epoch
+  # (epochLength=120) boundary end-to-end: the producer builds a bundle
+  # via create-snapshots + bootstrap, then `amaru run` must open it and
+  # stay alive. The custom epoch length is supplied at runtime via
+  # --era-history-file (the network built-in is 86400), so this is the
+  # gate for the runtime-testnet-parameters + short-epoch ledger fixes.
   antithesis-short-epoch-golden =
     pkgs.runCommand "antithesis-short-epoch-golden"
       {
         nativeBuildInputs = [
           pkgs.bash
           pkgs.coreutils
+          pkgs.gnugrep
           amaruPkg
         ];
       } ''
       set -euo pipefail
 
-      ledger_dir="$TMPDIR/ledger.testnet_42.db"
-      mkdir -p "$ledger_dir"
+      cp -rL ${shortEpochBootstrapBundle}/testnet_42 $TMPDIR/testnet_42
+      chmod -R u+w $TMPDIR/testnet_42
 
-      amaru import-ledger-state \
+      log=$TMPDIR/amaru-run.log
+      set +e
+      timeout 30s amaru --with-json-traces run \
         --network testnet_42 \
-        --ledger-dir "$ledger_dir" \
-        --snapshot-dir ${antithesisShortEpochSamples}/snapshots
+        --era-history-file $TMPDIR/testnet_42/era-history.json \
+        --ledger-dir $TMPDIR/testnet_42/ledger.testnet_42.db \
+        --chain-dir $TMPDIR/testnet_42/chain.testnet_42.db \
+        --listen-address 127.0.0.1:0 \
+        --peer-address 127.0.0.1:9 \
+        >"$log" 2>&1
+      rc=$?
+      set -e
 
-      test -d "$ledger_dir/live"
+      cat "$log"
+      if [ "$rc" -ne 124 ]; then
+        echo "expected amaru run to stay alive until timeout, got rc=$rc" >&2
+        exit 1
+      fi
+      if grep -q 'Failed to create ledger' "$log"; then
+        echo "amaru failed to create the short-epoch ledger" >&2
+        exit 1
+      fi
+      if ! grep -q 'build_ledger' "$log"; then
+        echo "amaru did not reach ledger startup from the short-epoch bundle" >&2
+        exit 1
+      fi
+
       mkdir -p "$out"
     '';
 

@@ -24,6 +24,15 @@
     iohkNix = {
       url = "github:input-output-hk/iohk-nix";
       inputs.nixpkgs.follows = "nixpkgs";
+      # Pin blst to the v0.3.14 tag rev. iohk-nix's crypto overlay expects
+      # blst 0.3.14, but the default (v0.3.15) rev now serves drifted tarball
+      # content under the same SHA, intermittently breaking the flake.lock
+      # narHash both locally and in CI ("regional content shift"). 8c7db7fe is
+      # the v0.3.14 tag and hashes deterministically to the expected content.
+      inputs.blst = {
+        url = "github:supranational/blst/8c7db7fe8d2ce6e76dc398ebd4d475c0ec564355";
+        flake = false;
+      };
     };
 
     # CHaP — read-only, consumed by haskell.nix as the cabal index for
@@ -46,11 +55,13 @@
     };
 
     # lambdasistemi/amaru consumed as a non-flake input; SHA pinned via
-    # flake.lock per constitution Principle III. This fork carries the
-    # runtime-parameter flags needed for generated Antithesis testnets,
-    # plus the relay restart/epoch-transition ledger fixes under test.
+    # flake.lock per constitution Principle III. Pinned to feat/testnet-bootstrap:
+    # upstream pragma-org/amaru main plus a minimal, upstreamable delta —
+    # create-snapshots --targets-file/--cardano-db-dir (offline/testnet snapshots),
+    # runtime --era-history-file/--global-parameters-file, the testnet tvar
+    # era-history sidecar fix, and short-epoch ledger/consensus guards.
     amaru = {
-      url = "github:lambdasistemi/amaru/main";
+      url = "github:lambdasistemi/amaru/feat/testnet-bootstrap";
       flake = false;
     };
   };

@@ -108,7 +108,8 @@ bundle_complete() {
 
   test -f "$sentinel" || return 1
   test -f "$final/chain.$AMARU_NETWORK.db/CURRENT" || return 1
-  test -f "$final/nonces.json" || return 1
+  # nonces + bootstrap headers are baked into chain.<network>.db by
+  # `amaru bootstrap`; they are no longer separate bundle artefacts.
   # Amaru opens ledger.<network>.db/live, then loads the two epochs
   # before the most recent historical snapshot. Snapshot directory
   # names are epochs observed by Amaru, not guaranteed to start at 0.

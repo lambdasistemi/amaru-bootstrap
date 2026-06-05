@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 
 # Regression coverage for custom testnet era-history sidecars.
-# `amaru convert-ledger-state` writes the open-ended current era with
-# the network default epoch size. The producer knows the node genesis
-# epochLength and must correct the sidecar before `import-ledger-state`
-# consumes it.
+# amaru `bootstrap` reads history.<slot>.<hash>.json next to each snapshot
+# dir for custom testnets. The producer derives that sidecar from the node
+# genesis epochLength, so a short-epoch testnet gets the correct epoch size
+# rather than the network default (86400).
 
 load 'lib/bootstrap-helpers'
 
@@ -59,9 +59,6 @@ case "\$cmd" in
     printf '{"data":[[8,"%s"],[9,"%s"],[120,"%s"],[129,"%s"],[248,"%s"],[249,"%s"],[360,"%s"],[370,"%s"]]}\n' \
       "\$h8" "\$h9" "\$h120" "\$h129" "\$h248" "\$h249" "\$h360" "\$h370"
     ;;
-  get-header)
-    printf 'header'
-    ;;
   *)
     printf 'unexpected header-extractor command: %s\n' "\$cmd" >&2
     exit 1
@@ -70,74 +67,42 @@ esac
 SHIM
   chmod +x "$MOCK_BIN/header-extractor"
 
-  cat >"$MOCK_BIN/ledger-state-emitter" <<SHIM
-#!${BASH_PATH}
-set -euo pipefail
-out=""
-while [[ \$# -gt 0 ]]; do
-  case "\$1" in
-    --out) out="\$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-[[ -n "\$out" ]] || exit 1
-mkdir -p "\$(dirname "\$out")"
-printf 'legacy' >"\$out"
-SHIM
-  chmod +x "$MOCK_BIN/ledger-state-emitter"
-
   cat >"$MOCK_BIN/amaru" <<SHIM
 #!${BASH_PATH}
 set -euo pipefail
 cmd="\$1"
 shift
 case "\$cmd" in
-  convert-ledger-state)
-    snapshot=""
-    target=""
+  create-snapshots)
+    targets=""
+    snapdir=""
     while [[ \$# -gt 0 ]]; do
       case "\$1" in
-        --snapshot) snapshot="\$2"; shift 2 ;;
-        --target-dir) target="\$2"; shift 2 ;;
+        --targets-file) targets="\$2"; shift 2 ;;
+        --snapshot-dir) snapdir="\$2"; shift 2 ;;
         *) shift ;;
       esac
     done
-    slot="\$(basename "\$snapshot" .cbor)"
-    hash="\$(printf '%064x' "\$slot")"
-    mkdir -p "\$target"
-    : >"\$target/\$slot.\$hash.cbor"
-    printf '{"tail":"00"}\n' >"\$target/nonces.\$slot.\$hash.json"
-    cat >"\$target/history.\$slot.\$hash.json" <<JSON
-{"eras":[{"start":{"time":0,"slot":0,"epoch":0},"end":null,"params":{"epoch_size_slots":86400,"slot_length":1000,"era_name":"Conway"}}]}
-JSON
+    mkdir -p "\$snapdir"
+    while IFS=\$'\t' read -r slot hash; do
+      d="\$snapdir/\$slot.\$hash"
+      mkdir -p "\$d/tables"
+      : >"\$d/state"
+      : >"\$d/tables/tvar"
+      printf '[]\n' >"\$d/bootstrap.headers.json"
+    done < <(jq -r '.[] | "\(.slot)\t\(.hash)"' "\$targets")
     ;;
-  import-ledger-state)
+  bootstrap)
     ledger=""
-    snapshots=""
-    while [[ \$# -gt 0 ]]; do
-      case "\$1" in
-        --ledger-dir) ledger="\$2"; shift 2 ;;
-        --snapshot-dir) snapshots="\$2"; shift 2 ;;
-        *) shift ;;
-      esac
-    done
-    for history in "\$snapshots"/history.*.json; do
-      jq -e 'all(.eras[] | select(.end == null); .params.epoch_size_slots == 120)' \
-        "\$history" >/dev/null
-    done
-    mkdir -p "\$ledger/live" "\$ledger/0" "\$ledger/1" "\$ledger/2"
-    ;;
-  import-headers)
     chain=""
     while [[ \$# -gt 0 ]]; do
       case "\$1" in
+        --ledger-dir) ledger="\$2"; shift 2 ;;
         --chain-dir) chain="\$2"; shift 2 ;;
         *) shift ;;
       esac
     done
-    mkdir -p "\$chain"
-    ;;
-  import-nonces)
+    mkdir -p "\$ledger/live" "\$ledger/0" "\$ledger/1" "\$ledger/2" "\$chain"
     ;;
   *)
     printf 'unexpected amaru command: %s\n' "\$cmd" >&2
@@ -148,7 +113,7 @@ SHIM
   chmod +x "$MOCK_BIN/amaru"
 }
 
-@test "converted current-era history uses the genesis epochLength" {
+@test "era-history sidecars use the genesis epochLength" {
   run "$BOOTSTRAP_PRODUCER_SCRIPT" \
       "$TMP_DIR/chain-db" \
       "$TMP_DIR/config" \
@@ -157,11 +122,15 @@ SHIM
 
   [ "$status" -eq 0 ]
 
-  for history in "$TMP_DIR"/bundle/testnet_42/snapshots/history.*.json; do
+  shopt -s nullglob
+  found=0
+  for history in "$TMP_DIR"/bundle/testnet_42/snapshots/testnet_42/history.*.json; do
+    found=1
     epoch_size="$(
       jq -r '.eras[] | select(.end == null) | .params.epoch_size_slots' \
         "$history"
     )"
     [ "$epoch_size" -eq 120 ]
   done
+  [ "$found" -eq 1 ]
 }

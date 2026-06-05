@@ -152,9 +152,16 @@ teardown() {
   final="$TMP_DIR/bundle/testnet_42"
   [ -d "$final/ledger.testnet_42.db" ]
   [ -d "$final/chain.testnet_42.db" ]
-  [ -f "$final/nonces.json" ]
-  [ -n "$(find "$final/snapshots" -name '*.cbor' -print -quit)" ]
+  # nonces + bootstrap headers are baked into chain.<net>.db by `amaru
+  # bootstrap`; the bundle ships the era-history override for `amaru run`.
+  [ -f "$final/era-history.json" ]
+  [ -d "$final/ledger.testnet_42.db/live" ]
 
-  header_count="$(find "$final/headers" -name 'header.*.cbor' | wc -l)"
-  [ "$header_count" -ge 4 ]
+  snapshot_count=0
+  for d in "$final"/ledger.testnet_42.db/*; do
+    if [ -d "$d" ] && [[ "$(basename "$d")" =~ ^[0-9]+$ ]]; then
+      snapshot_count=$(( snapshot_count + 1 ))
+    fi
+  done
+  [ "$snapshot_count" -ge 3 ]
 }

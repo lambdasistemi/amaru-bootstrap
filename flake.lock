@@ -36,16 +36,16 @@
     "amaru": {
       "flake": false,
       "locked": {
-        "lastModified": 1778156895,
-        "narHash": "sha256-iwDaNXT78PKfIOxQJYesGF8OnJrQJNKQBhh1F5yqNOY=",
+        "lastModified": 1780651707,
+        "narHash": "sha256-N+lzfFnSbBwTucR+sC5HzIQWP4p+O+m9kQJoLJI+Yq8=",
         "owner": "lambdasistemi",
         "repo": "amaru",
-        "rev": "5b04cc72d156e106d6592eda20751fe9d63fdbdf",
+        "rev": "756d9364313e70e94b4dd8dfc419043db05e73d4",
         "type": "github"
       },
       "original": {
         "owner": "lambdasistemi",
-        "ref": "main",
+        "ref": "feat/testnet-bootstrap",
         "repo": "amaru",
         "type": "github"
       }
@@ -57,13 +57,13 @@
         "narHash": "sha256-IlbNMLBjs/dvGogcdbWQIL+3qwy7EXJbIDpo4xBd4bY=",
         "owner": "supranational",
         "repo": "blst",
-        "rev": "6d960cd05d6fe2b5bc9ba161edf0c1a131b87c4c",
+        "rev": "8c7db7fe8d2ce6e76dc398ebd4d475c0ec564355",
         "type": "github"
       },
       "original": {
         "owner": "supranational",
-        "ref": "v0.3.15",
         "repo": "blst",
+        "rev": "8c7db7fe8d2ce6e76dc398ebd4d475c0ec564355",
         "type": "github"
       }
     },

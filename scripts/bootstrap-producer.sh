@@ -6,16 +6,20 @@
 # and the state diagram at
 # specs/003-amaru-bootstrap-producer/data-model.md.
 #
-# Pipeline (data-model.md state diagram, post-R-011 collapsed emit):
+# Pipeline (upstream-bootstrap projection):
 #
 #   1. Pre-flight: existing-bundle short-circuit, config validation,
-#      poll for chain DB, poll for era-readiness, tooling sanity.
-#   2. ledger-state-emitter @ target_slot and the two prior epochs
-#   3. amaru convert-ledger-state for all emitted snapshots
-#   4. header-extractor list-blocks + get-header loop
-#   5. compose nonces.json (jq tail rewrite)
-#   6. amaru import-{ledger-state,headers,nonces}
-#   7. mv -T <unique-tmp> <final> (atomic commit)
+#      poll for chain DB, poll for era-readiness, derive the three
+#      consecutive snapshot slots.
+#   2. Compose targets.json (epoch/slot/hash/parent_point) + snapshots.json
+#      from the chain's own block list.
+#   3. amaru create-snapshots (db-analyser engine, Koios/Mithril bypassed via
+#      --targets-file + --cardano-db-dir) -> per-epoch snapshot dirs with
+#      packaged bootstrap headers.
+#   4. Write per-snapshot era-history sidecars + bundle era-history.json.
+#   5. amaru bootstrap -> ledger.<net>.db + chain.<net>.db (derives nonces
+#      from the snapshot, imports the packaged headers).
+#   6. mv -T <unique-tmp> <final> (atomic commit)
 #
 # Exit-code classes (data-model.md "Error class registry"):
 #   0    success
@@ -23,11 +27,11 @@
 #   2    chain-not-era-ready
 #   3    configuration-error
 #   4    reserved
-#   5    tool-error: emit
-#   6    tool-error: convert
-#   7    tool-error: extract
-#   8    tool-error: nonces
-#   9    tool-error: import
+#   5    tool-error: targets
+#   6    tool-error: create-snapshots
+#   7    reserved
+#   8    reserved
+#   9    tool-error: bootstrap
 #   10   output-write-error
 #   >=64 internal-error (bash trap)
 
@@ -44,6 +48,7 @@ CHAIN_DB="$1"
 CONFIG_DIR="$2"
 BUNDLE_DIR="$3"
 NETWORK="${AMARU_NETWORK:-$4}"
+NET_LC="${NETWORK,,}"
 
 # Env knobs (defaults sized for the antithesis simulator's measured
 # ~150x speedup; mainnet-mature operators set AMARU_WAIT_DEADLINE_SECONDS=0
@@ -52,15 +57,11 @@ AMARU_WAIT_DEADLINE_SECONDS="${AMARU_WAIT_DEADLINE_SECONDS:-5400}"
 AMARU_CLUSTER_READY_DEADLINE_SECONDS="${AMARU_CLUSTER_READY_DEADLINE_SECONDS:-300}"
 AMARU_POLL_INTERVAL_SECONDS="${AMARU_POLL_INTERVAL_SECONDS:-10}"
 
-# Globals shared across phases. phase_preflight sets TARGET_SLOT and
-# EPOCH_LENGTH; the snapshot pipeline below threads further globals
-# (UNIQUE_TMP, ACTUAL_SLOT, LEGACY_SNAPSHOT_FILES) between phases as
-# each one is computed.
-TARGET_SLOT=0
+# Globals shared across phases. phase_preflight sets EPOCH_LENGTH and the
+# three SNAPSHOT_SLOTS; the snapshot pipeline below threads UNIQUE_TMP
+# between phases as it is computed.
 EPOCH_LENGTH=0
 UNIQUE_TMP=""
-ACTUAL_SLOT=0
-LEGACY_SNAPSHOT_FILES=()
 SNAPSHOT_SLOTS=()
 
 # ─── Internal-error trap ──────────────────────────────────────────
@@ -107,13 +108,13 @@ tail_phase_log() {
 ##
 ## Build a single-era Conway era_history JSON anchored at the
 ## genesis (epoch 0, slot 0, time 0) using the genesis epochLength.
-## This is what amaru `convert-ledger-state --era-history-file` needs
-## to compute correct epoch boundaries — without it the converter
-## defaults to the network's mainnet/preprod era-history (epoch_size
-## 86400) and treats every short-epoch slot as still-in-epoch-0,
-## producing wrong active/candidate nonces in the snapshot's
-## nonces.<slot>.<hash>.json. amaru run then verifies header VRFs
-## against those wrong nonces and fails. See
+## amaru `bootstrap` consumes this per-snapshot sidecar for custom
+## testnets (make_era_history reads history.<slot>.<hash>.json next to
+## the snapshot dir); the same document is shipped at the bundle root
+## as era-history.json so `amaru run --era-history-file` can override
+## the network default at consume time. Without it amaru defaults to
+## the built-in testnet era-history (epoch_size 86400) and treats every
+## short-epoch slot as still-in-epoch-0, producing wrong nonces. See
 ## https://github.com/lambdasistemi/amaru-bootstrap/issues/37.
 ensure_era_history_input() {
     local out="$1"
@@ -135,33 +136,7 @@ ensure_era_history_input() {
 JSON
 }
 
-patch_converted_era_history() {
-    local history tmp count=0
-
-    for history in "${UNIQUE_TMP}/snapshots"/history.*.json; do
-        [[ -e "${history}" ]] || continue
-        count=$(( count + 1 ))
-        tmp="${history}.tmp"
-        if ! jq --argjson epochLength "${EPOCH_LENGTH}" \
-            '(.eras[] | select(.end == null) | .params.epoch_size_slots) = $epochLength' \
-            "${history}" >"${tmp}" 2>"${BUNDLE_DIR}/.logs/history.stderr"
-        then
-            printf 'era-history patch failed for %s; see %s\n' \
-                   "${history}" "${BUNDLE_DIR}/.logs/history.stderr" >&2
-            rm -f "${tmp}"
-            exit 6
-        fi
-        mv "${tmp}" "${history}"
-    done
-
-    if (( count == 0 )); then
-        printf 'amaru convert-ledger-state produced no history.*.json files in %s\n' \
-               "${UNIQUE_TMP}/snapshots" >&2
-        exit 6
-    fi
-}
-
-# ─── 8-step state diagram (functions stubbed, T018+T019 fill them) ─
+# ─── State diagram ────────────────────────────────────────────────
 
 # Step 1: pre-flight (wait + validate + era-readiness predicate).
 # Five sub-steps per R-006 + data-model.md state diagram step 1:
@@ -319,7 +294,6 @@ phase_preflight() {
                                "${target_slot}" "${completed_epoch}" \
                                "${snapshot_slots[0]}" "${snapshot_slots[1]}" "${snapshot_slots[2]}" \
                                "${slot}" "${era}"
-                        TARGET_SLOT="${target_slot}"
                         SNAPSHOT_SLOTS=("${snapshot_slots[@]}")
                         return 0
                     fi
@@ -348,39 +322,23 @@ phase_preflight() {
 }
 
 # bundle_complete <dir>
-# Returns 0 iff <dir> contains every artefact amaru's import-* needs
-# (per R-005). Used by phase_preflight's FR-008 short-circuit and
-# also by the concurrent-runner loser path in phase_commit (T019).
+# Returns 0 iff <dir> contains every artefact amaru `run` needs from a
+# bootstrapped bundle (per the upstream-bootstrap projection): a ledger
+# DB with a live view and at least three historical epoch snapshots, and
+# a chain DB. nonces and bootstrap headers are baked into the chain DB by
+# `amaru bootstrap`, so they are no longer separate bundle artefacts.
+# Used by phase_preflight's FR-008 short-circuit and the concurrent-runner
+# loser path in phase_commit.
 # shellcheck disable=SC2329  # invoked by phase_preflight + phase_commit.
 bundle_complete() {
     local b="$1"
     [[ -d "${b}" ]] || return 1
-    [[ -d "${b}/ledger.${NETWORK}.db" ]] || return 1
-    [[ -d "${b}/ledger.${NETWORK}.db/live" ]] || return 1
-    [[ -d "${b}/chain.${NETWORK}.db" ]] || return 1
-    [[ -f "${b}/nonces.json" ]] || return 1
-    [[ -d "${b}/snapshots" ]] || return 1
-    [[ -d "${b}/headers" ]] || return 1
-    local header_count
-    header_count=$(find "${b}/headers" -name 'header.*.cbor' 2>/dev/null | wc -l)
-    (( header_count >= 4 )) || return 1
-    local snapshot_name snapshot_base snapshot_slot snapshot_hash
-    snapshot_name=$(find "${b}/snapshots" -maxdepth 1 \
-        -name '*.cbor' -printf '%f\n' 2>/dev/null \
-        | awk -F. '$1 ~ /^[0-9]+$/ { print $1 "\t" $0 }' \
-        | sort -n -k1,1 \
-        | tail -n 1 \
-        | cut -f2-)
-    [[ -n "${snapshot_name}" ]] || return 1
-    snapshot_base="${snapshot_name%.cbor}"
-    snapshot_slot="${snapshot_base%%.*}"
-    snapshot_hash="${snapshot_base#*.}"
-    [[ "${snapshot_slot}" =~ ^[0-9]+$ ]] || return 1
-    [[ -n "${snapshot_hash}" && "${snapshot_hash}" != "${snapshot_base}" ]] || return 1
-    [[ -f "${b}/headers/header.${snapshot_slot}.${snapshot_hash}.cbor" ]] || return 1
+    [[ -d "${b}/ledger.${NET_LC}.db" ]] || return 1
+    [[ -d "${b}/ledger.${NET_LC}.db/live" ]] || return 1
+    [[ -d "${b}/chain.${NET_LC}.db" ]] || return 1
     local snapshots=()
     local d base
-    for d in "${b}/ledger.${NETWORK}.db"/*; do
+    for d in "${b}/ledger.${NET_LC}.db"/*; do
         [[ -d "${d}" ]] || continue
         base=$(basename "${d}")
         if [[ "${base}" =~ ^[0-9]+$ ]]; then
@@ -391,9 +349,9 @@ bundle_complete() {
     mapfile -t snapshots < <(printf '%s\n' "${snapshots[@]}" | sort -n)
     local latest="${snapshots[$(( ${#snapshots[@]} - 1 ))]}"
     (( latest >= 2 )) || return 1
-    [[ -d "${b}/ledger.${NETWORK}.db/$(( latest - 2 ))" ]] || return 1
-    [[ -d "${b}/ledger.${NETWORK}.db/$(( latest - 1 ))" ]] || return 1
-    [[ -d "${b}/ledger.${NETWORK}.db/${latest}" ]] || return 1
+    [[ -d "${b}/ledger.${NET_LC}.db/$(( latest - 2 ))" ]] || return 1
+    [[ -d "${b}/ledger.${NET_LC}.db/$(( latest - 1 ))" ]] || return 1
+    [[ -d "${b}/ledger.${NET_LC}.db/${latest}" ]] || return 1
     return 0
 }
 
@@ -413,341 +371,191 @@ chain_db_alive() {
 # assembled. Per Obs#4 / R-007 the suffix combines $$ + $RANDOM so two
 # concurrent producers never share a staging path; the FIRST one to
 # `mv -T` into <final> wins, the loser short-circuits via FR-008.
+# The staging dir doubles as amaru's working directory: create-snapshots
+# and bootstrap resolve snapshots/<net> + data/<net> relative to it.
 phase_stage_init() {
     local final_bundle="${BUNDLE_DIR}/${NETWORK}"
     UNIQUE_TMP="${final_bundle}.tmp.$$.${RANDOM}"
     rm -rf "${UNIQUE_TMP}"
-    mkdir -p "${UNIQUE_TMP}/snapshots" "${UNIQUE_TMP}/headers"
+    mkdir -p "${UNIQUE_TMP}/snapshots/${NET_LC}" \
+             "${UNIQUE_TMP}/data/${NET_LC}/epoch-snapshots" \
+             "${UNIQUE_TMP}/bootstrap-config/${NET_LC}"
     printf '+ staging at %s\n' "${UNIQUE_TMP}"
 }
 
-# Step 2: ledger-state-emitter writes Legacy ExtLedgerState CBOR
-# files with canonical UTxO entries. Amaru run needs the live ledger
-# plus three historical epoch snapshots: the target epoch and the two
-# prior epochs used for rewards and leader-schedule stake distribution.
-# rc=5 on failure.
-phase_emit() {
-    local cfg="${CONFIG_DIR}/config.json"
-    local legacy_dir="${UNIQUE_TMP}/legacy-in"
-    mkdir -p "${legacy_dir}"
-    LEGACY_SNAPSHOT_FILES=()
-
-    local slots=("${SNAPSHOT_SLOTS[@]}")
-    if (( ${#slots[@]} == 0 )); then
-        slots=(
-            $(( TARGET_SLOT - (2 * EPOCH_LENGTH) ))
-            $(( TARGET_SLOT - EPOCH_LENGTH ))
-            "${TARGET_SLOT}"
-        )
+# Step 2: compose targets.json + snapshots.json. rc=5 on failure.
+# create-snapshots needs, per snapshot epoch, the last block's
+# (epoch, slot, hash, parent_point) — the same shape Koios resolution
+# yields on public networks. We read it straight from the chain's own
+# block list (preflight-blocks.json), bypassing Koios entirely.
+phase_targets() {
+    local list_json="${BUNDLE_DIR}/.logs/preflight-blocks.json"
+    [[ -s "${list_json}" ]] \
+        || { printf 'missing preflight block list %s\n' "${list_json}" >&2; exit 5; }
+    if (( ${#SNAPSHOT_SLOTS[@]} != 3 )); then
+        printf 'expected 3 snapshot slots, got %d\n' "${#SNAPSHOT_SLOTS[@]}" >&2
+        exit 5
     fi
-    local slot out rc
-    for slot in "${slots[@]}"; do
-        if (( slot < 0 )); then
-            printf 'internal error: negative snapshot slot %d\n' "${slot}" >&2
-            exit 5
-        fi
-        out="${legacy_dir}/${slot}.cbor"
-        printf '+ ledger-state-emitter @ %d\n' "${slot}"
-        rc=0
-        log_phase "emit-${slot}" ledger-state-emitter \
-            --db "${CHAIN_DB}" \
-            --config "${cfg}" \
-            --target-slot "${slot}" \
-            --out "${out}" \
-            || rc=$?
-        if (( rc != 0 )); then
-            printf 'ledger-state-emitter failed at slot %d (rc=%d); see %s\n' \
-                   "${slot}" "${rc}" "${BUNDLE_DIR}/.logs/emit-${slot}.stderr" >&2
-            tail_phase_log "emit-${slot}"
-            exit 5
-        fi
-        if [[ ! -f "${out}" ]]; then
-            printf 'ledger-state-emitter produced no output at %s\n' \
-                   "${out}" >&2
-            exit 5
-        fi
-        LEGACY_SNAPSHOT_FILES+=("${out}")
-    done
-}
 
-# Step 3: amaru convert-ledger-state. rc=6 on failure.
-# Writes <slot>.<hash>.cbor + nonces.<slot>.<hash>.json + history.<slot>.<hash>.json
-# into <staging>/snapshots/. amaru's import-ledger-state requires the
-# era-history file to live alongside the snapshot for testnet variants.
-# Amaru's converter currently fills the open-ended current era with the
-# network default epoch size; for custom short-epoch testnets the
-# producer corrects that sidecar from the node genesis before import.
-phase_convert() {
-    local snapshot slot rc
-    local era_history_input="${UNIQUE_TMP}/era-history.input.json"
-    ensure_era_history_input "${era_history_input}"
-    for snapshot in "${LEGACY_SNAPSHOT_FILES[@]}"; do
-        slot=$(basename "${snapshot}" .cbor)
-        printf '+ amaru convert-ledger-state @ %s\n' "${slot}"
-        rc=0
-        log_phase "convert-${slot}" amaru convert-ledger-state \
-            --network "${NETWORK}" \
-            --snapshot "${snapshot}" \
-            --target-dir "${UNIQUE_TMP}/snapshots" \
-            --era-history-file "${era_history_input}" \
-            || rc=$?
-        if (( rc != 0 )); then
-            printf 'amaru convert-ledger-state failed at slot %s (rc=%d); see %s\n' \
-                   "${slot}" "${rc}" "${BUNDLE_DIR}/.logs/convert-${slot}.stderr" >&2
-            tail_phase_log "convert-${slot}"
-            exit 6
+    local targets="[]"
+    local snapshots_meta="[]"
+    local slot hash parent epoch parent_point
+    for slot in "${SNAPSHOT_SLOTS[@]}"; do
+        hash=$(jq -r --argjson s "${slot}" \
+            '.data | map(select(.[0] == $s)) | (.[0][1] // empty)' "${list_json}")
+        if [[ -z "${hash}" ]]; then
+            printf 'no block hash for snapshot slot %s in %s\n' "${slot}" "${list_json}" >&2
+            exit 5
         fi
+        parent=$(jq -c --argjson s "${slot}" \
+            '.data | map(select(.[0] < $s)) | (max_by(.[0]) // empty)' "${list_json}")
+        if [[ -n "${parent}" && "${parent}" != "null" ]]; then
+            parent_point="$(jq -r '.[0]' <<<"${parent}").$(jq -r '.[1]' <<<"${parent}")"
+        else
+            printf 'no parent block for snapshot slot %s (chain too short?)\n' "${slot}" >&2
+            exit 5
+        fi
+        epoch=$(( slot / EPOCH_LENGTH ))
+        targets=$(jq \
+            --argjson e "${epoch}" --argjson s "${slot}" \
+            --arg h "${hash}" --arg p "${parent_point}" \
+            '. + [{epoch: $e, slot: $s, hash: $h, parent_point: $p}]' \
+            <<<"${targets}")
+        snapshots_meta=$(jq \
+            --argjson e "${epoch}" --arg pt "${slot}.${hash}" --arg pp "${parent_point}" \
+            '. + [{epoch: $e, point: $pt, parent_point: $pp, url: ""}]' \
+            <<<"${snapshots_meta}")
     done
 
-    patch_converted_era_history
-
-    local cbor_count
-    cbor_count=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
-        -name '*.cbor' 2>/dev/null | wc -l)
-    if (( cbor_count < 3 )); then
-        printf 'amaru convert-ledger-state produced %d .cbor files in %s, need at least 3\n' \
-               "${cbor_count}" \
-               "${UNIQUE_TMP}/snapshots" >&2
-        exit 6
-    fi
-    local snapshot_name snapshot_file snapshot_base
-    snapshot_name=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
-        -name '*.cbor' -printf '%f\n' 2>/dev/null \
-        | awk -F. '$1 ~ /^[0-9]+$/ { print $1 "\t" $0 }' \
-        | sort -n -k1,1 \
-        | tail -n 1 \
-        | cut -f2-)
-    if [[ -z "${snapshot_name}" ]]; then
-        printf 'no numerically-prefixed converted snapshot under %s\n' \
-               "${UNIQUE_TMP}/snapshots" >&2
-        exit 6
-    fi
-    snapshot_file="${UNIQUE_TMP}/snapshots/${snapshot_name}"
-    snapshot_base=$(basename "${snapshot_file}")
-    ACTUAL_SLOT="${snapshot_base%%.*}"
-    if ! [[ "${ACTUAL_SLOT}" =~ ^[0-9]+$ ]]; then
-        printf 'converted snapshot filename lacks numeric slot prefix: %s\n' \
-               "${snapshot_base}" >&2
-        exit 6
-    fi
+    printf '%s\n' "${targets}" >"${UNIQUE_TMP}/targets.json"
+    printf '%s\n' "${snapshots_meta}" >"${UNIQUE_TMP}/bootstrap-config/${NET_LC}/snapshots.json"
+    printf '+ wrote targets.json (%d epochs) + snapshots.json\n' "${#SNAPSHOT_SLOTS[@]}"
 }
 
-# Step 4: header-extractor list-blocks + get-header loop. rc=7.
-# Per amaru-loader.sh's pipeline: extract two header pairs, one near
-# the snapshot slot and one near the previous-epoch boundary, so amaru
-# has the parent hashes it needs to compute the epoch's active nonce.
-# Our list-blocks returns chain-order ascending, so we take the LAST
-# two blocks of each filtered window (amaru-loader uses .[0:2] against
-# db-server which yields the same blocks under its descending order).
-phase_extract() {
-    local cfg="${CONFIG_DIR}/config.json"
-    local list_json="${UNIQUE_TMP}/blocks.json"
-    printf '+ header-extractor list-blocks\n'
+# Step 3: amaru create-snapshots. rc=6 on failure.
+# Drives the db-analyser engine against the local chain DB
+# (--cardano-db-dir, so Mithril is skipped) using the explicit targets
+# (--targets-file, so Koios is skipped). Materializes one snapshot dir
+# per epoch under snapshots/<net>/<slot>.<hash>/ with packaged bootstrap
+# headers, plus epoch metadata under data/<net>/epoch-snapshots/epochs/.
+phase_create_snapshots() {
+    local snap_root="${UNIQUE_TMP}/snapshots/${NET_LC}"
+    local dist_dir="${UNIQUE_TMP}/data/${NET_LC}/epoch-snapshots"
+    local first_epoch=$(( SNAPSHOT_SLOTS[0] / EPOCH_LENGTH ))
+
+    # Give db-analyser an isolated cardano-db view: the immutable chunks
+    # are symlinked from the live chain DB (read-only), while the ledger
+    # snapshots db-analyser materializes land in our own writable dir.
+    # This keeps the producer from mutating the operator's chain DB and
+    # lets concurrent producers run against the same chain DB safely.
+    local cardano_db="${UNIQUE_TMP}/cardano-db"
+    mkdir -p "${cardano_db}"
+    ln -sfn "${CHAIN_DB}/immutable" "${cardano_db}/immutable"
+
     local rc=0
-    log_phase extract-list bash -c "header-extractor list-blocks --db \"\$1\" --config \"\$2\" >\"\$3\"" \
-        _ "${CHAIN_DB}" "${cfg}" "${list_json}" \
+    printf '+ amaru create-snapshots (epoch %d + 2)\n' "${first_epoch}"
+    log_phase create-snapshots amaru create-snapshots \
+        --network "${NETWORK}" \
+        --epoch "${first_epoch}" \
+        --cardano-node-config-dir "${CONFIG_DIR}" \
+        --cardano-db-dir "${cardano_db}" \
+        --targets-file "${UNIQUE_TMP}/targets.json" \
+        --snapshot-dir "${snap_root}" \
+        --dist-dir "${dist_dir}" \
         || rc=$?
     if (( rc != 0 )); then
-        printf 'header-extractor list-blocks failed (rc=%d); see %s\n' \
-               "${rc}" "${BUNDLE_DIR}/.logs/extract-list.stderr" >&2
-        exit 7
+        printf 'amaru create-snapshots failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/create-snapshots.stderr" >&2
+        tail_phase_log create-snapshots
+        exit 6
     fi
-    # The "previous epoch boundary" we want is the LAST SLOT of the
-    # epoch BEFORE the snapshot's epoch — not "one epoch back from the
-    # snapshot slot". For ACTUAL_SLOT in epoch K, that is
-    #   prev_boundary = K * EPOCH_LENGTH - 1
-    # which is the last slot of epoch K-1. The previous code used
-    # `ACTUAL_SLOT - EPOCH_LENGTH`, which is just the slot at the same
-    # in-epoch offset one epoch earlier (e.g. slot 179 for ACTUAL_SLOT
-    # 299). The block selected from there is mid-prev-epoch, so the
-    # `tail` rewritten below pointed at the wrong header. amaru then
-    # mixed the wrong tail at each downstream epoch boundary,
-    # producing a different active nonce than cardano-node, which made
-    # VRF verification fail at every epoch boundary past the anchor.
-    local current_epoch=$(( ACTUAL_SLOT / EPOCH_LENGTH ))
-    local prev_boundary=$(( current_epoch * EPOCH_LENGTH - 1 ))
-    if (( prev_boundary < 0 )); then
-        prev_boundary=0
+
+    local dir_count
+    dir_count=$(find "${snap_root}" -mindepth 1 -maxdepth 1 -type d \
+        -regextype posix-extended -regex '.*/[0-9]+\.[0-9a-f]+' 2>/dev/null | wc -l)
+    if (( dir_count < 3 )); then
+        printf 'create-snapshots produced %d snapshot dirs in %s, need at least 3\n' \
+               "${dir_count}" "${snap_root}" >&2
+        exit 6
     fi
-    local headers_csv="${UNIQUE_TMP}/headers.csv"
-    : >"${headers_csv}"
-    if ! jq -rc \
-        --argjson last "${ACTUAL_SLOT}" \
-        --argjson prev "${prev_boundary}" \
-        '
-          (.data | map(select(.[0] <= $last))  | .[-2:] | .[]),
-          (.data | map(select(.[0] <= $prev))  | .[-2:] | .[])
-          | @csv
-        ' \
-        "${list_json}" >"${headers_csv}" 2>"${BUNDLE_DIR}/.logs/extract-filter.stderr"
-    then
-        printf 'header filter pipeline failed; see %s\n' \
-               "${BUNDLE_DIR}/.logs/extract-filter.stderr" >&2
-        exit 7
-    fi
-    if [[ ! -s "${headers_csv}" ]]; then
-        printf 'no headers selected for slots <=%d / <=%d\n' \
-               "${ACTUAL_SLOT}" "${prev_boundary}" >&2
-        exit 7
-    fi
-    while IFS=, read -ra hdr; do
-        [[ ${#hdr[@]} -eq 2 ]] || continue
-        local slot=${hdr[0]//\"/}
-        local hash=${hdr[1]//\"/}
-        [[ -n "${slot}" && -n "${hash}" ]] || continue
-        local out="${UNIQUE_TMP}/headers/header.${slot}.${hash}.cbor"
-        printf '+ header-extractor get-header %s.%s\n' "${slot}" "${hash}"
-        rc=0
-        log_phase "extract-${slot}" bash -c "header-extractor get-header \"\$1\" --db \"\$2\" --config \"\$3\" >\"\$4\"" \
-            _ "${slot}.${hash}" "${CHAIN_DB}" "${cfg}" "${out}" \
-            || rc=$?
-        if (( rc != 0 )); then
-            printf 'header-extractor get-header %s.%s failed (rc=%d)\n' \
-                   "${slot}" "${hash}" "${rc}" >&2
-            exit 7
-        fi
-    done <"${headers_csv}"
 }
 
-# Step 5: compose nonces.json from snapshot's nonces + tail rewrite. rc=8.
-# amaru convert-ledger-state writes nonces.<slot>.<hash>.json with a
-# zero-byte `tail`. We rewrite that field to the parent hash from the
-# previous-epoch header batch (the LAST hash with slot <= prev_boundary)
-# so amaru's epoch-transition nonce computation has a real anchor.
-phase_nonces() {
-    local nonces_src
-    local nonces_name
-    nonces_name=$(find "${UNIQUE_TMP}/snapshots" -maxdepth 1 \
-        -name 'nonces.*.json' -printf '%f\n' 2>/dev/null \
-        | awk -F. '$2 ~ /^[0-9]+$/ { print $2 "\t" $0 }' \
-        | sort -n -k1,1 \
-        | tail -n 1 \
-        | cut -f2-)
-    if [[ -z "${nonces_name}" ]]; then
-        printf 'no nonces.*.json under %s\n' \
-               "${UNIQUE_TMP}/snapshots" >&2
-        exit 8
+# Step 4: era-history sidecars + bundle era-history.json. rc=6 on failure.
+# amaru `bootstrap` reads history.<slot>.<hash>.json alongside each
+# snapshot dir for custom testnets (make_era_history); `amaru run` later
+# reads era-history.json from the bundle root via --era-history-file.
+phase_era_sidecars() {
+    local snap_root="${UNIQUE_TMP}/snapshots/${NET_LC}"
+    local slot hash count=0
+    for slot in "${SNAPSHOT_SLOTS[@]}"; do
+        hash=$(jq -r --argjson s "${slot}" \
+            '.data | map(select(.[0] == $s)) | (.[0][1] // empty)' \
+            "${BUNDLE_DIR}/.logs/preflight-blocks.json")
+        [[ -n "${hash}" ]] || { printf 'no hash for sidecar slot %s\n' "${slot}" >&2; exit 6; }
+        ensure_era_history_input "${snap_root}/history.${slot}.${hash}.json"
+        count=$(( count + 1 ))
+    done
+    if (( count == 0 )); then
+        printf 'no era-history sidecars written\n' >&2
+        exit 6
     fi
-    nonces_src="${UNIQUE_TMP}/snapshots/${nonces_name}"
-    cp "${nonces_src}" "${UNIQUE_TMP}/nonces.json"
-    # nonces.tail must be the hash of the LAST block of the previous
-    # epoch (= the slot the cardano-node Praos rule would have stored
-    # as `praosStateLabNonce` AT that boundary, which becomes
-    # `praosStateLastEpochBlockNonce` for the active-nonce mix when
-    # the next boundary fires). amaru `evolve_nonce` later does:
-    #
-    #   load_header(parent.tail).parent()
-    #
-    # to recover that lab value, so the imported tail must point to
-    # the LAST header of the previous epoch — `load_header(hash_N).parent()`
-    # then yields `hash_{N-1}`, exactly the lab value cardano stored.
-    #
-    # phase_extract emits headers.csv with current-epoch headers first
-    # (last two of the snapshot's epoch) and prev-epoch headers second
-    # (last two of the previous epoch). The LAST line of the file is
-    # therefore the last block of the previous epoch — which is what
-    # we want.
-    local prev_hash=""
-    local headers_csv="${UNIQUE_TMP}/headers.csv"
-    if [[ -s "${headers_csv}" ]]; then
-        prev_hash=$(awk -F, 'END {gsub(/"/,"",$2); print $2}' \
-                    "${headers_csv}" 2>/dev/null || true)
-    fi
-    if [[ -z "${prev_hash}" ]]; then
-        printf 'no previous-epoch hash to anchor nonces.tail\n' >&2
-        exit 8
-    fi
-    printf '+ rewriting nonces.tail = %s\n' "${prev_hash}"
-    local tmp_json="${UNIQUE_TMP}/nonces.json.tmp"
-    if ! jq --arg t "${prev_hash}" '.tail = $t' \
-        "${UNIQUE_TMP}/nonces.json" \
-        >"${tmp_json}" 2>"${BUNDLE_DIR}/.logs/nonces.stderr"
-    then
-        printf 'nonces tail rewrite failed; see %s\n' \
-               "${BUNDLE_DIR}/.logs/nonces.stderr" >&2
-        exit 8
-    fi
-    mv "${tmp_json}" "${UNIQUE_TMP}/nonces.json"
+    # Bundle-level copy for `amaru run --era-history-file` at consume time.
+    ensure_era_history_input "${UNIQUE_TMP}/era-history.json"
 }
 
-# Step 6: three chained `amaru import-*` calls. rc=9 on failure.
-# Paths follow R-005 / Obs#3: ledger.<network>.db, chain.<network>.db,
-# headers/* all at the staging root so the final `mv -T` lands them in
-# the canonical bundle layout.
-phase_import() {
-    local ledger_dir="${UNIQUE_TMP}/ledger.${NETWORK}.db"
-    local chain_dir="${UNIQUE_TMP}/chain.${NETWORK}.db"
-    local snapshots_dir="${UNIQUE_TMP}/snapshots"
-    mkdir -p "${ledger_dir}" "${chain_dir}"
-
-    printf '+ amaru import-ledger-state\n'
+# Step 5: amaru bootstrap. rc=9 on failure.
+# Runs with CWD = staging so default_snapshots_dir (snapshots/<net>) and
+# default_data_dir (data/<net>) resolve to the freshly materialized
+# snapshots, and AMARU_BOOTSTRAP_CONFIG_DIR pointing at our local
+# snapshots.json. Produces ledger.<net>.db + chain.<net>.db, deriving
+# nonces from the latest snapshot and importing the packaged headers.
+phase_bootstrap() {
+    local first_epoch=$(( SNAPSHOT_SLOTS[0] / EPOCH_LENGTH ))
+    local ledger_dir="${UNIQUE_TMP}/ledger.${NET_LC}.db"
+    local chain_dir="${UNIQUE_TMP}/chain.${NET_LC}.db"
+    local logdir="${BUNDLE_DIR}/.logs"
+    mkdir -p "${logdir}"
     local rc=0
-    log_phase import-ledger-state amaru import-ledger-state \
-        --network "${NETWORK}" \
-        --ledger-dir "${ledger_dir}" \
-        --snapshot-dir "${snapshots_dir}" \
-        || rc=$?
+    printf '+ amaru bootstrap\n'
+    # Run with CWD = staging so amaru resolves snapshots/<net> + data/<net>
+    # relative to the freshly materialized snapshots; AMARU_BOOTSTRAP_CONFIG_DIR
+    # points at our local snapshots.json.
+    (
+        cd "${UNIQUE_TMP}" || exit 9
+        AMARU_BOOTSTRAP_CONFIG_DIR="${UNIQUE_TMP}/bootstrap-config" \
+            amaru bootstrap \
+                --network "${NETWORK}" \
+                --epoch "${first_epoch}" \
+                --ledger-dir "${ledger_dir}" \
+                --chain-dir "${chain_dir}"
+    ) 2>"${logdir}/bootstrap.stderr" || rc=$?
     if (( rc != 0 )); then
-        printf 'amaru import-ledger-state failed (rc=%d); see %s\n' \
-               "${rc}" "${BUNDLE_DIR}/.logs/import-ledger-state.stderr" >&2
-        tail_phase_log import-ledger-state
+        printf 'amaru bootstrap failed (rc=%d); see %s\n' \
+               "${rc}" "${BUNDLE_DIR}/.logs/bootstrap.stderr" >&2
+        tail_phase_log bootstrap
         exit 9
     fi
-
-    printf '+ amaru import-headers\n'
-    local hdr_args=()
-    while IFS= read -r -d '' f; do
-        hdr_args+=(--header-file "${f}")
-    done < <(find "${UNIQUE_TMP}/headers" -name 'header.*.cbor' -print0 \
-                  | sort -z)
-    rc=0
-    log_phase import-headers amaru import-headers \
-        --network "${NETWORK}" \
-        --chain-dir "${chain_dir}" \
-        "${hdr_args[@]}" \
-        || rc=$?
-    if (( rc != 0 )); then
-        printf 'amaru import-headers failed (rc=%d); see %s\n' \
-               "${rc}" "${BUNDLE_DIR}/.logs/import-headers.stderr" >&2
-        tail_phase_log import-headers
-        exit 9
-    fi
-
-    printf '+ amaru import-nonces\n'
-    rc=0
-    # --era-history-file is mandatory for short-epoch testnets:
-    # without it, import-nonces falls back to the network default
-    # (preprod's 86400 slots/epoch) and stores the wrong `epoch` for
-    # the imported snapshot point. amaru run then sees a fake
-    # epoch-boundary crossing on the FIRST roll-forward (parent.epoch=0
-    # vs current_epoch=N from the correct era-history at run time)
-    # and recomputes a new active nonce that no longer matches what
-    # cardano-node actually used to sign the block, producing
-    # `Invalid VRF proof: VerificationFailed`. See
-    # https://github.com/lambdasistemi/amaru-bootstrap/issues/34.
-    log_phase import-nonces amaru import-nonces \
-        --network "${NETWORK}" \
-        --nonces-file "${UNIQUE_TMP}/nonces.json" \
-        --era-history-file "${UNIQUE_TMP}/era-history.input.json" \
-        --chain-dir "${chain_dir}" \
-        || rc=$?
-    if (( rc != 0 )); then
-        printf 'amaru import-nonces failed (rc=%d); see %s\n' \
-               "${rc}" "${BUNDLE_DIR}/.logs/import-nonces.stderr" >&2
-        tail_phase_log import-nonces
+    if [[ ! -d "${ledger_dir}/live" ]]; then
+        printf 'amaru bootstrap did not produce a live ledger view at %s\n' \
+               "${ledger_dir}/live" >&2
+        tail_phase_log bootstrap
         exit 9
     fi
 }
 
-# Step 7: mv -T <unique-tmp> <final>. rc=10 on failure.
+# Step 6: mv -T <unique-tmp> <final>. rc=10 on failure.
 # `mv -T` invokes renameat2(NOREPLACE) on Linux and is the atomic
 # commit per R-007. On EEXIST another producer won the race; fall back
-# to bundle_complete which short-circuits with rc=0 (FR-008).
+# to bundle_complete which short-circuits with rc=0 (FR-008). The
+# create-snapshots work dirs (data/, bootstrap-config/, targets.json)
+# are intermediates and are dropped before the commit; the era-history
+# snapshot sidecars stay under snapshots/<net> for re-bootstrap.
 phase_commit() {
     local final_bundle="${BUNDLE_DIR}/${NETWORK}"
-    rm -rf "${UNIQUE_TMP}/legacy-in" \
-           "${UNIQUE_TMP}/blocks.json" \
-           "${UNIQUE_TMP}/headers.csv"
+    rm -rf "${UNIQUE_TMP}/data" \
+           "${UNIQUE_TMP}/bootstrap-config" \
+           "${UNIQUE_TMP}/cardano-db" \
+           "${UNIQUE_TMP}/targets.json"
     if mv -T "${UNIQUE_TMP}" "${final_bundle}" 2>"${BUNDLE_DIR}/.logs/commit.stderr"
     then
         printf 'wrote %s\n' "${final_bundle}"
@@ -763,16 +571,15 @@ phase_commit() {
     exit 10
 }
 
-# ─── Main orchestration (skeleton) ────────────────────────────────
+# ─── Main orchestration ───────────────────────────────────────────
 
 main() {
     phase_preflight
     phase_stage_init
-    phase_emit
-    phase_convert
-    phase_extract
-    phase_nonces
-    phase_import
+    phase_targets
+    phase_create_snapshots
+    phase_era_sidecars
+    phase_bootstrap
     phase_commit
 }
 
