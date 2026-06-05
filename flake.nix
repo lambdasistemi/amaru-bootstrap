@@ -24,6 +24,15 @@
     iohkNix = {
       url = "github:input-output-hk/iohk-nix";
       inputs.nixpkgs.follows = "nixpkgs";
+      # Pin blst to the v0.3.14 tag rev. iohk-nix's crypto overlay expects
+      # blst 0.3.14, but the default (v0.3.15) rev now serves drifted tarball
+      # content under the same SHA, intermittently breaking the flake.lock
+      # narHash both locally and in CI ("regional content shift"). 8c7db7fe is
+      # the v0.3.14 tag and hashes deterministically to the expected content.
+      inputs.blst = {
+        url = "github:supranational/blst/8c7db7fe8d2ce6e76dc398ebd4d475c0ec564355";
+        flake = false;
+      };
     };
 
     # CHaP — read-only, consumed by haskell.nix as the cabal index for
