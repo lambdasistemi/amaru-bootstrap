@@ -61,7 +61,7 @@
     # runtime --era-history-file/--global-parameters-file, the testnet tvar
     # era-history sidecar fix, and short-epoch ledger/consensus guards.
     amaru = {
-      url = "github:lambdasistemi/amaru/4165a5f4ce3f64a9819e0bb97276f82c7db52d5b";
+      url = "github:lambdasistemi/amaru/feat/testnet-bootstrap";
       flake = false;
     };
   };

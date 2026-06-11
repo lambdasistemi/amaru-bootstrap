@@ -434,8 +434,8 @@ phase_targets() {
 
 # Step 3: amaru create-snapshots. rc=6 on failure.
 # Drives the db-analyser engine against the local chain DB
-# (--cardano-db-dir, so Mithril is skipped) using the explicit targets
-# (--targets-file, so Koios is skipped). Materializes one snapshot dir
+# (--cardano-node-db, so Mithril is skipped) using the explicit snapshot
+# points (--snapshot, so Koios is skipped). Materializes one snapshot dir
 # per epoch under snapshots/<net>/<slot>.<hash>/ with packaged bootstrap
 # headers, plus epoch metadata under data/<net>/epoch-snapshots/epochs/.
 phase_create_snapshots() {
@@ -453,13 +453,24 @@ phase_create_snapshots() {
     ln -sfn "${CHAIN_DB}/immutable" "${cardano_db}/immutable"
 
     local rc=0
-    printf '+ amaru create-snapshots (epoch %d + 2)\n' "${first_epoch}"
+    # amaru >= 4de2db13 replaced --targets-file with a repeated
+    # --snapshot "<point>::<parent_point>" option (Point = "<slot>.<hash>"); three
+    # snapshot points, derived from the targets already computed above.
+    local -a snapshot_args=()
+    while IFS= read -r _snap; do snapshot_args+=("${_snap}"); done < <(
+        jq -r '.[] | "--snapshot", "\(.slot).\(.hash)::\(.parent_point)"' "${UNIQUE_TMP}/targets.json"
+    )
+    # amaru >= 4de2db13 treats --epoch as the TARGET epoch (Amaru's start point),
+    # expanding to the 3 prior snapshots (T-3,T-2,T-1). Our snapshots are the 3
+    # latest completed epochs [first_epoch .. first_epoch+2], so target = first_epoch+3.
+    local target_epoch=$(( first_epoch + 3 ))
+    printf '+ amaru create-snapshots (target epoch %d, snapshots %d..%d)\n' "${target_epoch}" "${first_epoch}" "$(( first_epoch + 2 ))"
     log_phase create-snapshots amaru create-snapshots \
         --network "${NETWORK}" \
-        --epoch "${first_epoch}" \
+        --epoch "${target_epoch}" \
         --cardano-node-config-dir "${CONFIG_DIR}" \
-        --cardano-db-dir "${cardano_db}" \
-        --targets-file "${UNIQUE_TMP}/targets.json" \
+        --cardano-node-db "${cardano_db}" \
+        "${snapshot_args[@]}" \
         --snapshot-dir "${snap_root}" \
         --dist-dir "${dist_dir}" \
         || rc=$?
@@ -525,7 +536,7 @@ phase_bootstrap() {
         AMARU_BOOTSTRAP_CONFIG_DIR="${UNIQUE_TMP}/bootstrap-config" \
             amaru bootstrap \
                 --network "${NETWORK}" \
-                --epoch "${first_epoch}" \
+                --epoch "$(( first_epoch + 3 ))" \
                 --ledger-dir "${ledger_dir}" \
                 --chain-dir "${chain_dir}"
     ) 2>"${logdir}/bootstrap.stderr" || rc=$?
