@@ -53,22 +53,23 @@ EOF
 cmd="$1"; shift
 case "$cmd" in
   create-snapshots)
-    targets=""; snapdir=""
+    snapdir=""; points=()
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        --targets-file) targets="$2"; shift 2 ;;
+        --snapshot) points+=("$2"); shift 2 ;;
         --snapshot-dir) snapdir="$2"; shift 2 ;;
         *) shift ;;
       esac
     done
     mkdir -p "$snapdir"
-    while IFS=$'\t' read -r slot hash; do
-      d="$snapdir/$slot.$hash"
+    for p in "${points[@]}"; do
+      point="${p%%::*}"
+      d="$snapdir/$point"
       mkdir -p "$d/tables"
       : >"$d/state"
       : >"$d/tables/tvar"
       printf '[]\n' >"$d/bootstrap.headers.json"
-    done < <(jq -r '.[] | "\(.slot)\t\(.hash)"' "$targets")
+    done
     ;;
   bootstrap)
     ledger=""; chain=""
