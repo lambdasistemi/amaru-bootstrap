@@ -3,7 +3,7 @@
 Bootstrap image and tools for running [Amaru](https://github.com/pragma-org/amaru)
 on custom Cardano testnets.
 
-## What this repo provides
+## What is this
 
 Amaru cannot currently synchronise from genesis on arbitrary custom
 testnets. It must start from prepared ledger and chain stores, plus the
@@ -20,32 +20,116 @@ entrypoints:
   `amaru run`.
 - `bootstrap-producer`: the lower-level one-shot bundle producer used by
   the relay entrypoint and by local verification. It reads a cardano-node
-  ChainDB, emits the Amaru ledger projection, imports headers and nonces,
-  then exits with a classed status code.
+  ChainDB, derives snapshot targets from the chain itself, runs
+  `amaru create-snapshots` and `amaru bootstrap`, then exits with a
+  classed status code.
 
 The image default Docker entrypoint remains `bootstrap-producer` for
 standalone compatibility. Antithesis Compose stacks must override it to
 `amaru-relay-bootstrap`.
 
-## Production data flow
+## Architecture
+
+```mermaid
+flowchart LR
+    node["paired cardano-node\nChainDB + config"] --> producer["bootstrap-producer\n(one-shot)"]
+    relay["amaru-relay-bootstrap\n(long-lived container)"] --> producer
+    producer --> extractor["header-extractor\ntip-info / list-blocks"]
+    producer --> snaps["amaru create-snapshots\n(db-analyser engine)"]
+    producer --> boot["amaru bootstrap"]
+    boot --> bundle["bundle\nledger.net.db + chain.net.db\nsnapshots + era-history.json"]
+    bundle --> run["exec amaru run"]
+    relay --> run
+    runtime["/amaru-runtime\nera-history.json\nglobal-parameters.json"] --> run
+```
 
 The production path does not use `db-synthesizer`. It reads a live
 cardano-node ChainDB and runs:
 
-1. `ledger-state-emitter` - reads the pinned cardano-node 10.7.1 ledger
-   state and emits the Amaru bootstrap projection.
-2. `amaru convert-ledger-state` - converts the projected ledger states
-   into Amaru snapshot artifacts.
-3. `header-extractor` - extracts the headers needed by Amaru's chain
-   store and nonce alignment.
-4. `amaru import-ledger-state`, `amaru import-headers`, and
-   `amaru import-nonces` - populate the stores that `amaru run` opens.
+1. `header-extractor tip-info` / `list-blocks` - poll the immutable DB
+   until the chain is era-ready, then pick the last block of each of
+   the three most recent completed epochs as snapshot targets.
+2. `amaru create-snapshots` - materialize per-epoch snapshot
+   directories (with packaged bootstrap headers) directly from the
+   local chain DB, using `--targets-file` and `--cardano-db-dir` to
+   bypass Koios and Mithril. Internally this drives the `db-analyser`
+   engine, which is why `db-analyser` is bundled in the image.
+3. era-history sidecars - the producer writes
+   `history.<slot>.<hash>.json` next to each snapshot and an
+   `era-history.json` at the bundle root, both built from the mounted
+   Shelley genesis `epochLength`.
+4. `amaru bootstrap` - populate `ledger.<network>.db` and
+   `chain.<network>.db` from the snapshots, deriving nonces and
+   importing the packaged headers.
+5. atomic commit - `mv -T` of the staging directory into
+   `<bundle-dir>/<network>`.
 
 `db-synthesizer` remains in this repository only for fixtures and checks.
 It fabricates ChainDB inputs for CI; it is not in the Antithesis runtime
-path.
+path. `ledger-state-emitter` (the in-repo node-10.7.1 ledger projection
+tool) is still built, shipped, and exposed as a flake app, but it is no
+longer invoked by the producer pipeline since the migration to upstream
+`create-snapshots` + `bootstrap`.
 
-## Antithesis relay contract
+## Install
+
+The supported runtime artifact is the published Docker image:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
+```
+
+After CI succeeds on `main`, GitHub Actions publishes a tag named by the
+full commit SHA. After CI succeeds on a same-repository pull request, it
+also publishes:
+
+```text
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-pr-head-sha>
+ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>
+```
+
+Downstream Compose files should pin a full commit-SHA tag. The project
+does not publish moving runtime tags such as `latest`.
+
+Local image build (x86_64-linux only):
+
+```bash
+nix build .#packages.x86_64-linux.bootstrap-producer-image \
+  -o result-bootstrap-producer-image
+docker load -i result-bootstrap-producer-image
+```
+
+The matching CI artifact is named `bootstrap-producer-image-<github-sha>`
+and contains `amaru-bootstrap-producer-<github-sha>.tar.gz`.
+
+## Quickstart
+
+Produce a bundle from an existing cardano-node ChainDB without Docker:
+
+```bash
+nix run .#bootstrap-producer -- \
+  /path/to/cardano-node/db \
+  /path/to/cardano-node/config \
+  /tmp/amaru-bundle \
+  testnet_42
+```
+
+That command waits for the chain to become era-ready, writes
+`/tmp/amaru-bundle/testnet_42`, and exits. For the full Compose relay
+shape, follow the [tutorial](docs/tutorial.md).
+
+## Usage
+
+All tools are exposed as flake apps:
+
+| App | Purpose |
+|-----|---------|
+| `nix run .#bootstrap-producer` | One-shot bundle producer (`<chain-db> <config-dir> <bundle-dir> <network>`) |
+| `nix run .#smoke-test` | Phase 0 format-compatibility smoke test (`<bundle> <out-dir>`) |
+| `nix run .#header-extractor` | Immutable chain-DB queries: `tip-info`, `list-blocks`, `get-header` |
+| `nix run .#ledger-state-emitter` | Standalone node-10.7.1 ledger-state projection (not in the producer pipeline) |
+| `nix run .#amaru` | The pinned Amaru binary |
+| `nix run .#db-synthesizer` / `.#db-analyser` / `.#snapshot-converter` | Pinned upstream consensus tools |
 
 In the downstream
 [`cardano-foundation/cardano-node-antithesis`](https://github.com/cardano-foundation/cardano-node-antithesis)
@@ -91,45 +175,26 @@ must contain:
 - `global-parameters.json`: the custom testnet consensus parameters
   passed to `--global-parameters-file`.
 
-## Published images
-
-After CI succeeds on `main`, GitHub Actions publishes:
-
-```text
-ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-commit-sha>
-```
-
-After CI succeeds on a same-repository pull request, it also publishes:
-
-```text
-ghcr.io/lambdasistemi/amaru-bootstrap-producer:<full-pr-head-sha>
-ghcr.io/lambdasistemi/amaru-bootstrap-producer:pr-<pr-number>-<full-pr-head-sha>
-```
-
-Downstream Compose files should pin a full commit-SHA tag. The project
-does not publish moving runtime tags such as `latest`.
-
-Local build:
-
-```bash
-nix build .#packages.x86_64-linux.bootstrap-producer-image \
-  -o result-bootstrap-producer-image
-docker load -i result-bootstrap-producer-image
-```
-
-The matching CI artifact is named `bootstrap-producer-image-<github-sha>`
-and contains `amaru-bootstrap-producer-<github-sha>.tar.gz`.
-
-## Compatibility target
+### Compatibility target
 
 This repository currently targets `cardano-node 10.7.1`. That is
 deliberate: Cardano ledger-state CBOR changes across node releases, so
 compiling against a random ledger package set is not enough. Retargeting
 the producer means updating `cabal.project`, `flake.lock`, and the
 documented projection in
-`specs/003-amaru-bootstrap-producer/research.md#r-011`.
+[`specs/003-amaru-bootstrap-producer/research.md#r-011`](specs/003-amaru-bootstrap-producer/research.md).
 
-## Local verification
+## Documentation
+
+The MkDocs site is published at
+<https://lambdasistemi.github.io/amaru-bootstrap/> and starts at
+[`docs/index.md`](docs/index.md). The current operator path is
+[`docs/tutorial.md`](docs/tutorial.md), and the Antithesis-specific
+contract is in [`docs/antithesis.md`](docs/antithesis.md).
+
+For AI agents, start at [AGENTS.md](AGENTS.md).
+
+## Development
 
 ```bash
 just ci
@@ -152,12 +217,6 @@ just live-bootstrap-producer
 These checks prove bundle production, Amaru import, and Amaru startup
 alignment for the pinned release boundary. They are not exhaustive
 mainnet ledger-content coverage.
-
-## Documentation
-
-The MkDocs site starts at [`docs/index.md`](docs/index.md). The current
-operator path is [`docs/tutorial.md`](docs/tutorial.md), and the
-Antithesis-specific contract is in [`docs/antithesis.md`](docs/antithesis.md).
 
 ## License
 
