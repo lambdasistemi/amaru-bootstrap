@@ -23,7 +23,7 @@ flowchart LR
 
     relay --> scratch["private scratch\n/srv/amaru/.work"]
     scratch --> producer["bootstrap-producer\nretry attempts"]
-    producer --> produced["scratch bundle\n<scratch-out>/<network>"]
+    producer --> produced["scratch bundle\n&lt;scratch-out&gt;/&lt;network&gt;"]
     produced --> promote["promote complete bundle"]
     promote --> stores["/srv/amaru\nledger.*.db\nchain.*.db\nera-history.json"]
     stores --> amaru["exec amaru run"]
