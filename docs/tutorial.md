@@ -154,8 +154,9 @@ Expected relay log shape:
 [amaru-relay-1] bootstrap attempt #1: refreshing snapshot from /live
 [amaru-relay-1] bootstrap attempt #1: invoking bootstrap-producer
 [amaru-relay-1 bootstrap-producer] + era-readiness predicate satisfied - target_slot=...
-[amaru-relay-1 bootstrap-producer] + ledger-state-emitter @ ...
-[amaru-relay-1 bootstrap-producer] + amaru import-ledger-state
+[amaru-relay-1 bootstrap-producer] + wrote targets.json (3 epochs) + snapshots.json
+[amaru-relay-1 bootstrap-producer] + amaru create-snapshots (epoch N + 2)
+[amaru-relay-1 bootstrap-producer] + amaru bootstrap
 [amaru-relay-1] bootstrap attempt #1: committed bundle to /srv/amaru
 [amaru-relay-1] bundle already complete at /srv/amaru, skipping bootstrap loop
 [amaru-relay-1] bundle ready at /srv/amaru, exec'ing amaru run
@@ -175,8 +176,7 @@ After promotion, the relay's private `/srv/amaru` volume contains:
 |-- chain.testnet_42.db/
 |-- ledger.testnet_42.db/
 |-- snapshots/
-|-- nonces.json
-`-- headers/
+`-- era-history.json
 ```
 
 `amaru run` opens the stores directly from that directory:
@@ -187,8 +187,9 @@ After promotion, the relay's private `/srv/amaru` volume contains:
 ```
 
 The ledger store must include `live/` and at least three numeric
-historical snapshots. The chain store must include the exact header for
-the latest ledger snapshot.
+historical snapshots. Nonces and the bootstrap headers (including the
+header for the latest ledger snapshot) are baked into
+`chain.testnet_42.db` by `amaru bootstrap`.
 
 ## Failure Diagnosis
 
@@ -202,7 +203,8 @@ Relay failures are usually visible in the wrapper prefix:
 | repeated `transient rc=1` | ChainDB is not ready or the snapshot copy is too early. |
 | repeated `transient rc=2` | The chain has not reached the producer's era-readiness window. |
 | `fatal rc=3` | Config/genesis files are missing or invalid. |
-| `fatal rc=9` | One of the Amaru import commands failed. Check the prefixed producer output. |
+| repeated `transient rc=6` | `amaru create-snapshots` failed. Check the prefixed producer output. |
+| `fatal rc=9` | `amaru bootstrap` failed. Check the prefixed producer output. |
 | Amaru starts then fails VRF/nonce checks | Check `amaru-runtime/era-history.json` and `global-parameters.json` against the generated testnet. |
 
 In relay mode, avoid `depends_on: service_completed_successfully` for

@@ -7,14 +7,14 @@ The current runtime path is:
 
 ```text
 cardano-node ChainDB
-  -> ledger-state-emitter
-  -> amaru convert-ledger-state
-  -> header-extractor
-  -> amaru import-*
+  -> header-extractor tip-info / list-blocks
+  -> amaru create-snapshots
+  -> amaru bootstrap
   -> amaru run
 ```
 
-`db-synthesizer` now belongs to fixtures and CI checks only.
+`db-synthesizer` now belongs to fixtures and CI checks only. See
+[Architecture](../architecture.md) for the current pipeline.
 
 ## Original Bundle Layout
 
@@ -89,10 +89,10 @@ That fork was the original maintenance problem: it lagged far behind
 upstream consensus and mixed fixture generation with bootstrap snapshot
 extraction.
 
-## The No-Fork Replacement
+## The No-Fork Replacement (first iteration)
 
-This repository replaced the forked snapshot writer with in-repo tools
-that consume the stock node libraries:
+This repository first replaced the forked snapshot writer with in-repo
+tools that consume the stock node libraries:
 
 ```bash
 ledger-state-emitter \
@@ -108,13 +108,15 @@ header-extractor tip-info|list-blocks|get-header ...
 10.7.1 dependency set and emits the Amaru bootstrap projection documented
 in `specs/003-amaru-bootstrap-producer/research.md#r-011`.
 
-The producer calls it three times: `target_slot`,
-`target_slot - epochLength`, and `target_slot - 2 * epochLength`.
-`amaru convert-ledger-state` still owns the final snapshot slicing,
-history JSON, and nonce JSON formats.
+In that first iteration the producer called the emitter three times
+(`target_slot`, `target_slot - epochLength`, and
+`target_slot - 2 * epochLength`) and `amaru convert-ledger-state` owned
+the final snapshot slicing, history JSON, and nonce JSON formats.
 
-For custom testnets, the producer corrects converted
-`history.<slot>.<hash>.json` files before import: the open-ended current
-era's `epoch_size_slots` is set to the mounted Shelley genesis
-`epochLength`. That keeps short-epoch networks consistent with the
-ledger snapshot epoch number that Amaru checks during import.
+That iteration has since been superseded as well: once upstream Amaru
+gained `create-snapshots --targets-file --cardano-db-dir` and
+`bootstrap`, the producer migrated to driving those two commands
+directly, and nonces and headers became internal artefacts of
+`chain.<network>.db`. `ledger-state-emitter` remains available as a
+standalone tool. The emit/convert/import bundle shape on this page is
+historical context only.
