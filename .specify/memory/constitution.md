@@ -31,13 +31,13 @@ Every step of the bootstrap pipeline must use either:
 Examples currently in use:
 
 - `db-synthesizer` (upstream `ouroboros-consensus`, mode (a)) — fixture chain DB synthesis
+- `db-analyser` (upstream `ouroboros-consensus`, mode (a)) — bundled in the runtime image as the engine `amaru create-snapshots` drives
 - `header-extractor` (in-repo, mode (b), consumes `ouroboros-consensus` as a library) — chain DB queries
-- `ledger-state-emitter` (in-repo, mode (b), consumes `ouroboros-consensus` and `cardano-ledger` as libraries) — Amaru-compatible ledger-state emission for the pinned node release
-- `amaru` ([`pragma-org/amaru`](https://github.com/pragma-org/amaru), mode (a)) — convert / import / run
+- `ledger-state-emitter` (in-repo, mode (b), consumes `ouroboros-consensus` and `cardano-ledger` as libraries) — standalone Amaru-compatible ledger-state emission for the pinned node release; no longer in the producer pipeline
+- `amaru` ([`pragma-org/amaru`](https://github.com/pragma-org/amaru), mode (a), currently consumed via the `lambdasistemi/amaru` `feat/testnet-bootstrap` branch — upstream main plus a minimal upstreamable delta — SHA-pinned in `flake.lock`) — create-snapshots / bootstrap / run
 
-`db-analyser` and `snapshot-converter` remain available for historical
-Phase 0 checks, but they are not in the bootstrap-producer runtime
-image after the R-011 pivot.
+`snapshot-converter` remains available for historical Phase 0 checks,
+but it is not in the bootstrap-producer runtime image.
 
 What is **not** permitted:
 
@@ -118,10 +118,18 @@ Amendments require a PR, a rationale in the PR description, and the
 All PRs must verify compliance with these principles. When the
 constitution and a convenience are in conflict, the constitution wins.
 
-**Version**: 1.2.0 | **Ratified**: 2026-04-27 | **Last Amended**: 2026-04-29
+**Version**: 1.3.0 | **Ratified**: 2026-04-27 | **Last Amended**: 2026-06-12
 
 ### Amendment log
 
+- **1.3.0 (2026-06-12)**: Principle II examples updated after the
+  producer migrated to upstream `amaru create-snapshots` +
+  `amaru bootstrap`. `db-analyser` returned to the runtime image as the
+  engine that `create-snapshots` drives; `ledger-state-emitter` is
+  retained as a standalone tool but is no longer the runtime
+  ledger-state producer; the Amaru example commands are now
+  create-snapshots / bootstrap / run, consumed via the SHA-pinned
+  `lambdasistemi/amaru` `feat/testnet-bootstrap` branch.
 - **1.2.0 (2026-04-29)**: Principle II examples updated after the
   Phase 2 R-011 pivot. `ledger-state-emitter` is now the runtime
   ledger-state producer, consuming `ouroboros-consensus` and
