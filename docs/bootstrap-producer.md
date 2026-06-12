@@ -58,60 +58,90 @@ the relay startup marker and the relay process continues as `amaru run`.
 
 1. Check whether `<bundle-dir>/<network>` is already complete. If so,
    exit 0.
-2. Validate the node config and wait for the chain DB to appear.
-3. Poll `header-extractor tip-info` until the immutable tip is in
-   Conway and at least two Conway epochs are available.
-4. Run `ledger-state-emitter` at the selected target slot and the two
-   preceding epoch slots.
-5. Run `amaru convert-ledger-state` for all emitted ledger states.
-6. Correct the converted current-era history sidecars from the node
-   genesis `epochLength`.
-7. Run `header-extractor list-blocks` and `get-header` to collect the
-   headers Amaru needs.
-8. Rewrite `nonces.json` so `tail` points at the previous-epoch header
-   hash.
-9. Run `amaru import-ledger-state`, `amaru import-headers`, and
-   `amaru import-nonces`.
-10. Atomically rename the unique temp directory into the final bundle
-   path.
+2. Validate the node config and genesis (`config.json`,
+   `shelley-genesis.json`, positive `epochLength`) and wait for the
+   chain DB to appear.
+3. Poll `header-extractor tip-info` until the era-readiness predicate
+   holds: the immutable tip is in Conway, the tip epoch is at least 3,
+   and `header-extractor list-blocks` finds a block in each of the
+   three most recent completed epochs, all at or after the Conway fork
+   slot. The snapshot targets are the last immutable block of each of
+   those three epochs.
+4. Compose `targets.json` (epoch/slot/hash/parent_point) and
+   `snapshots.json` from the chain's own block list, bypassing Koios.
+5. Run `amaru create-snapshots` with `--targets-file` and an isolated
+   `--cardano-db-dir` (immutable chunks symlinked from the source
+   chain DB), materializing one snapshot directory per epoch with
+   packaged bootstrap headers.
+6. Write a `history.<slot>.<hash>.json` era-history sidecar next to
+   each snapshot and an `era-history.json` at the bundle root, both
+   built from the genesis `epochLength`.
+7. Run `amaru bootstrap`, which populates `ledger.<network>.db` and
+   `chain.<network>.db`, deriving nonces from the latest snapshot and
+   importing the packaged headers.
+8. Atomically rename (`mv -T`) the unique staging directory into the
+   final bundle path.
 
 The final layout is:
 
 ```text
-<bundle-dir>/<network>/
-├── chain.<network>.db/
-├── ledger.<network>.db/
-├── snapshots/
-├── nonces.json
-└── headers/
+<bundle-dir>/
+├── .logs/                      # per-phase stderr logs
+└── <network>/
+    ├── chain.<network>.db/
+    ├── ledger.<network>.db/
+    ├── snapshots/<network>/
+    └── era-history.json
 ```
+
+Nonces and bootstrap headers are baked into `chain.<network>.db` by
+`amaru bootstrap`; they are no longer separate bundle artefacts.
 
 The ledger store must contain `live/` plus at least three numeric
 historical epoch directories. `amaru run` opens the live ledger and then
 loads the two prior historical snapshots for rewards and leader-schedule
-stake distribution. A bundle with only the latest imported snapshot can
-pass `amaru import-ledger-state` and still fail to start.
+stake distribution.
 
-The chain store must also contain the exact header for the ledger tip.
-If the latest converted snapshot is
-`snapshots/<slot>.<hash>.cbor`, the bundle must include
-`headers/header.<slot>.<hash>.cbor` and import it into
-`chain.<network>.db/`; otherwise `amaru run` fails during startup with
-`ledger tip header not found`.
+For custom testnets, `amaru bootstrap` reads the
+`history.<slot>.<hash>.json` sidecar next to each snapshot directory.
+Without it, Amaru defaults to the built-in testnet era history
+(epoch size 86400) and computes wrong nonces on short-epoch networks.
+The bundle-root `era-history.json` is the same document, shipped for
+`amaru run --era-history-file` at consume time. The runtime
+`era-history.json` and `global-parameters.json` consumed by `amaru run`
+in relay mode are deployment files mounted at `/amaru-runtime`; see
+[Antithesis deployment](antithesis.md#runtime-parameter-files).
 
-For custom testnets, `amaru import-ledger-state` reads
-`snapshots/history.<slot>.<hash>.json` next to each snapshot. Amaru's
-converter currently fills the open-ended current era with the network
-default epoch size, so the producer rewrites that sidecar to the
-`epochLength` from the mounted Shelley genesis before import. Without
-that correction a 120-slot Antithesis testnet imports slot 9, then fails
-at slot 129 because the sidecar still maps slot 129 to epoch 0.
+### Environment Knobs
 
-`amaru import-nonces` also receives the producer-generated era-history
-input so imported nonce epochs match short-epoch testnets. The runtime
-`era-history.json` and `global-parameters.json` consumed later by
-`amaru run` are deployment files mounted at `/amaru-runtime` in relay
-mode; see [Antithesis deployment](antithesis.md#runtime-parameter-files).
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `AMARU_NETWORK` | 4th positional argument | Overrides the network name. |
+| `AMARU_CLUSTER_READY_DEADLINE_SECONDS` | `300` | Deadline for the chain DB to appear (exit 1 past it). |
+| `AMARU_WAIT_DEADLINE_SECONDS` | `5400` | Deadline for the era-readiness predicate (exit 2 past it). |
+| `AMARU_POLL_INTERVAL_SECONDS` | `10` | Sleep between readiness polls. |
+
+The relay wrapper tightens the two deadlines to 30 seconds and the poll
+interval to 5 seconds, because its outer retry loop is the right place
+to wait for the chain to mature.
+
+### Exit Codes
+
+| Code | Class |
+|------|-------|
+| 0 | success (bundle committed, or an existing complete bundle found) |
+| 1 | cluster-not-ready: chain DB never appeared |
+| 2 | chain-not-era-ready: readiness predicate never held |
+| 3 | configuration-error: missing/invalid config or genesis |
+| 5 | tool-error: targets composition failed |
+| 6 | tool-error: `amaru create-snapshots` or sidecar write failed |
+| 7 | tool-error: `header-extractor` could not read the chain DB (for example a read-only mount) |
+| 9 | tool-error: `amaru bootstrap` failed |
+| 10 | output-write-error: atomic rename failed |
+| >= 64 | internal error (bash `ERR` trap: `64 + rc`) |
+
+Every tool invocation's stderr lands in `<bundle-dir>/.logs/<phase>.stderr`,
+and the producer tails the failing phase's log onto its own stderr.
 
 ## Node-Release Target
 
@@ -169,16 +199,23 @@ volumes:
 
 This is not a write contract for the producer. `header-extractor` opens
 only the immutable DB and the readiness predicate is derived only from
-immutable chunks. `ledger-state-emitter` opens the LedgerDB with an
-in-memory backend and does not flush replayed state into the node-owned
-LedgerDB. The read-write mount is required because the node-10.7.1
-consensus ImmutableDB opener validates chunk files through APIs that
-fail on a read-only filesystem.
+immutable chunks. `amaru create-snapshots` works against an isolated
+`--cardano-db-dir` in which the immutable chunks are symlinked from the
+source chain DB, so the ledger snapshots its `db-analyser` engine
+materializes never land in the node-owned LedgerDB. The read-write
+mount is required because the node-10.7.1 consensus ImmutableDB opener
+validates chunk files through APIs that fail on a read-only filesystem;
+the producer detects that case and exits 7 with a pointer to the
+`tip-info` stderr log.
 
-## Ledger-State Projection
+## Ledger-State Projection (standalone emitter)
 
-`ledger-state-emitter` writes the Amaru bootstrap projection of the
-node-10.7.1 ledger state:
+`ledger-state-emitter` is the in-repo projection tool. It is no longer
+invoked by the producer pipeline (upstream `amaru create-snapshots` +
+`amaru bootstrap` own snapshot materialization now), but it remains in
+the image and as the flake app `nix run .#ledger-state-emitter` for
+standalone emission and debugging. It writes the Amaru bootstrap
+projection of the node-10.7.1 ledger state:
 
 - UTxO entries are canonical `EncCBOR` entries, not consensus
   ledger-table `MemPack` bytes.
@@ -220,8 +257,10 @@ just live-bootstrap-producer
 ```
 
 `bootstrap-producer-synthesized` runs the real producer pipeline against
-a synthesized Conway-ready `testnet_42` chain DB and verifies that Amaru
-accepts the resulting ledger state, headers, and nonces.
+a synthesized Conway-ready `testnet_42` chain DB and asserts the
+canonical bundle layout: a ledger store with `live/` plus at least three
+numeric historical snapshots, a chain store, and the bundle-root
+`era-history.json`.
 
 `amaru-run-bootstrap` copies that produced bundle into a writable test
 directory, starts `amaru run` without a live peer, and requires Amaru to
@@ -236,17 +275,19 @@ to exercise every transaction, script, UTxO, stake, governance, or reward
 shape a long-running public network can contain.
 
 `antithesis-short-epoch-samples` generates a deterministic short-epoch
-ChainDB corpus from the pinned node 10.7.1 tooling, emits the observed
-early bootstrap slots `9`, `129`, and `249`, and converts them through
-`amaru convert-ledger-state`. The check also rewrites the current-era
-history sidecars to the generated Shelley genesis `epochLength`, matching
-the production producer path. The source ChainDB is generated during the
-Nix build; the repository does not commit bulky database artifacts.
+(`epochLength=120`) ChainDB corpus from the pinned node 10.7.1 tooling,
+runs the full producer pipeline against it, and asserts that at least
+three snapshot directories and the bundle-root `era-history.json` were
+materialized. The source ChainDB is generated during the Nix build; the
+repository does not commit bulky database artifacts.
 
-`antithesis-short-epoch-golden` imports those converted snapshots into
-Amaru's ledger store. It is the regression gate for the Antithesis
-cold-start ledger-state family: convert success alone is not enough, the
-same sampled states must also pass `amaru import-ledger-state`.
+`antithesis-short-epoch-golden` is the issue #29 regression gate for the
+Antithesis cold-start family. It starts `amaru run` on the short-epoch
+bundle with `--era-history-file` pointing at the bundle's
+`era-history.json` (the network built-in epoch size is 86400), and
+requires Amaru to reach `build_ledger` and stay alive until the test
+timeout. Bundle production alone is not enough; the short-epoch stores
+must also be usable as Amaru startup state.
 
 `just live-bootstrap-producer` is the Docker-level verifier. It seeds a
 stock `testnet_42` ChainDB with `db-synthesizer`, starts

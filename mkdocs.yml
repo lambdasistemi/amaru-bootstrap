@@ -63,14 +63,16 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Antithesis deployment: antithesis.md
-  - Tutorial: tutorial.md
-  - Concepts:
-      - Architecture: architecture.md
+  - User manual:
+      - Tutorial: tutorial.md
+      - Antithesis deployment: antithesis.md
+  - Architecture:
+      - Overview: architecture.md
       - Bootstrap producer: bootstrap-producer.md
       - History:
           - What Amaru needed: history/what-amaru-needs.md
-  - Constitution: constitution.md
+  - Development:
+      - Constitution: constitution.md
 
 extra:
   social:

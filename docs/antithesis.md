@@ -91,9 +91,19 @@ variables:
 | `AMARU_RELAY_CONFIG_DIR` | no | `/cardano/config/configs` | Mounted node config directory. |
 | `AMARU_RELAY_RUNTIME_DIR` | no | `/amaru-runtime` | Runtime JSON directory. |
 | `AMARU_RELAY_STARTUP_DIR` | no | `/startup` | Startup marker directory. |
+| `AMARU_WAIT_DEADLINE_SECONDS` | no | `30` | Per-attempt era-readiness deadline exported to the producer. |
+| `AMARU_CLUSTER_READY_DEADLINE_SECONDS` | no | `30` | Per-attempt chain-DB-appears deadline exported to the producer. |
+| `AMARU_POLL_INTERVAL_SECONDS` | no | `5` | Producer poll interval exported to the producer. |
+| `BOOTSTRAP_PRODUCER_BIN` | no | `/bin/bootstrap-producer` | Producer binary invoked by the loop. |
+| `AMARU_BIN` | no | `/bin/amaru` | Amaru binary used for the final `exec`. |
 
 The first two positional arguments may also provide `RELAY_NAME` and
 `AMARU_PEER`, but environment variables win.
+
+The wrapper deliberately tightens the producer's own deadlines (which
+default to 300 s / 5400 s standalone) to 30 seconds per attempt: the
+outer retry loop, which refreshes the `/live` snapshot between attempts,
+is the right place to wait for the chain to mature.
 
 ## Startup Marker
 

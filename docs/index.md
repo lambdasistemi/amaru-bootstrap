@@ -35,10 +35,14 @@ bootstrapper and the Amaru node.
 - `bootstrap-producer`: one-shot primitive used by the relay wrapper and
   by local checks. It produces the Amaru ledger and chain stores from a
   cardano-node ChainDB.
+- `header-extractor`: Haskell executable for `tip-info`, `list-blocks`,
+  and `get-header` against immutable ChainDB chunks. The producer's
+  era-readiness poll and snapshot-target selection are built on it.
 - `ledger-state-emitter`: Haskell executable that projects a pinned
   cardano-node 10.7.1 ledger state into the legacy shape Amaru imports.
-- `header-extractor`: Haskell executable for `tip-info`, `list-blocks`,
-  and `get-header` against immutable ChainDB chunks.
+  Still shipped in the image and exposed as a flake app, but no longer
+  invoked by the producer pipeline since the migration to upstream
+  `amaru create-snapshots` + `amaru bootstrap`.
 - `amaru-runtime/`: deployment-provided runtime files consumed by
   `amaru run`: `era-history.json` and `global-parameters.json`.
 
@@ -48,16 +52,18 @@ The production bootstrap pipeline is:
 
 ```text
 cardano-node ChainDB
-  -> ledger-state-emitter
-  -> amaru convert-ledger-state
-  -> header-extractor
-  -> nonce tail rewrite
-  -> amaru import-ledger-state/import-headers/import-nonces
+  -> header-extractor tip-info / list-blocks   (era-readiness + targets)
+  -> targets.json + snapshots.json             (from the chain's own blocks)
+  -> amaru create-snapshots                    (db-analyser engine, offline)
+  -> era-history sidecars                      (from genesis epochLength)
+  -> amaru bootstrap                           (ledger + chain stores)
   -> amaru run
 ```
 
 `db-synthesizer` is not part of this runtime path. It remains available
-for fixture generation and CI checks.
+for fixture generation and CI checks. `amaru create-snapshots` drives the
+`db-analyser` engine internally, which is why `db-analyser` is bundled in
+the published image.
 
 ## Specs And History
 

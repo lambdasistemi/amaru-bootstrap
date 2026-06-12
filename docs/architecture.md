@@ -6,8 +6,10 @@ The repository has two layers:
 - `bootstrap-producer`: the one-shot producer primitive called by the
   relay wrapper and by local checks.
 
-The critical code boundary is still release-pinned ledger projection:
-`ledger-state-emitter` targets one cardano-node release at a time. This
+The critical code boundary is still the release-pinned ledger-state
+format: the whole toolset (`header-extractor`, the `db-analyser` engine
+that `amaru create-snapshots` drives, and the standalone
+`ledger-state-emitter`) targets one cardano-node release at a time. This
 branch targets `cardano-node 10.7.1`.
 
 ## Relay Runtime
@@ -23,7 +25,7 @@ flowchart LR
     scratch --> producer["bootstrap-producer\nretry attempts"]
     producer --> produced["scratch bundle\n<scratch-out>/<network>"]
     produced --> promote["promote complete bundle"]
-    promote --> stores["/srv/amaru\nledger.*.db\nchain.*.db\nnonces.json"]
+    promote --> stores["/srv/amaru\nledger.*.db\nchain.*.db\nera-history.json"]
     stores --> amaru["exec amaru run"]
     runtime --> amaru
     amaru --> peer["peer cardano-node\n$AMARU_PEER"]
@@ -42,19 +44,16 @@ not stop after bootstrap; it `exec`s `amaru run`.
 
 ```mermaid
 flowchart LR
-    mount["ChainDB snapshot\nconfig"] --> preflight["pre-flight\nconfig + era readiness"]
-    preflight --> emitter["ledger-state-emitter x3\nnode-10.7.1 projection"]
-    emitter --> legacy["Legacy ExtLedgerState CBOR\nlatest + two prior epochs"]
-    legacy --> convert["amaru convert-ledger-state x3"]
-    convert --> snapshots["snapshot CBOR\nhistory JSON\nnonces JSON"]
-
-    mount --> headers["header-extractor\nlist-blocks/get-header"]
-    headers --> headerFiles["header.*.cbor files"]
-
-    snapshots --> compose["nonce tail rewrite"]
-    headerFiles --> compose
-    compose --> imports["amaru import-ledger-state\namaru import-headers\namaru import-nonces"]
-    imports --> bundle["complete bundle\n<bundle>/<network>"]
+    mount["ChainDB snapshot\nconfig"] --> preflight["pre-flight\nconfig + era readiness\nheader-extractor tip-info"]
+    preflight --> blocks["preflight block list\nheader-extractor list-blocks"]
+    blocks --> targets["targets.json\nsnapshots.json\nlast block of each of the\n3 completed epochs"]
+    targets --> snaps["amaru create-snapshots\ndb-analyser engine\n--targets-file + --cardano-db-dir"]
+    snaps --> snapdirs["snapshots/&lt;net&gt;/&lt;slot&gt;.&lt;hash&gt;/\nwith packaged bootstrap headers"]
+    snapdirs --> sidecars["era-history sidecars\nhistory.&lt;slot&gt;.&lt;hash&gt;.json\n+ bundle era-history.json"]
+    sidecars --> boot["amaru bootstrap\nderives nonces\nimports packaged headers"]
+    boot --> stores["ledger.&lt;net&gt;.db\nchain.&lt;net&gt;.db"]
+    stores --> commit["mv -T staging final\natomic commit"]
+    commit --> bundle["complete bundle\n&lt;bundle&gt;/&lt;network&gt;"]
 ```
 
 In standalone mode the producer writes `<bundle>/<network>`. In relay
@@ -66,9 +65,15 @@ mode it writes to scratch, and the wrapper promotes the contents of
 |-- chain.<network>.db/
 |-- ledger.<network>.db/
 |-- snapshots/
-|-- nonces.json
-`-- headers/
+`-- era-history.json
 ```
+
+Nonces and bootstrap headers are baked into `chain.<network>.db` by
+`amaru bootstrap`; they are no longer separate bundle artefacts. The
+`snapshots/<network>/` directory keeps the materialized epoch snapshots
+and their era-history sidecars for re-bootstrap; `era-history.json` at
+the bundle root is the consume-time override for
+`amaru run --era-history-file`.
 
 ## Live ChainDB Contract
 
@@ -89,9 +94,12 @@ because node-10.7.1's consensus ImmutableDB validation path opens chunk
 files through APIs that reject a read-only filesystem. The relay wrapper
 therefore copies the paired cardano-node `/live` state into private
 writable scratch before invoking the producer. The producer behavior is
-immutable-only: readiness comes from immutable chunks, and the ledger
-replay uses an in-memory LedgerDB backend rather than flushing into the
-node-owned LedgerDB.
+immutable-only: readiness comes from immutable chunks, and
+`amaru create-snapshots` is given an isolated `--cardano-db-dir` view in
+which the immutable chunks are symlinked from the source ChainDB while
+the ledger snapshots its `db-analyser` engine materializes land in
+producer-owned writable directories. The producer never mutates the
+source ChainDB, so concurrent producers can run against the same chain.
 
 ## Relay State Machine
 
@@ -124,30 +132,33 @@ instead of blocking the whole setup behind a one-shot service.
 ```mermaid
 stateDiagram-v2
     [*] --> Preflight
-    Preflight --> Success: existing complete bundle
-    Preflight --> ClusterNotReady: chain DB timeout
-    Preflight --> ChainNotReady: era-readiness timeout
-    Preflight --> Emit: ready immutable tip
+    Preflight --> Success: existing complete bundle (rc 0)
+    Preflight --> ClusterNotReady: chain DB timeout (rc 1)
+    Preflight --> ChainNotReady: era-readiness timeout (rc 2)
+    Preflight --> ConfigError: config or genesis invalid (rc 3)
+    Preflight --> ExtractError: chain DB unreadable (rc 7)
+    Preflight --> Targets: era-readiness predicate holds
 
-    Emit --> Convert: Legacy CBOR written
-    Emit --> EmitError: emitter failed
+    Targets --> CreateSnapshots: targets.json + snapshots.json written
+    Targets --> TargetsError: block list incomplete (rc 5)
 
-    Convert --> ExtractHeaders: snapshot converted
-    Convert --> ConvertError: amaru convert failed
+    CreateSnapshots --> EraSidecars: 3 snapshot dirs materialized
+    CreateSnapshots --> SnapshotsError: amaru create-snapshots failed (rc 6)
 
-    ExtractHeaders --> ComposeNonces: headers written
-    ExtractHeaders --> ExtractError: header extraction failed
+    EraSidecars --> Bootstrap: history sidecars + era-history.json
+    EraSidecars --> SnapshotsError: sidecar write failed (rc 6)
 
-    ComposeNonces --> Import: nonces.json written
-    ComposeNonces --> NonceError: nonce rewrite failed
+    Bootstrap --> Commit: ledger + chain stores populated
+    Bootstrap --> BootstrapError: amaru bootstrap failed (rc 9)
 
-    Import --> Commit: Amaru stores populated
-    Import --> ImportError: amaru import failed
-
-    Commit --> Success: mv -T temp final
+    Commit --> Success: mv -T staging final
     Commit --> Success: another producer won race
-    Commit --> CommitError: final bundle incomplete
+    Commit --> CommitError: rename failed (rc 10)
 ```
+
+Any other uncaught failure exits with `64 + rc` via the internal-error
+trap. The relay wrapper treats exit codes 1, 2, 5, 6, 7, and 8 as
+transient and retries; 0 promotes; anything else is fatal.
 
 ## Runtime Parameters
 
@@ -159,9 +170,12 @@ The relay passes deployment-provided runtime JSON to `amaru run`:
 ```
 
 These files must match the custom testnet genesis/config used by the
-paired cardano-node. They are separate from the snapshot sidecar history
-files that `amaru convert-ledger-state` writes next to each converted
-snapshot.
+paired cardano-node. They are separate from the
+`history.<slot>.<hash>.json` sidecars the producer writes next to each
+snapshot directory (consumed by `amaru bootstrap`) and from the
+`era-history.json` it writes at the bundle root (the consume-time
+override for `amaru run --era-history-file`). All three documents are
+built from the same genesis `epochLength`.
 
 ## Node-Release Boundary
 
@@ -173,18 +187,19 @@ flowchart TB
         ledger["cardano-ledger-* versions"]
     end
 
-    Pinned --> emitter["ledger-state-emitter"]
-    emitter --> projection["Amaru bootstrap projection"]
-    projection --> amaru["Amaru importer"]
+    Pinned --> tools["in-repo tools\nheader-extractor\nledger-state-emitter"]
+    Pinned --> analyser["db-analyser\ncreate-snapshots engine"]
+    analyser --> amaru["amaru create-snapshots\n+ amaru bootstrap"]
+    tools --> amaru
 
     other["Future node release"] -. "requires retargeting" .-> Pinned
 ```
 
 Retargeting to another node release is an explicit project task. It is
-not just a Cabal compile check: the emitted ledger-state shape has to
-match what Amaru imports for that release.
+not just a Cabal compile check: the ledger-state CBOR that the pinned
+tools read and that Amaru imports has to match for that release.
 
-## Ledger-State Projection
+## Ledger-State Projection (standalone emitter)
 
 ```mermaid
 flowchart LR
@@ -203,6 +218,13 @@ The projection preserves the fields Amaru imports and omits node-side
 acceleration or wrapper fields that Amaru does not consume during
 bootstrap.
 
+`ledger-state-emitter` implements this projection as an in-repo
+executable. Since the producer migrated to upstream
+`amaru create-snapshots` + `amaru bootstrap`, the emitter is no longer
+part of the producer pipeline; it remains in the image and as the flake
+app `nix run .#ledger-state-emitter` for standalone snapshot emission
+and debugging against the pinned node release.
+
 ## CI Startup Proof
 
 ```mermaid
@@ -213,7 +235,7 @@ sequenceDiagram
     participant Amaru as amaru run
 
     Check->>Producer: synthesize chain DB, produce bundle
-    Producer->>Bundle: import ledger, headers, nonces
+    Producer->>Bundle: create-snapshots + bootstrap stores
     Check->>Bundle: copy to writable test directory
     Check->>Amaru: run with ledger-dir and chain-dir
     Amaru-->>Check: build_ledger trace
