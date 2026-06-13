@@ -400,7 +400,7 @@ in
       test -d "$final/chain.testnet_42.db"
       # nonces + bootstrap headers are baked into chain.<net>.db by
       # `amaru bootstrap`; the bundle ships the era-history override for
-      # `amaru run --era-history-file` at consume time.
+      # `amaru run --era-history` at consume time.
       test -f "$final/era-history.json"
       test -d "$final/ledger.testnet_42.db/live"
       snapshot_count=0
@@ -474,7 +474,7 @@ in
   # (epochLength=120) boundary end-to-end: the producer builds a bundle
   # via create-snapshots + bootstrap, then `amaru run` must open it and
   # stay alive. The custom epoch length is supplied at runtime via
-  # --era-history-file (the network built-in is 86400), so this is the
+  # --era-history (the network built-in is 86400), so this is the
   # gate for the runtime-testnet-parameters + short-epoch ledger fixes.
   antithesis-short-epoch-golden =
     pkgs.runCommand "antithesis-short-epoch-golden"
@@ -495,7 +495,7 @@ in
       set +e
       timeout 30s amaru --with-json-traces run \
         --network testnet_42 \
-        --era-history-file $TMPDIR/testnet_42/era-history.json \
+        --era-history $TMPDIR/testnet_42/era-history.json \
         --ledger-dir $TMPDIR/testnet_42/ledger.testnet_42.db \
         --chain-dir $TMPDIR/testnet_42/chain.testnet_42.db \
         --listen-address 127.0.0.1:0 \

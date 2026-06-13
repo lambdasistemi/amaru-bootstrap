@@ -162,8 +162,7 @@ amaru run \
   --network "$AMARU_NETWORK" \
   --ledger-dir /srv/amaru/ledger.$AMARU_NETWORK.db \
   --chain-dir /srv/amaru/chain.$AMARU_NETWORK.db \
-  --era-history-file /amaru-runtime/era-history.json \
-  --global-parameters-file /amaru-runtime/global-parameters.json \
+  --era-history /amaru-runtime/era-history.json \
   --peer-address "$AMARU_PEER"
 ```
 
@@ -171,9 +170,10 @@ The `amaru-runtime/` directory is part of the deployment contract. It
 must contain:
 
 - `era-history.json`: the custom testnet era history passed to
-  `--era-history-file`.
-- `global-parameters.json`: the custom testnet consensus parameters
-  passed to `--global-parameters-file`.
+  `--era-history`.
+- `global-parameters.json`: the custom testnet consensus parameters,
+  exported by the relay as `AMARU_GLOBAL_*` overrides for `amaru run`
+  (see `amaru run --help-global-parameters`).
 
 ### Compatibility target
 

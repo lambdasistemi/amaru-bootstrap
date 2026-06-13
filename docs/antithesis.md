@@ -155,8 +155,8 @@ relay entrypoint reads them from `/amaru-runtime` by default:
 It passes them directly to Amaru:
 
 ```text
---era-history-file /amaru-runtime/era-history.json
---global-parameters-file /amaru-runtime/global-parameters.json
+--era-history /amaru-runtime/era-history.json
+# global-parameters.json is exported as AMARU_GLOBAL_* (amaru run --help-global-parameters)
 ```
 
 Keep these files aligned with the `testnet.yaml` and genesis files used
