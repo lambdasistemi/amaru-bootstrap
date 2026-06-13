@@ -220,10 +220,25 @@ done
 # the indexer sees it directly with no further wrapping.
 log "bundle ready at $final, exec'ing amaru run"
 export AMARU_LOG
+
+# amaru no longer accepts --global-parameters-file: for a Testnet network the
+# global parameters come from individual AMARU_GLOBAL_* cli/env overrides
+# (see `amaru run --help-global-parameters`), falling back to the network
+# built-in otherwise. Convert the custom testnet's global-parameters.json into
+# those env vars; field names map 1:1 to AMARU_GLOBAL_<UPPER>
+# (e.g. consensus_security_param -> AMARU_GLOBAL_CONSENSUS_SECURITY_PARAM).
+if [[ -f "$runtime/global-parameters.json" ]]; then
+  while IFS='=' read -r _k _v; do
+    [[ -n "$_k" ]] && export "AMARU_GLOBAL_${_k}=${_v}"
+  done < <(jq -r 'to_entries[] | "\(.key | ascii_upcase)=\(.value)"' "$runtime/global-parameters.json")
+  log "exported AMARU_GLOBAL_* overrides from $runtime/global-parameters.json"
+else
+  log "WARNING: $runtime/global-parameters.json not found; using network-default global parameters"
+fi
+
 exec "$AMARU_BIN" run \
   --network "$AMARU_NETWORK" \
   --ledger-dir "$final/ledger.$AMARU_NETWORK.db" \
   --chain-dir "$final/chain.$AMARU_NETWORK.db" \
-  --era-history-file "$runtime/era-history.json" \
-  --global-parameters-file "$runtime/global-parameters.json" \
+  --era-history "$runtime/era-history.json" \
   --peer-address "$AMARU_PEER"

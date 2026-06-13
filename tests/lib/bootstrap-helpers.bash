@@ -264,10 +264,14 @@ start_amaru_run() {
 
   local extra=()
   if [[ -f "$bundle/era-history.json" ]]; then
-    extra+=(--era-history-file "$bundle/era-history.json")
+    extra+=(--era-history "$bundle/era-history.json")
   fi
+  # amaru replaced --global-parameters-file with individual AMARU_GLOBAL_*
+  # cli/env overrides; mirror the relay entrypoint by exporting them.
   if [[ -f "$bundle/global-parameters.json" ]]; then
-    extra+=(--global-parameters-file "$bundle/global-parameters.json")
+    while IFS='=' read -r _k _v; do
+      [[ -n "$_k" ]] && export "AMARU_GLOBAL_${_k}=${_v}"
+    done < <(jq -r 'to_entries[] | "\(.key | ascii_upcase)=\(.value)"' "$bundle/global-parameters.json")
   fi
 
   amaru --with-json-traces run \

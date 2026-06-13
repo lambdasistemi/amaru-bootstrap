@@ -58,7 +58,7 @@
     # flake.lock per constitution Principle III. Pinned to feat/testnet-bootstrap:
     # upstream pragma-org/amaru main plus a minimal, upstreamable delta —
     # create-snapshots --targets-file/--cardano-db-dir (offline/testnet snapshots),
-    # runtime --era-history-file/--global-parameters-file, the testnet tvar
+    # runtime --era-history + AMARU_GLOBAL_* overrides, the testnet tvar
     # era-history sidecar fix, and short-epoch ledger/consensus guards.
     amaru = {
       url = "github:lambdasistemi/amaru/feat/testnet-bootstrap";
