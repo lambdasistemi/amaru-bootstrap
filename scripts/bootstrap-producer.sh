@@ -111,7 +111,7 @@ tail_phase_log() {
 ## amaru `bootstrap` consumes this per-snapshot sidecar for custom
 ## testnets (make_era_history reads history.<slot>.<hash>.json next to
 ## the snapshot dir); the same document is shipped at the bundle root
-## as era-history.json so `amaru run --era-history-file` can override
+## as era-history.json so `amaru run --era-history` can override
 ## the network default at consume time. Without it amaru defaults to
 ## the built-in testnet era-history (epoch_size 86400) and treats every
 ## short-epoch slot as still-in-epoch-0, producing wrong nonces. See
@@ -494,7 +494,7 @@ phase_create_snapshots() {
 # Step 4: era-history sidecars + bundle era-history.json. rc=6 on failure.
 # amaru `bootstrap` reads history.<slot>.<hash>.json alongside each
 # snapshot dir for custom testnets (make_era_history); `amaru run` later
-# reads era-history.json from the bundle root via --era-history-file.
+# reads era-history.json from the bundle root via --era-history.
 phase_era_sidecars() {
     local snap_root="${UNIQUE_TMP}/snapshots/${NET_LC}"
     local slot hash count=0
@@ -510,7 +510,7 @@ phase_era_sidecars() {
         printf 'no era-history sidecars written\n' >&2
         exit 6
     fi
-    # Bundle-level copy for `amaru run --era-history-file` at consume time.
+    # Bundle-level copy for `amaru run --era-history` at consume time.
     ensure_era_history_input "${UNIQUE_TMP}/era-history.json"
 }
 

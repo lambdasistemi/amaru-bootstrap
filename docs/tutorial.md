@@ -44,8 +44,8 @@ testnets/cardano_amaru_epoch360/
 The relay entrypoint passes these files to `amaru run` with:
 
 ```text
---era-history-file /amaru-runtime/era-history.json
---global-parameters-file /amaru-runtime/global-parameters.json
+--era-history /amaru-runtime/era-history.json
+# global-parameters.json is exported as AMARU_GLOBAL_* (amaru run --help-global-parameters)
 ```
 
 Keep them aligned with the genesis/config emitted by the cardano-node

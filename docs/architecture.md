@@ -154,8 +154,8 @@ stateDiagram-v2
 The relay passes deployment-provided runtime JSON to `amaru run`:
 
 ```text
---era-history-file /amaru-runtime/era-history.json
---global-parameters-file /amaru-runtime/global-parameters.json
+--era-history /amaru-runtime/era-history.json
+# global-parameters.json is exported as AMARU_GLOBAL_* (amaru run --help-global-parameters)
 ```
 
 These files must match the custom testnet genesis/config used by the
