@@ -177,6 +177,34 @@ phase_preflight() {
         exit 3
     fi
 
+    # 1.B.2 custom-testnet global parameters -----------------------
+    # Post pragma-org/amaru#959, `amaru bootstrap` takes a Testnet network's
+    # GlobalParameters as AMARU_GLOBAL_* cli/env overrides and derives
+    # epoch_length = k*(1/f)*scale_factor. Without them it falls back to the
+    # network default epoch length and the snapshot import fails with
+    # "expected epoch N from the snapshot point, got M". Derive k, 1/f and
+    # scale_factor from the genesis and export them so create-snapshots and
+    # bootstrap (children of this process) inherit them. Harmless for built-in
+    # networks (amaru honours those networks' own parameters, ignoring the env).
+    local k active inverse scale_factor
+    k=$(jq -r '.securityParam // empty' "${shelley}")
+    active=$(jq -r '.activeSlotsCoeff // empty' "${shelley}")
+    if [[ "${k}" =~ ^[0-9]+$ ]] && [[ -n "${active}" ]]; then
+        inverse=$(jq -n --argjson f "${active}" '(1 / $f) | round')
+        if [[ "${inverse}" =~ ^[0-9]+$ ]] && (( inverse > 0 )) \
+            && (( EPOCH_LENGTH % (k * inverse) == 0 )); then
+            scale_factor=$(( EPOCH_LENGTH / (k * inverse) ))
+            export AMARU_GLOBAL_CONSENSUS_SECURITY_PARAM="${k}"
+            export AMARU_GLOBAL_ACTIVE_SLOT_COEFF_INVERSE="${inverse}"
+            export AMARU_GLOBAL_EPOCH_LENGTH_SCALE_FACTOR="${scale_factor}"
+            printf '+ derived AMARU_GLOBAL_* from genesis: k=%s 1/f=%s scale_factor=%s epoch_length=%s\n' \
+                "${k}" "${inverse}" "${scale_factor}" "${EPOCH_LENGTH}"
+        else
+            printf 'WARNING: epochLength %s is not k*(1/f)*scale_factor (k=%s, 1/f=%s); amaru bootstrap will use defaults and snapshot import may fail\n' \
+                "${EPOCH_LENGTH}" "${k}" "${inverse}" >&2
+        fi
+    fi
+
     # 1.C Conway-fork-slot derivation ------------------------------
     # For test-style configs (testnet_42 fixture, antithesis), the
     # node config carries TestConwayHardForkAtEpoch; for mainnet/
