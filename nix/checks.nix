@@ -441,6 +441,7 @@ in
       set +e
       timeout 30s amaru --with-json-traces run \
         --network testnet_42 \
+        --era-history $TMPDIR/testnet_42/era-history.json \
         --ledger-dir $TMPDIR/testnet_42/ledger.testnet_42.db \
         --chain-dir $TMPDIR/testnet_42/chain.testnet_42.db \
         --listen-address 127.0.0.1:0 \
