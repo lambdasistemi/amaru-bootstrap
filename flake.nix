@@ -61,7 +61,11 @@
     # runtime --era-history + AMARU_GLOBAL_* overrides, the testnet tvar
     # era-history sidecar fix, and short-epoch ledger/consensus guards.
     amaru = {
-      url = "github:lambdasistemi/amaru/feat/testnet-bootstrap";
+      # pragma-org/amaru main (the fork's testnet-bootstrap work is fully
+      # upstreamed). Pinned to a validated main commit: 5923f085 bootstraps AND
+      # follows locally with the epoch125 testnet profile (k*(1/f)*scale_factor
+      # invariant, scale_factor=5) + the --era-history/AMARU_GLOBAL_* relay CLI.
+      url = "github:pragma-org/amaru/5923f0858da464256e1664337b478511b6d3fcee";
       flake = false;
     };
   };
