@@ -36,17 +36,17 @@
     "amaru": {
       "flake": false,
       "locked": {
-        "lastModified": 1781285605,
-        "narHash": "sha256-aVzUcJEbn4e0ucS5EZV+867osDm4lIjOnvHoZe36Axo=",
-        "owner": "lambdasistemi",
+        "lastModified": 1782417896,
+        "narHash": "sha256-auHMfwN75cAo9CRZ3Y3BM7jawLk3dLK1XYZG9blnt7I=",
+        "owner": "pragma-org",
         "repo": "amaru",
-        "rev": "74ffb873ab776921f79b7da6ad1b52b31dbc3e42",
+        "rev": "5923f0858da464256e1664337b478511b6d3fcee",
         "type": "github"
       },
       "original": {
-        "owner": "lambdasistemi",
-        "ref": "feat/testnet-bootstrap",
+        "owner": "pragma-org",
         "repo": "amaru",
+        "rev": "5923f0858da464256e1664337b478511b6d3fcee",
         "type": "github"
       }
     },
