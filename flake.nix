@@ -65,7 +65,7 @@
       # upstreamed). Pinned to a validated main commit: 5923f085 bootstraps AND
       # follows locally with the epoch125 testnet profile (k*(1/f)*scale_factor
       # invariant, scale_factor=5) + the --era-history/AMARU_GLOBAL_* relay CLI.
-      url = "github:pragma-org/amaru/5923f0858da464256e1664337b478511b6d3fcee";
+      url = "github:pragma-org/amaru/eb21a990440d90dd353f589710070b7467e44333";
       flake = false;
     };
   };
