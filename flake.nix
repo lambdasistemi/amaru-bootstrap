@@ -61,11 +61,13 @@
     # runtime --era-history + AMARU_GLOBAL_* overrides, the testnet tvar
     # era-history sidecar fix, and short-epoch ledger/consensus guards.
     amaru = {
-      # pragma-org/amaru main (the fork's testnet-bootstrap work is fully
-      # upstreamed). Pinned to a validated main commit: 5923f085 bootstraps AND
-      # follows locally with the epoch125 testnet profile (k*(1/f)*scale_factor
-      # invariant, scale_factor=5) + the --era-history/AMARU_GLOBAL_* relay CLI.
-      url = "github:pragma-org/amaru/eb21a990440d90dd353f589710070b7467e44333";
+      # pragma-org/amaru main HEAD (2026-07-09). KNOWN BROKEN in this harness:
+      # under Antithesis fault injection amaru crash-loops with an `unreachable
+      # epoch` panic in amaru-ledger apply_block (state.rs:288) while cardano-node
+      # in the same run survives; root cause undetermined. Evidence:
+      # https://gist.github.com/paolino/5331b5c793086bcdd4aeae5f770ecf19
+      # Last pin that bootstrapped + followed the epoch125 profile: eb21a990.
+      url = "github:pragma-org/amaru/562371253a4e0685f0161b7bcd20bc4b4c44816f";
       flake = false;
     };
   };
