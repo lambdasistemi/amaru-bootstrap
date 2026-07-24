@@ -68,6 +68,7 @@ pkgs.dockerTools.buildLayeredImage {
     pkgs.gawk
     pkgs.gnused
     pkgs.jq
+    pkgs.cacert
     ledgerStateEmitter
     headerExtractor
     iogTools.db-analyser
@@ -83,5 +84,9 @@ pkgs.dockerTools.buildLayeredImage {
   config = {
     Entrypoint = [ "${bootstrapProducer}/bin/bootstrap-producer" ];
     Cmd = [ ];
+    Env = [
+      "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+      "SSL_CERT_DIR=/etc/ssl/certs"
+    ];
   };
 }
