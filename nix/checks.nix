@@ -109,9 +109,14 @@ let
           amaruPkg
           headerExtractorPkgs.header-extractor
           headerExtractorPkgs.ledger-state-emitter
+          pkgs.cacert
         ];
       } ''
       set -euo pipefail
+
+      # amaru snapshot create builds a reqwest (Koios) client unconditionally,
+      # which needs a CA trust anchor even on the offline --snapshot path.
+      export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
 
       cp -rL ${synthesizedChainDb}/chain-db $TMPDIR/chain-db
       chmod -R u+w $TMPDIR/chain-db
@@ -217,9 +222,14 @@ let
           amaruPkg
           iogTools.db-analyser
           headerExtractorPkgs.header-extractor
+          pkgs.cacert
         ];
       } ''
       set -euo pipefail
+
+      # amaru snapshot create builds a reqwest (Koios) client unconditionally,
+      # which needs a CA trust anchor even on the offline --snapshot path.
+      export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
 
       cp -rL ${antithesisShortEpochChainDb}/chain-db "$TMPDIR/chain-db"
       cp -rL ${antithesisShortEpochChainDb}/config "$TMPDIR/config"
@@ -434,12 +444,15 @@ in
       } ''
       set -euo pipefail
 
+      # amaru node run builds a reqwest client at startup; needs a CA anchor.
+      export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+
       cp -rL ${synthesizedBootstrapBundle}/testnet_42 $TMPDIR/testnet_42
       chmod -R u+w $TMPDIR/testnet_42
 
       log=$TMPDIR/amaru-run.log
       set +e
-      timeout 30s amaru --with-json-traces run \
+      timeout 30s amaru --with-json-traces node run \
         --network testnet_42 \
         --era-history $TMPDIR/testnet_42/era-history.json \
         --ledger-dir $TMPDIR/testnet_42/ledger.testnet_42.db \
@@ -489,12 +502,15 @@ in
       } ''
       set -euo pipefail
 
+      # amaru node run builds a reqwest client at startup; needs a CA anchor.
+      export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+
       cp -rL ${shortEpochBootstrapBundle}/testnet_42 $TMPDIR/testnet_42
       chmod -R u+w $TMPDIR/testnet_42
 
       log=$TMPDIR/amaru-run.log
       set +e
-      timeout 30s amaru --with-json-traces run \
+      timeout 30s amaru --with-json-traces node run \
         --network testnet_42 \
         --era-history $TMPDIR/testnet_42/era-history.json \
         --ledger-dir $TMPDIR/testnet_42/ledger.testnet_42.db \
