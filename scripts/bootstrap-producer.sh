@@ -13,11 +13,11 @@
 #      consecutive snapshot slots.
 #   2. Compose targets.json (epoch/slot/hash/parent_point) + snapshots.json
 #      from the chain's own block list.
-#   3. amaru create-snapshots (db-analyser engine, Koios/Mithril bypassed via
-#      --targets-file + --cardano-db-dir) -> per-epoch snapshot dirs with
+#   3. amaru snapshot create (db-analyser engine, Koios/Mithril bypassed via
+#      --snapshot + --cardano-node-db) -> per-epoch snapshot dirs with
 #      packaged bootstrap headers.
 #   4. Write per-snapshot era-history sidecars + bundle era-history.json.
-#   5. amaru bootstrap -> ledger.<net>.db + chain.<net>.db (derives nonces
+#   5. amaru node bootstrap -> ledger.<net>.db + chain.<net>.db (derives nonces
 #      from the snapshot, imports the packaged headers).
 #   6. mv -T <unique-tmp> <final> (atomic commit)
 #
@@ -118,6 +118,11 @@ tail_phase_log() {
 ## https://github.com/lambdasistemi/amaru-bootstrap/issues/37.
 ensure_era_history_input() {
     local out="$1"
+    local shelley="${CONFIG_DIR}/shelley-genesis.json"
+    local slot_length_sec
+    slot_length_sec=$(jq -r '.slotLength // 1' "${shelley}" 2>/dev/null || echo 1)
+    local slot_length_ms
+    slot_length_ms=$(awk -v s="${slot_length_sec}" 'BEGIN { printf "%d\n", (s * 1000.0) + 0.5 }')
     cat >"${out}" <<JSON
 {
   "stability_window": $(( 3 * EPOCH_LENGTH )),
@@ -127,7 +132,7 @@ ensure_era_history_input() {
       "end": null,
       "params": {
         "epoch_size_slots": ${EPOCH_LENGTH},
-        "slot_length": 1000,
+        "slot_length": ${slot_length_ms},
         "era_name": "Conway"
       }
     }
@@ -197,11 +202,23 @@ phase_preflight() {
             export AMARU_GLOBAL_CONSENSUS_SECURITY_PARAM="${k}"
             export AMARU_GLOBAL_ACTIVE_SLOT_COEFF_INVERSE="${inverse}"
             export AMARU_GLOBAL_EPOCH_LENGTH_SCALE_FACTOR="${scale_factor}"
+            # Remaining global parameters from genesis (A-015).
+            local max_lovelace kes_period kes_evol system_start_sec byron
+            max_lovelace=$(jq -r '.maxLovelaceSupply // empty' "${shelley}")
+            kes_period=$(jq -r '.slotsPerKESPeriod // empty' "${shelley}")
+            kes_evol=$(jq -r '.maxKESEvolutions // empty' "${shelley}")
+            byron="${CONFIG_DIR}/byron-genesis.json"
+            system_start_sec=$(jq -r '.startTime // 0' "${byron}" 2>/dev/null || echo 0)
+            [[ -n "${max_lovelace}" ]] && export AMARU_GLOBAL_MAX_LOVELACE_SUPPLY="${max_lovelace}"
+            [[ -n "${kes_period}" ]]   && export AMARU_GLOBAL_SLOTS_PER_KES_PERIOD="${kes_period}"
+            [[ -n "${kes_evol}" ]]     && export AMARU_GLOBAL_MAX_KES_EVOLUTION="${kes_evol}"
+            export AMARU_GLOBAL_SYSTEM_START="$(( system_start_sec * 1000 ))"
             printf '+ derived AMARU_GLOBAL_* from genesis: k=%s 1/f=%s scale_factor=%s epoch_length=%s\n' \
                 "${k}" "${inverse}" "${scale_factor}" "${EPOCH_LENGTH}"
         else
-            printf 'WARNING: epochLength %s is not k*(1/f)*scale_factor (k=%s, 1/f=%s); amaru bootstrap will use defaults and snapshot import may fail\n' \
+            printf 'FATAL: epochLength %s is not (1/f)*scale*k (k=%s, 1/f=%s); genesis is not representable in amaru epoch_length model\n' \
                 "${EPOCH_LENGTH}" "${k}" "${inverse}" >&2
+            exit 3
         fi
     fi
 
@@ -492,8 +509,8 @@ phase_create_snapshots() {
     # expanding to the 3 prior snapshots (T-3,T-2,T-1). Our snapshots are the 3
     # latest completed epochs [first_epoch .. first_epoch+2], so target = first_epoch+3.
     local target_epoch=$(( first_epoch + 3 ))
-    printf '+ amaru create-snapshots (target epoch %d, snapshots %d..%d)\n' "${target_epoch}" "${first_epoch}" "$(( first_epoch + 2 ))"
-    log_phase create-snapshots amaru create-snapshots \
+    printf '+ amaru snapshot create (target epoch %d, snapshots %d..%d)\n' "${target_epoch}" "${first_epoch}" "$(( first_epoch + 2 ))"
+    log_phase create-snapshots amaru snapshot create \
         --network "${NETWORK}" \
         --epoch "${target_epoch}" \
         --cardano-node-config-dir "${CONFIG_DIR}" \
@@ -555,14 +572,14 @@ phase_bootstrap() {
     local logdir="${BUNDLE_DIR}/.logs"
     mkdir -p "${logdir}"
     local rc=0
-    printf '+ amaru bootstrap\n'
+    printf '+ amaru node bootstrap\n'
     # Run with CWD = staging so amaru resolves snapshots/<net> + data/<net>
     # relative to the freshly materialized snapshots; AMARU_BOOTSTRAP_CONFIG_DIR
     # points at our local snapshots.json.
     (
         cd "${UNIQUE_TMP}" || exit 9
         AMARU_BOOTSTRAP_CONFIG_DIR="${UNIQUE_TMP}/bootstrap-config" \
-            amaru bootstrap \
+            amaru node bootstrap \
                 --network "${NETWORK}" \
                 --epoch "$(( first_epoch + 3 ))" \
                 --ledger-dir "${ledger_dir}" \
