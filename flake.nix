@@ -55,17 +55,12 @@
     };
 
     # lambdasistemi/amaru consumed as a non-flake input; SHA pinned via
-    # flake.lock per constitution Principle III. Pinned to feat/testnet-bootstrap:
-    # upstream pragma-org/amaru main plus a minimal, upstreamable delta —
-    # create-snapshots --targets-file/--cardano-db-dir (offline/testnet snapshots),
-    # runtime --era-history + AMARU_GLOBAL_* overrides, the testnet tvar
-    # era-history sidecar fix, and short-epoch ledger/consensus guards.
+    # flake.lock per constitution Principle III.
     amaru = {
-      # pragma-org/amaru main (the fork's testnet-bootstrap work is fully
-      # upstreamed). Pinned to a validated main commit: 5923f085 bootstraps AND
-      # follows locally with the epoch125 testnet profile (k*(1/f)*scale_factor
-      # invariant, scale_factor=5) + the --era-history/AMARU_GLOBAL_* relay CLI.
-      url = "github:pragma-org/amaru/5923f0858da464256e1664337b478511b6d3fcee";
+      # BARE pragma-org/amaru origin/main — no fork, no branch, no patches.
+      # Native snapshot create + node bootstrap + node run with
+      # AMARU_GLOBAL_* overrides and --era-history (all upstreamed).
+      url = "github:pragma-org/amaru/4b40e8dff718f3b14655430f263c179ef07a1335";
       flake = false;
     };
   };
