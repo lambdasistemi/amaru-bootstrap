@@ -44,15 +44,22 @@ esac
 EOF
   } >"$TMP_DIR/bin/header-extractor"
 
-  # amaru stub: create-snapshots materializes one node-snapshot dir per
-  # target (Koios/Mithril/db-analyser all bypassed via the flags); bootstrap
-  # produces the ledger + chain DBs.
+  # amaru stub, canonical bare-main CLI: `snapshot create` materializes
+  # one node-snapshot dir per --snapshot point (Koios/Mithril/db-analyser
+  # all bypassed via the flags); `node bootstrap` produces the ledger +
+  # chain DBs. The legacy aliases are rejected so this suite keeps
+  # guarding the native-CLI migration.
   {
     printf '#!%s\n' "$BASH"
     cat <<'EOF'
 cmd="$1"; shift
 case "$cmd" in
-  create-snapshots)
+  snapshot)
+    sub="$1"; shift
+    [ "$sub" = create ] || {
+      printf 'unexpected amaru command: snapshot %s\n' "$sub" >&2
+      exit 64
+    }
     snapdir=""; points=()
     while [ "$#" -gt 0 ]; do
       case "$1" in
@@ -71,7 +78,12 @@ case "$cmd" in
       printf '[]\n' >"$d/bootstrap.headers.json"
     done
     ;;
-  bootstrap)
+  node)
+    sub="$1"; shift
+    [ "$sub" = bootstrap ] || {
+      printf 'unexpected amaru command: node %s\n' "$sub" >&2
+      exit 64
+    }
     ledger=""; chain=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
@@ -81,6 +93,11 @@ case "$cmd" in
       esac
     done
     mkdir -p "$ledger/live" "$ledger/1" "$ledger/2" "$ledger/3" "$chain"
+    ;;
+  create-snapshots|bootstrap)
+    printf 'legacy alias rejected: amaru %s (use the canonical native CLI)\n' \
+           "$cmd" >&2
+    exit 64
     ;;
   *)
     printf 'unexpected amaru command: %s\n' "$cmd" >&2
