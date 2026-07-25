@@ -8,39 +8,52 @@ in favour of stock `db-analyser`
 **Exploratory only — nothing here is implemented.**
 
 > This file replaces the first-pass assessment committed as `6e2ebab`, which
-> reached the opposite verdict on a claim that does not survive testing. See
-> [Revision history](#revision-history).
+> reached the opposite verdict on a claim that does not survive testing, and was
+> then re-scoped to the amaru-facing surface only. See
+> [Revision history](#11-revision-history).
+
+**Scope, as of the third pass:** the question is *not* whether `db-analyser`
+can reproduce `header-extractor`'s API. It is whether `db-analyser` can supply
+what **amaru** needs. §8 establishes that surface and answers the question
+against it; §1 gives the verdict under that scoping. §3–§7 are retained because
+they are still the evidence base, but several §7 residue items turn out to be
+artifacts of preserving an API nothing requires — each is marked.
 
 ---
 
 ## 1. Verdict
 
-**Partially replaceable — replaceable in capability and in cost, with a small
-but real ergonomic residue.**
+**Replaceable.** Everything amaru consumes from the chain DB is obtainable from
+`db-analyser`, and the producer-internal scaffolding around it is free to be
+redesigned rather than reproduced.
 
-| query | replaceable by `db-analyser`? | evidence |
-|---|---|---|
-| `tip-info` slot + hash | **yes, at cost parity** | §4, §5 |
-| `tip-info` era | **no** — `db-analyser` never prints an era | §7.1 |
-| `list-blocks` | **yes, byte-identical JSON** via ~10 lines of shell | §6 |
-| `get-header` | not needed — unused by the producer | §3 |
+| what | needed by amaru? | obtainable from `db-analyser`? | evidence |
+|---|---|---|---|
+| 3 epoch-boundary blocks + their 3 parents — 6 `(slot, hash)` pairs | **yes, this is the whole surface** | **yes** — reproduces `targets.json` exactly | §8.1, §8.2 |
+| tip slot (readiness gate) | no — producer-internal | yes, faster than `tip-info` | §4, §5.1 |
+| tip era (readiness gate) | **no** — never reaches amaru | n/a — gap dissolves | §8.3 |
+| whole-chain block list | **no** — an artifact of how the gate was built | n/a — descoped | §8.1 |
+| `get-header` | no — unused by anything | n/a | §3 |
 
-The first pass's blocking argument — *"`db-analyser` has no O(1) tip mode, so
-each poll tick would take tens of seconds to minutes"* — is **false**. There is
-a `db-analyser` invocation that prints the tip and does no other work, and it
-is measurably **as fast as or faster than** `header-extractor tip-info` at every
-DB size tested (§5).
+Two claims from earlier passes are now settled and do not change:
 
-The honest complexity picture is also not what either the first pass or its
-reviewer assumed: **neither tool has an O(1) tip query.** Both pay the same
-ImmutableDB-open cost, which grows linearly in the number of chunk *files* on
-disk, because they run literally the same open code path (§4.3, §5.2).
+- The first pass's blocking argument — *"`db-analyser` has no O(1) tip mode, so
+  each poll tick would take tens of seconds to minutes"* — is **false**. There
+  is a `db-analyser` invocation that prints the tip and does no other work, and
+  it is measurably as fast as or faster than `header-extractor tip-info` at
+  every DB size tested (§4, §5).
+- **Neither tool has an O(1) tip query.** Both pay the same ImmutableDB-open
+  cost, growing linearly in the number of chunk *files*, because they run
+  literally the same open code path (§4.3, §5.2).
 
-Recommendation: §9. Short version — it is a legitimate cleanup that the
-constitution actively favours, worth about an M-sized ticket, but it is a
-maintenance-surface trade (≈700 lines of Haskell + bats deleted) rather than a
-performance or capability win, and it converts a typed Haskell contract into
-shell that scrapes two `Show` instances.
+What it costs (§8.2, measured): the readiness-gate tick gets *cheaper*
+(0.087 s vs 0.115 s). The one-shot point extraction gets dearer — 1.842 s vs
+0.349 s on an 11,743-block DB — but that is still around one ledger-replay step
+of the `amaru snapshot create` work that immediately follows on the same chain
+DB (1.576 s measured). The extraction is not, and does not become, the
+bottleneck.
+
+Recommendation and re-sized ticket: §10.
 
 ---
 
@@ -70,9 +83,16 @@ Fixtures (all under `/tmp/hx-explore/hx-db-analyser/`, all synthesized from
 | `pad-1000/5000/20000` | 3675 (constant) | 1000 / 5000 / 20000 | `db-400k` + hard-linked filler chunk files (§5.2) |
 
 Measurement caveat: the machine is shared and carried a load average of ~13
-throughout. All timings are **medians of 7 runs after one warm-up**; treat
-differences under ~30 ms as noise. Scripts: `bench.sh`, `synth.sh`, `shim.sh`
-in the runtime root.
+throughout. Timings are **medians of 7 runs after one warm-up** in §5, medians
+of 5 in §8; treat differences under ~30 ms as noise. Scripts: `bench.sh`,
+`synth.sh`, `shim.sh`, `points.sh` in the runtime root.
+
+Third-pass note: the scratch fixtures were archived between the second and third
+passes and `db-400k` was rebuilt from the cached nix fixture
+`/nix/store/w9kh11qr…-header-extractor-fixture-chain-db` — it reproduces at
+3,675 blocks / 83 chunks / tip slot 357472, identical to the second pass's. The
+`pad-*` and `db-big` fixtures were restored intact, so §5.2 rests on the same
+data the reviewer independently reproduced.
 
 ---
 
@@ -104,8 +124,11 @@ field.** The real envelope is **[parent]** **[measured]**:
 `app/header-extractor/Main.hs:96-105` builds it, and the module header
 (`app/header-extractor/Main.hs:22-24`) says why: it is *"a db-server-portable
 envelope so Arnaud's amaru-loader.sh pipeline ports unchanged"* **[source]**.
-The `tag: "Found"` is therefore an interop shape, not decoration — anything
-replacing it has to keep emitting it.
+The `tag: "Found"` is an interop shape, not decoration. **[DESCOPED — §8.1]**
+it was shaped for a `db-server`-style consumer, and no such consumer is in this
+pipeline: the only reader of `list-blocks` output is the producer's own `jq`,
+four lines of it, all of which reduce to 6 pairs. A replacement does not have to
+emit this envelope; it has to emit those pairs.
 
 ---
 
@@ -265,7 +288,12 @@ from `db-analyser`; there is no cost asymmetry to exploit in either direction.
 
 ---
 
-## 6. `list-blocks` is exactly reproducible from `db-analyser`
+## 6. `list-blocks` is exactly reproducible from `db-analyser` — **[DESCOPED — §8.2]**
+
+> Retained as evidence that no *capability* is missing. But reproducing
+> `list-blocks` is not what a ticket should do: §8.2 replaces this with a
+> single-pass extractor that emits `targets.json` directly and never
+> materialises the whole-chain list at all.
 
 `shim.sh` in the runtime root reimplements both call sites over `db-analyser`
 alone. The `list-blocks` half is:
@@ -284,16 +312,24 @@ same hashes **[measured]**. The stream split is as the first pass described:
 per-block lines on **stderr**, the `ImmutableDB tip:` line on **stdout**.
 
 So `list-blocks` is not a capability gap. It is a ~10-line shell tax plus the
-32× per-block cost from §5.1.
+32× per-block cost from §5.1 — and §8.2 shows that per-block cost never binds,
+because the extraction is bounded by the ledger replay `amaru snapshot create`
+runs on the same chain DB immediately afterwards.
 
 ---
 
-## 7. The real residue
+## 7. Residue, under the original API-equivalence framing
 
-What a removal ticket would actually have to solve. Everything here is
-`[measured]` or `[source]` unless marked.
+> **Read §8 first.** This section was written to answer *"what breaks if we
+> reproduce `header-extractor`'s API with `db-analyser`?"* Under the amaru-only
+> scoping the question changed, and several items below stop being residue
+> because nothing requires the API they protect. Each is tagged
+> **[DESCOPED — §8.x]** where §8 supersedes it. The untagged items still hold
+> and still belong in a ticket. The measurements are unaffected.
 
-### 7.1 Era is genuinely lost
+Everything here is `[measured]` or `[source]` unless marked.
+
+### 7.1 Era is genuinely lost — **[DESCOPED — §8.3]**
 
 `db-analyser` prints no era anywhere. The producer's predicate
 (`scripts/bootstrap-producer.sh:306`) is `era == "Conway" && tip_epoch >= 3`.
@@ -399,18 +435,200 @@ the module has to survive (trimmed) or `NodeConfig` has to move. And there is
 `ouroboros-consensus:unstable-cardano-tools`, `ImmutableDB`, `ChainDB.Impl.Args`
 and the rest on its own **[measured]**.
 
-### 7.6 One capability `db-analyser` has and `header-extractor` does not
+### 7.6 One capability `db-analyser` has — **[superseded by §8.2, which measured it]**
 
 `--analyse-from SLOT` and `--num-blocks-to-process N` let a caller bound the
 listing; `header-extractor list-blocks` always dumps the whole chain. That
 would let the producer's preflight ask only for the epoch window it needs.
 Caveat: `--analyse-from` resolves via `getHashForSlot` and **fails** unless a
 block sits at exactly that slot (`Run.hs:206-208` **[source]**), so it needs a
-known slot, not an arbitrary lower bound.
+known slot, not an arbitrary lower bound. §8.2 measured what that caveat costs;
+the short answer is that it kills the idea.
 
 ---
 
-## 8. Governance: the constitution leans toward removal
+## 8. Re-scope: only the amaru-facing surface
+
+The producer touches the chain DB to feed `amaru snapshot create`. Everything
+else is producer-internal scaffolding a rewrite may redesign or delete, not a
+contract to preserve. This section evaluates against that narrower target.
+
+### 8.1 The required surface is exactly 6 `(slot, hash)` pairs — confirmed
+
+The chain DB is touched at four points in `scripts/bootstrap-producer.sh`
+**[measured]**, and only one of them produces data that reaches amaru:
+
+| line | what | reaches amaru? |
+|---|---|---|
+| `:246` `chain_db_alive` | `find` for any `*.chunk` — no tool at all | no |
+| `:301` `header-extractor tip-info` | readiness gate | no |
+| `:309` `header-extractor list-blocks` | → `preflight-blocks.json` | **yes, indirectly** |
+| `:498` `ln -sfn "${CHAIN_DB}/immutable"` | handed to amaru, which runs `db-analyser` itself | n/a |
+
+`preflight-blocks.json` has exactly four readers **[measured]**: `:330`
+(per-epoch `max_by(.[0])` → the three `SNAPSHOT_SLOTS`), `:450` (hash for a
+snapshot slot), `:456` (`max_by` over blocks with `slot < s` → the parent), and
+`:549` (hash for the sidecar filename). Everything they produce is:
+
+- 3 boundary blocks — for each of three consecutive completed epochs, the last
+  block, i.e. `max{ block : slot < (E+1) × EPOCH_LENGTH }`
+- their 3 parents — for each, the immediately preceding block in chain order
+
+which is **6 `(slot, hash)` pairs.** Confirmed: the operator's claim is exact.
+
+Checking the two artifacts named in the question:
+
+- **`snapshots.json`** (`:470-472`) carries `{epoch, point: "<slot>.<hash>",
+  parent_point, url: ""}` — `epoch` is `slot / EPOCH_LENGTH` arithmetic, `url`
+  is empty. No new chain data.
+- **`history.<slot>.<hash>.json`** — only the *filename* is chain-derived, from
+  3 of the 6 pairs. The **content** is built entirely from genesis by
+  `ensure_era_history_input` (`:119-142`): `stability_window` = `3 ×
+  EPOCH_LENGTH`, `epoch_size_slots` = `EPOCH_LENGTH`, `slot_length` from
+  `shelley-genesis.json`, `era_name` a **string literal** `"Conway"`
+  (`:136`) **[source]**. No new chain data.
+
+Nothing else derived from `header-extractor` output reaches amaru. The
+whole-chain block list is incidental to how the gate was built.
+
+### 8.2 Can `db-analyser` produce just those 6 pairs, bounded?
+
+**Mechanically yes; usefully no — and it does not matter.**
+
+*The bounded primitives work.* Verified on `db-400k` **[measured]**:
+`--analyse-from 172731` (a real block) streams **strictly after** the anchor —
+first line emitted is slot 172837, the anchor itself is excluded — and
+`--num-blocks-to-process 5` truncates it to five lines.
+
+*But they cannot be aimed at an epoch boundary.* `--analyse-from` resolves via
+`getHashForSlot`, documented as *"the hash of the block in the given slot"*
+(`ImmutableDB/Impl.hs:219-221` **[source]**) — an exact lookup, `Nothing` if
+the slot is empty. Epoch boundaries are essentially never occupied: on
+`db-400k`, **0 of 4** boundary slots hold a block, and the block-slot gap
+distribution is mean 97, median 68, p90 223, max 760 slots **[measured]**. So
+an anchor has to be found by descending probe, one `db-analyser` process per
+slot tried, at 0.074–0.086 s each **[measured]**.
+
+Costed on `db-big` (11,743 blocks, tip epoch 13, wanting epochs 10–12)
+**[measured]**:
+
+- probing down to each of the 6 pairs directly: 3 + 52 + 176 + 138 + 17 + 212 =
+  **598 probes ≈ 51 s**
+- the cheaper hybrid — probe once for an anchor before epoch 10 (24 probes),
+  then one bounded 3-epoch forward scan: **2.517 s**
+- one unbounded forward pass that yields all 6 pairs: **1.842 s**
+
+**The bounded hybrid is slower than the full scan.** Break-even **[inference]**:
+an anchor costs mean-gap × probe ≈ 97 × 0.075 ≈ 7.3 s, and skipping blocks saves
+≈140 µs each, so probing only pays once it skips **≳50,000 blocks**. `db-big`
+skips ~9,000. It would pay on a much longer chain; it does not here, and it
+makes the cost depend on chain density, which is not a property a producer
+should be sensitive to.
+
+*The residue dissolves anyway, for a better reason.* The 140 µs/block figure
+never binds, because the extraction is not the expensive thing the producer does
+to this chain DB. Measured on the same fixtures **[measured]**:
+
+| | `db-400k` (3,675 blk) | `db-big` (11,743 blk) |
+|---|---|---|
+| current: `he list-blocks` + the producer's own `jq` | 0.230 s | 0.349 s |
+| new: one `db-analyser` pass → `targets.json` | 0.620 s | 1.842 s |
+| `db-analyser --store-ledger` to the newest snapshot point | 0.585 s | 1.576 s |
+
+That last row is a proxy for the ledger replay `amaru snapshot create`
+immediately performs against the same chain DB (`bootstrap-producer.sh:481-517`
+drives it with `--cardano-node-db`). The extraction goes from roughly 22% of one
+replay step to roughly 117% of it — it grows, but it stays the same order as
+work the pipeline already does and never becomes the bottleneck. **[inference]**
+on a chain with real transaction load the replay term grows much faster than the
+index scan, so the ratio only improves; the fixtures here carry empty blocks,
+which is the *least* favourable case for this argument.
+
+*The extraction itself.* One `db-analyser` pass, no whole-chain JSON
+intermediate, reproducing `targets.json` **exactly** — verified byte-identical
+against the producer's own `jq` derivation on `db-400k` **[measured]**
+(`points.sh` in the runtime root):
+
+```sh
+db-analyser --db "$db" --config "$CFG" --in-mem \
+            --db-validation minimum-block-validation --show-slot-block-no 2>&1 >/dev/null \
+  | sed -n 's/^\[[0-9.]*s\] BlockNo [0-9]*\tSlotNo \([0-9]*\)\t\([0-9a-f]*\)$/\1 \2/p' \
+  | awk -v L="$L" -v first="$first" '
+      { e = int($1 / L)
+        if (e >= first && e <= first+2) { slot[e]=$1; hash[e]=$2; pslot[e]=ps; phash[e]=ph }
+        ps=$1; ph=$2 }
+      END { for (e = first; e <= first+2; e++)
+              printf "%d %d %s %d %s\n", e, slot[e], hash[e], pslot[e], phash[e] }'
+```
+
+Note what this removes as a side effect: the parent lookup stops being a
+`max_by` over a whole-chain array and becomes the previous line of a stream, and
+`preflight-blocks.json` — a multi-megabyte intermediate on any real chain —
+stops existing. **§6's `list-blocks` reconstruction is therefore descoped**: it
+was solving for an API, not for amaru.
+
+### 8.3 The era gap evaporates
+
+**Nothing is lost.** The era string never reaches amaru. What amaru is told
+about the era is the `"era_name": "Conway"` **string literal** the producer
+writes into every `history.<slot>.<hash>.json` sidecar and into
+`era-history.json` (`bootstrap-producer.sh:136` **[source]**) — unconditionally,
+regardless of what `tip-info` reported.
+
+So `tip-info`'s `era` field feeds exactly one thing: the readiness gate at
+`:306`. And as a gate it is arguably the *wrong* check already — it tests the
+era of the **tip**, while what has to be Conway is the three **snapshot
+blocks**, three epochs further back. Those can differ. The producer's other
+guard, `snapshot_slots[0] >= conway_first_slot` (`:336`), tests the right thing.
+
+**What the gate becomes**, using only the cheap `db-analyser` tip query:
+
+```
+tip_slot   ← db-analyser cheap tip query          (§4.3; 0.087 s, faster than tip-info)
+tip_epoch  = tip_slot / EPOCH_LENGTH
+gate       = tip_epoch >= 3
+             AND the three boundary blocks exist in epochs [tip_epoch-3 .. tip_epoch-1]
+             AND boundary_slot[0] >= conway_first_slot     (already config-derived, :234-238)
+```
+
+The one honest caveat, unchanged from §7.1: for a config carrying no
+`Test*HardForkAtEpoch` key, `conway_first_slot` defaults to `0` (`:235`) and
+that clause is vacuous. **[inference]** that is a real loosening for a
+hypothetical pre-Conway chain, and irrelevant for every network this repo
+targets — the fixture sets `TestConwayHardForkAtEpoch: 0` **[measured]**, and
+mainnet/preprod/preview have been Conway for years. If the maintainer wants the
+guard back, the honest form is to check the era of a *snapshot* block, which
+neither tool offers today and which the config arithmetic already approximates
+better than the tip-era string does.
+
+### 8.4 Re-derived residue, amaru-scoped
+
+Everything that survives the re-scoping, and nothing that does not:
+
+1. **Output is two `Show` instances, not a CLI contract** — §7.2 stands
+   unchanged, and is now the *only* substantive risk. The point extraction
+   parses `Analysis.hs:244-252`'s `Show (TraceEvent blk)`; the gate parses
+   `show tipPoint` at `Run.hs:229`. Neither carries a stability promise.
+   Mitigated by the shared `ouroboros-consensus` pin, but only if CI proves it.
+2. **`Point Origin` must map to "not ready", not "success"** — §7.3's sharp
+   edge stands. `db-analyser` exits **0** on an absent or empty chain DB, which
+   is exactly the state the polling loop waits through.
+3. **`--db-validation minimum-block-validation` is mandatory** — §4.3. Omitting
+   it silently selects `ValidateAllChunks` and re-parses the whole DB every
+   poll tick.
+4. **`NodeConfig` cannot be deleted** — §7.5. `LedgerStateEmitter` imports it.
+
+Dropped from the ticket by the re-scoping: the era gap (§8.3), the
+`{"tag":"Found","data":…}` envelope and the whole-chain list reconstruction
+(§8.1/§8.2 — the envelope was a `db-server` interop shape, and no
+`db-server`-shaped consumer is in this pipeline), and the `rc=7` CLI contract as
+an *external* contract (`contracts/bootstrap-producer-cli.md:59` classifies
+producer exit codes, and the producer keeps exiting 7 — it just stops needing a
+separate binary to do it).
+
+---
+
+## 9. Governance: the constitution leans toward removal
 
 `.specify/memory/constitution.md` Principle II permits mode (b) in-repo
 library-consumers such as `header-extractor`, but constrains them:
@@ -430,63 +648,84 @@ answer both live queries at parity cost. Under a strict reading, the
 "replaceable upstream binary" has been shown to exist and Principle II points
 at removal.
 
-The counter-argument, also legitimate: what is missing upstream is not the
-*data* but a **stable machine-readable query interface** over the immutable DB.
-`db-analyser` exposes debug traces. Mode (b) is precisely "for missing
-features", and a JSON contract with defined exit codes is arguably one. This
-is a judgement call for the maintainer, not something this assessment can
-settle from evidence.
+The counter-argument was: what is missing upstream is not the *data* but a
+**stable machine-readable query interface** over the immutable DB, and mode (b)
+is precisely "for missing features". **The re-scoping weakens this
+considerably.** A JSON contract with defined exit codes is a missing feature
+only if something consumes it — and §8.1 establishes that nothing does. What
+amaru consumes is 6 pairs; the JSON envelope was shaped for a `db-server`-style
+consumer (`app/header-extractor/Main.hs:22-24`) that is not in this pipeline. On
+the amaru-only framing, `header-extractor` is closer to the "long-lived in-repo
+replacement for a tool that already exists upstream" that Principle II forbids
+than to the missing-feature case that permits it.
 
 ---
 
-## 9. Recommended next step
+## 10. Recommended next step
 
-**Do the removal, as one M-sized ticket — but bank the S-sized part first.**
+Re-sized against the amaru surface. The target is **"produce 6 points + a
+readiness gate"**, not "reimplement `list-blocks` and `tip-info` in shell", and
+the ticket shrinks accordingly: from six scope items to four, and from
+reproducing two JSON contracts to reproducing none.
 
 **Ticket A (S, ~half a day) — prune `get-header`.** Unused under every verdict
-(§3). Drops the `getHeader` function, its Main.hs branch, its bats case and its
-hspec case. No behavioural risk. Do this regardless of what happens to Ticket B.
+and every scoping (§3). Drops the `getHeader` function, its `Main.hs` branch,
+its bats case and its hspec case. No behavioural risk, no dependency on
+Ticket B. Bank it regardless.
 
-**Ticket B (M, ~1–2 days) — replace both call sites with `db-analyser`.**
+**Ticket B (S–M, ~1 day) — retarget the producer at `db-analyser`.**
 Scope, in order:
 
-1. Add a `chain_db_query` helper in `scripts/bootstrap-producer.sh` wrapping
-   the two invocations from `shim.sh`.
-   Tip: **no analysis flag** plus `--db-validation minimum-block-validation`
-   (§4.3 — getting this wrong silently reintroduces an O(N) full validation).
-2. Map `Point Origin` → rc=7 explicitly (§7.3). This is the failure the tests
-   must cover; it is the one a naive port gets wrong.
-3. Replace the `era == "Conway"` clause with the existing
-   `conway_first_slot` derivation, and add an explicit comment recording that
-   this is a loosening for configs lacking `TestConwayHardForkAtEpoch` (§7.1).
-4. Keep the `{"tag":"Found","data":…}` envelope byte-for-byte — it is the
-   db-server-portable interop shape (§3.1).
-5. **Ship a nix check that runs the new helper against a real synthesized
-   chain DB and asserts the parsed output**, replacing `header-extractor-cli-bats`.
-   Without it, a consensus pin bump silently breaks the producer at runtime
-   (§7.2). This is the load-bearing part of the ticket; everything else is
-   deletion.
-6. Only then delete the exe, the spec suite, the two checks, the two CI jobs
-   and the three library functions — keeping `NodeConfig` (§7.5).
+1. Replace the polling-loop body with the cheap tip query — **no analysis flag**
+   plus `--db-validation minimum-block-validation` (§4.3) — and rebuild the gate
+   as §8.3 specifies: tip slot only, plus the `conway_first_slot` arithmetic the
+   producer already computes at `:234-238`. The `era == "Conway"` clause goes;
+   record in a comment that the guard now rests on config arithmetic and why
+   that is the more correct check (§8.3).
+2. Map `Point Origin` → "not ready" explicitly. `db-analyser` exits **0** on an
+   absent or empty chain DB, which is precisely the state the loop waits
+   through (§8.4 item 2). This is the failure a naive port gets wrong.
+3. Replace `list-blocks` + the four `jq` readers with the single-pass extractor
+   in §8.2, emitting `targets.json` directly. `preflight-blocks.json` stops
+   existing — the parent lookup becomes the previous line of a stream instead of
+   a `max_by` over a whole-chain array.
+4. **Ship a nix check that runs the new helper against a real synthesized chain
+   DB and asserts the extracted points**, replacing `header-extractor-cli-bats`.
+   Still load-bearing, and the re-scoping does not soften it — a bounded or
+   single-pass query has the same silent-breakage mode on a consensus pin bump,
+   because it parses the same two `Show` instances (§8.4 item 1). Assert the
+   6 pairs, not just the exit code; a format drift that yields *zero* parsed
+   lines must fail the check.
+5. Only then delete the exe, the spec suite, the two checks, the two CI jobs
+   and the library functions — keeping `NodeConfig` (§7.5).
 
 **What you get:** ≈700 fewer lines to maintain, one fewer Haskell executable,
-two fewer CI jobs, a ~63 MB smaller runtime image, and Principle II satisfied.
+two fewer CI jobs, a ~63 MB smaller runtime image, a faster readiness tick
+(0.087 s vs 0.115 s), one fewer multi-megabyte intermediate file, and
+Principle II satisfied on a reading the re-scoping strengthens (§9).
 
-**What you pay:** ~15 lines of shell parsing two upstream `Show` instances, a
-weaker era guard, and `list-blocks` at ~140 µs/block instead of ~4.4 µs/block
-(§5.1). At this repo's working scale — testnet_42 fixtures at 3,675 blocks, the
-Antithesis short-epoch corpus at ~3,000 slots — that is 0.5 s versus 0.2 s and
-does not matter. **[inference]** it would matter on a chain of ≥10⁶ blocks
-(≈140 s versus ≈4.4 s), which this producer does not currently target.
+**What you pay:** ~12 lines of shell parsing two upstream `Show` instances, and
+a one-shot extraction that costs 1.842 s instead of 0.349 s on an 11,743-block
+DB — against a ledger-replay step of 1.576 s that the pipeline runs immediately
+afterwards on the same chain DB (§8.2). Not free; not the bottleneck.
 
-**If you would rather not:** the honest framing is *"replaceable, but the win
-is maintenance surface rather than capability or speed, and it trades a typed
-Haskell contract for shell over unstable debug output."* That is a defensible
-"no". What is **not** defensible is the first pass's reason for saying no.
+**Sequencing, and the reason to keep Ticket B small.** Upstream
+[lambdasistemi/amaru#8](https://github.com/lambdasistemi/amaru/issues/8) proposes
+amaru derive these points from `--cardano-node-db` itself. If that lands, the
+producer stops needing *any* of this — not `header-extractor`, not the
+`db-analyser` shim, not `targets.json`. That is out of scope here, but it argues
+for the cheap version of Ticket B rather than an elaborate one: do not build a
+polished shell query layer for something that may be deleted wholesale. Ticket A
+is safe under either future.
+
+**If you would rather not:** the honest framing is *"replaceable, and the win is
+maintenance surface rather than capability or speed, at the cost of parsing
+upstream debug output."* Still a defensible "no" — but the two reasons earlier
+passes gave for it (the polling-loop cost, and the era gap) are both gone.
 
 ---
 
-## 10. Revision history
+## 11. Revision history
 
 **First pass — `6e2ebab`, verdict NOT REPLACEABLE.** Its evidence gathering was
 sound and reproduces exactly; its reasoning did not. Three defects:
@@ -519,6 +758,38 @@ genesis case in §7.3 needs handling. The note also proposed `--count-blocks`,
 which works but still walks the whole secondary index; the no-flag default is
 strictly cheaper (§4.3, §5.1).
 
-The pattern worth keeping from all three passes: *"tool X cannot do Y"* is a
-claim about a tool's whole option surface, and measuring one mode does not
-establish it. Read the dispatch table before concluding a mode does not exist.
+**Second pass — `de51973`, verdict PARTIALLY REPLACEABLE.** Accepted and
+independently reproduced by the reviewer (padded-chunk result confirmed at
+≈50 µs/chunk against the ≈47 measured here). Its limitation was not an error but
+a framing: it answered *"can `db-analyser` reproduce `header-extractor`'s API?"*
+That is the wrong question, because the API has no external consumer.
+
+**Third pass — this revision, verdict REPLACEABLE, amaru-scoped (NOTE-002).**
+Re-scoped by the operator to what amaru actually consumes. What changed:
+
+- The required surface is **6 `(slot, hash)` pairs**, confirmed exhaustively
+  (§8.1). The whole-chain block list, the `{"tag":"Found"}` envelope and the
+  `list-blocks` reconstruction of §6 were all solving for an API nothing
+  requires.
+- **The era gap dissolved** (§8.3). The second pass called it "genuinely lost".
+  It is not lost, because it never arrived: the producer already writes
+  `"era_name": "Conway"` as a string literal into the sidecar amaru reads. The
+  tip-era string feeds only a producer-internal gate, and as a gate it tests the
+  wrong block.
+- **The bounded-query hypothesis was tested and failed** (§8.2) — `--analyse-from`
+  needs an exact block slot, epoch boundaries are never occupied (0/4 measured,
+  mean gap 97 slots), and the probing required makes the bounded path *slower*
+  than the full scan (2.517 s vs 1.842 s). The residue it was meant to dissolve
+  dissolves anyway, because the extraction is bounded by the ledger replay that
+  follows it on the same chain DB.
+- The ticket shrank from M to S–M, from six scope items to four.
+
+Two patterns worth keeping. First, from passes one and two: *"tool X cannot do
+Y"* is a claim about a tool's whole option surface, and measuring one mode does
+not establish it — read the dispatch table before concluding a mode does not
+exist. Second, from this pass: **an equivalence assessment inherits the scope of
+whatever interface it starts from.** Two passes treated `header-extractor`'s
+three subcommands as the specification and asked what it would cost to
+reproduce them. The specification was six numbers. Asking *who consumes this*
+before asking *can we reproduce this* would have reached the answer sooner and
+with a smaller ticket.
