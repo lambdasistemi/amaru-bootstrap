@@ -12,7 +12,12 @@ setup() {
   TMP_DIR="$(mktemp -d)"
   make_valid_inputs "$TMP_DIR"
 
-  jq '.epochLength = 120' \
+  # Antithesis short-epoch params (same set as make_short_epoch_node_inputs).
+  # k and activeSlotsCoeff must move with epochLength: the producer now
+  # derives amaru's GlobalParameters from genesis and refuses a genesis
+  # where epochLength != (1/f) * scale_factor * k. Here 1/f=1, k=8 =>
+  # scale_factor = 15.
+  jq '.epochLength = 120 | .securityParam = 8 | .activeSlotsCoeff = 1.0' \
     "$TMP_DIR/config/shelley-genesis.json" \
     >"$TMP_DIR/config/shelley-genesis.json.tmp"
   mv "$TMP_DIR/config/shelley-genesis.json.tmp" \
@@ -73,7 +78,13 @@ set -euo pipefail
 cmd="\$1"
 shift
 case "\$cmd" in
-  create-snapshots)
+  snapshot)
+    sub="\$1"
+    shift
+    [[ "\$sub" == create ]] || {
+      printf 'unexpected amaru command: snapshot %s\n' "\$sub" >&2
+      exit 1
+    }
     snapdir=""
     points=()
     while [[ \$# -gt 0 ]]; do
@@ -93,7 +104,13 @@ case "\$cmd" in
       printf '[]\n' >"\$d/bootstrap.headers.json"
     done
     ;;
-  bootstrap)
+  node)
+    sub="\$1"
+    shift
+    [[ "\$sub" == bootstrap ]] || {
+      printf 'unexpected amaru command: node %s\n' "\$sub" >&2
+      exit 1
+    }
     ledger=""
     chain=""
     while [[ \$# -gt 0 ]]; do
@@ -104,6 +121,11 @@ case "\$cmd" in
       esac
     done
     mkdir -p "\$ledger/live" "\$ledger/0" "\$ledger/1" "\$ledger/2" "\$chain"
+    ;;
+  create-snapshots|bootstrap)
+    printf 'legacy alias rejected: amaru %s (use the canonical native CLI)\n' \
+           "\$cmd" >&2
+    exit 1
     ;;
   *)
     printf 'unexpected amaru command: %s\n' "\$cmd" >&2

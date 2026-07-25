@@ -352,6 +352,7 @@ in
         nativeBuildInputs = [
           pkgs.bash
           pkgs.bats
+          pkgs.cacert
           pkgs.coreutils
           pkgs.jq
           headerExtractorPkgs.header-extractor
@@ -362,9 +363,15 @@ in
       chmod -R u+w .
       patchShebangs scripts tests
       export PATH="${producerRuntimePath}:$PATH"
+      # The suites that drive the REAL amaru (concurrent, chain) need a CA
+      # anchor: `amaru snapshot create` builds a reqwest client at startup
+      # even on the offline --cardano-node-db/--snapshot path, and panics
+      # with "No CA certificates were loaded" without one.
+      export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
 
       bats --tap \
         tests/test-amaru-relay-bootstrap.bats \
+        tests/test-bootstrap-producer-canonical-cli.bats \
         tests/test-bootstrap-producer-sparse-boundaries.bats \
         tests/test-bootstrap-producer-config.bats \
         tests/test-bootstrap-producer-cluster.bats \
