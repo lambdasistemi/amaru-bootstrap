@@ -9,8 +9,8 @@ Delete the unused Haskell module and executable, remove every live Cabal/Nix/
 flake/CI/test/image reference, then align current-facing documentation. The
 work lands as two vertical commits: first the executable and live build/test
 surfaces, then current documentation. Both commits remain buildable; the first
-also proves the synthesized fixture bundle is byte-identical and that the image
-no longer contains the binary.
+also proves deterministic equivalence of the synthesized fixture bundle and
+that the image no longer contains the binary.
 
 ## Technical Context
 
@@ -24,7 +24,7 @@ sandbox; no persistent schema change
 
 **Testing**: `nix flake check`, `just build-gate`, focused
 `cli-mock-honesty`, live-reference audit, Docker layer inspection, and
-recursive NAR hashing of the synthesized fixture bundle
+path/content-manifest comparison of the synthesized fixture bundle
 
 **Target Platform**: `x86_64-linux`
 
@@ -35,7 +35,7 @@ in the producer image
 
 **Constraints**: No dependency repins; no `header-extractor` changes; no
 historical rewrites; exact surgical edits in `flake.nix` and `nix/checks.nix`;
-byte-identical `testnet_42` bundle
+identical `testnet_42` path inventory and deterministic file subset
 
 **Scale/Scope**: One dead executable, 18 live files at baseline, two reviewed
 commits
@@ -48,7 +48,7 @@ commits
 | II. Stock tools, custom orchestration | PASS | Removes an unused custom tool; supported producer continues using stock Amaru and IOG tools |
 | III. Reproducibility by SHA pinning | PASS | `flake.lock` and the Amaru pin remain untouched |
 | IV. Nix-first, haskell.nix | PASS | Flake evaluation, checks, apps, package exports, and image contents are the primary proof surfaces |
-| V. Smallest provable step | PASS | Two focused commits; actual generated bundle bytes gate the removal |
+| V. Smallest provable step | PASS | Two focused commits; the generated bundle inventory, deterministic bytes, and semantic checks gate the removal |
 
 Post-design check: PASS. The design deletes surface without adding an
 alternative implementation, dependency, or architectural layer.
@@ -59,6 +59,9 @@ alternative implementation, dependency, or architectural layer.
 
 ```text
 specs/050-remove-dead-emitter/
+├── baseline-bundle-deterministic.sha256
+├── baseline-bundle-files.txt
+├── baseline-bundle-rocksdb-exclusions.txt
 ├── checklists/requirements.md
 ├── plan.md
 ├── quickstart.md
@@ -140,8 +143,13 @@ commands are the test-first failure.
 - `nix flake show` exposes no emitter package, app, or check;
 - `nix build .#checks.x86_64-linux.cli-mock-honesty` passes;
 - the built image has no matching binary path;
-- the new synthesized bundle matches the frozen baseline hash, file count, and
-  byte count;
+- the new synthesized bundle matches the frozen 49-path inventory and all 31
+  deterministic-file hashes;
+- its only permitted byte differences are the 18 explicitly named RocksDB
+  physical files, and the measured size is accounted against the pre-change
+  control pair;
+- `bootstrap-producer-synthesized`, `amaru-run-bootstrap`,
+  `antithesis-short-epoch-samples`, and `antithesis-short-epoch-golden` pass;
 - `./gate.sh` passes.
 
 **Commit**: `chore: remove dead ledger-state emitter`
@@ -181,9 +189,9 @@ passes.
 ## Dependency and Integration Order
 
 1. Slice 1 consumes merged PR #56 and removes executable/build/test surface.
-2. The ticket orchestrator independently verifies the bundle bytes, image
-   contents, full gate, commit shape, and sibling check preservation before
-   pushing.
+2. The ticket orchestrator independently verifies bundle deterministic
+   equivalence, the four semantic bundle checks, image contents, full gate,
+   commit shape, and sibling check preservation before pushing.
 3. Both worker panes are cleared.
 4. Slice 2 aligns current-facing documentation with the now-verified live
    product surface.

@@ -39,27 +39,35 @@ latest sibling merge, satisfying the epic's evidence-over-assumption rule.
 would game the audit, while A-001 ruled that rewriting historical claims would
 falsify them.
 
-## R-003: Byte identity is measured on the generated bundle
+## R-003: Measure and isolate bundle nondeterminism
 
-**Decision**: Compare the recursive NAR hash of the internal synthesized
-`testnet_42` bundle before and after the removal.
+**Decision**: Compare the exact file inventory and deterministic file contents
+of the internal synthesized `testnet_42` bundle. Whole-bundle NAR hash and size
+are recorded as evidence, not treated as reproducibility criteria.
 
-**Baseline**:
+**Control experiment**: The same unmodified pre-change derivation was realized
+twice. It produced:
 
-- Recursive NAR hash:
-  `sha256-hIvI4FyFRdDcd6WJjuhjNjryLGens90TRENhz2eCL90=`
-- Regular files: 49
-- Apparent bytes: 194,485
+- build 1: `sha256-hIvI4FyFRdDcd6WJjuhjNjryLGens90TRENhz2eCL90=`,
+  49 files, 194,485 apparent bytes;
+- build 2: `sha256-p9zj76WMds5SJiB1sv+yxYs3UZ6M4cHczeNnPYlsE3c=`,
+  49 files, 212,933 apparent bytes.
 
 **Method**: Evaluate the
 `checks.x86_64-linux.bootstrap-producer-synthesized` derivation, locate its
-`bootstrap-producer-synthesized-bundle` input derivation, realize it, and hash
-the `testnet_42` output subtree with `nix hash path`.
+`bootstrap-producer-synthesized-bundle` input derivation, realize it, compare
+its sorted file inventory with `baseline-bundle-files.txt`, and validate all
+non-excluded files against `baseline-bundle-deterministic.sha256`.
 
-**Rationale**: The public synthesized check validates layout but produces an
-empty success marker. Hashing its internal generated bundle measures the
-actual ledger/chain/snapshot bytes rather than merely re-running a structural
-assertion.
+**Rationale**: The control builds had identical 49-path inventories but
+different NAR hashes and an 18,448-byte size difference. The 13 observed byte
+differences were RocksDB physical files. The acceptance proof therefore freezes
+the inventory and 31 deterministic files while explicitly naming all 18
+permitted RocksDB physical-file paths, including five `CURRENT` files that did
+not differ in the control. The post-change 202,240-byte sample lies inside the
+measured pre-change size span. Semantic protection remains in
+`bootstrap-producer-synthesized`, `amaru-run-bootstrap`,
+`antithesis-short-epoch-samples`, and `antithesis-short-epoch-golden`.
 
 ## R-004: Preserve sibling mock honesty
 

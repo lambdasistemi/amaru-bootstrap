@@ -19,8 +19,8 @@ surface while falsely implying that it remains part of the supported pipeline.
 
 **Independent Test**: Build every flake check and the producer image, inspect
 the available packages/apps and image contents, audit the live repository
-surfaces, and compare the synthesized `testnet_42` bundle byte-for-byte with
-the frozen pre-change baseline.
+surfaces, and compare the synthesized `testnet_42` bundle's path inventory and
+deterministic file subset with the frozen pre-change baseline.
 
 **Acceptance Scenarios**:
 
@@ -28,8 +28,9 @@ the frozen pre-change baseline.
    maintainer evaluates the flake, **then** no package, app, check, runtime
    path, or image layer exposes the obsolete executable.
 2. **Given** the canonical fixture and the same pinned dependencies, **when**
-   the producer bundle is built before and after the removal, **then** its
-   recursive bytes, file count, and apparent byte count are identical.
+   the producer bundle is built before and after the removal, **then** its 49
+   regular-file paths are identical and every file outside the explicitly
+   enumerated RocksDB physical-file exclusions is byte-identical.
 3. **Given** the repository contains current and historical documentation,
    **when** a maintainer audits exact-name matches, **then** the live-surface
    bucket is empty and every remaining process/history match belongs to an
@@ -47,9 +48,10 @@ the frozen pre-change baseline.
   actionable; they form a separate process-document exception.
 - Sibling PR #56 added the fail-closed CLI mock-honesty check and changed
   `nix/checks.nix`; the removal must preserve that check unchanged.
-- Removing an unused runtime-path entry must not alter the deterministic
-  bundle. Any byte difference means the supposedly dead dependency affected
-  behavior and the change must be rejected.
+- A forced rebuild of the unmodified pre-change bundle measured different NAR
+  hashes and apparent sizes. Whole-bundle byte identity is therefore not a
+  valid criterion; the exact path inventory and deterministic subset remain
+  load-bearing, alongside the semantic bundle checks.
 
 ## Requirements
 
@@ -72,7 +74,10 @@ the frozen pre-change baseline.
 - **FR-007**: Historical records under `specs/001-*`, `specs/003-*`,
   `specs/004-*`, `docs/history/`, and the constitution MUST remain unchanged.
 - **FR-008**: The synthesized `testnet_42` bundle MUST match the frozen
-  pre-change recursive NAR hash, regular-file count, and apparent byte count.
+  49-path inventory and the frozen content hashes for every file except the 18
+  explicitly enumerated RocksDB physical files. The exclusion list MUST name
+  each path and MUST be limited to `IDENTITY`, `LOG`, `MANIFEST-*`, `*.sst`,
+  and `CURRENT` files.
 - **FR-009**: `nix flake check` and the complete explicit Build Gate list MUST
   pass after the removal.
 - **FR-010**: The producer image MUST build and contain no executable file
@@ -87,9 +92,11 @@ the frozen pre-change baseline.
 ### Measurable Outcomes
 
 - **SC-001**: The live-surface exact-name audit reports 0 matches.
-- **SC-002**: The post-change synthesized bundle reports the baseline recursive
-  NAR hash `sha256-hIvI4FyFRdDcd6WJjuhjNjryLGens90TRENhz2eCL90=`, 49 regular
-  files, and 194,485 apparent bytes.
+- **SC-002**: The post-change synthesized bundle matches all 49 frozen paths
+  and all 31 frozen deterministic-file hashes. Its measured 202,240-byte sample
+  lies between the two unmodified pre-change samples (194,485 and 212,933
+  bytes), whose differing NAR hashes prove that whole-bundle size and NAR hash
+  are nondeterministic.
 - **SC-003**: Flake evaluation exposes 0 packages, apps, or checks named for
   the removed executable.
 - **SC-004**: Inspection of the built producer image finds 0 executable paths
