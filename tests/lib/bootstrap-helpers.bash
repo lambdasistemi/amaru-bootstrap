@@ -297,27 +297,29 @@ assert_amaru_alive() {
 
 # scan_amaru_log_for_fatal <log-path>
 #
-# Grep -F the four fatal substrings from the failure-classes contract
+# Grep -F the five fatal substrings from the failure-classes contract
 # in declaration order. On the first match: print the class label on
 # stdout, emit the labelled context block on stderr, return 0. No
 # match: return 1.
 #
 # Class table (must stay in lockstep with
-# specs/005-amaru-run-live-test/contracts/failure-classes.md):
+# specs/057-fatal-amaru-detection/contracts/fatal-log-contract.md):
 #   "Invalid VRF proof"      -> vrf
 #   "Consensus died"         -> consensus
 #   "HeaderValidationError"  -> header
 #   "ledger inconsistency"   -> rollback
+#   "roll back in the future" -> future-rollback
 scan_amaru_log_for_fatal() {
   local log="$1"
   [[ -f "$log" ]] || return 1
 
-  local -a classes=(vrf consensus header rollback)
+  local -a classes=(vrf consensus header rollback future-rollback)
   local -a needles=(
     'Invalid VRF proof'
     'Consensus died'
     'HeaderValidationError'
     'ledger inconsistency'
+    'roll back in the future'
   )
 
   local i
@@ -326,13 +328,35 @@ scan_amaru_log_for_fatal() {
       printf '%s\n' "${classes[$i]}"
       {
         printf -- '--- amaru consume failure: %s ---\n' "${classes[$i]}"
-        grep -F -n -B2 -A2 -- "${needles[$i]}" "$log" | head -n 50
+        grep -F -n -m1 -B2 -A2 -- "${needles[$i]}" "$log"
         printf -- '--- end amaru consume failure ---\n'
       } >&2
       return 0
     fi
   done
   return 1
+}
+
+# assert_amaru_log_clean <log-path>
+#
+# Caller-facing cleanliness check with ordinary shell semantics:
+#   0  — the log exists, is readable, and contains no fatal signature.
+#   1  — the log is missing, unreadable, or contains a fatal signature.
+#
+# On a fatal match the labelled diagnostic block from
+# scan_amaru_log_for_fatal appears on stderr. On a missing or
+# unreadable log a short diagnostic naming the path appears on stderr.
+assert_amaru_log_clean() {
+  local log="$1"
+  if [[ ! -f "$log" || ! -r "$log" ]]; then
+    printf 'assert_amaru_log_clean: missing or unreadable log: %s\n' \
+      "$log" >&2
+    return 1
+  fi
+  if scan_amaru_log_for_fatal "$log"; then
+    return 1
+  fi
+  return 0
 }
 
 # report_amaru_exited_early <log-path> <elapsed> <hold>

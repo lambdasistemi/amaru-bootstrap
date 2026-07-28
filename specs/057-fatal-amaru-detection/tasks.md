@@ -18,16 +18,16 @@ only on readable, clean logs.
 real `Consensus died` log and a clean log; observe nonzero/`consensus` and zero,
 respectively.
 
-- [ ] T001 [US1] Add RED cases for the future-rollback signature, direct fatal
+- [X] T001 [US1] Add RED cases for the future-rollback signature, direct fatal
   cleanliness result, clean result, and missing-log result in
   `tests/test-bootstrap-helpers.bats`
-- [ ] T002 [US1] Add the `future-rollback` class and caller-facing cleanliness
+- [X] T002 [US1] Add the `future-rollback` class and caller-facing cleanliness
   contract in `tests/lib/bootstrap-helpers.bash`
-- [ ] T003 [US1] Cover every existing fatal class and bounded diagnostic shape
+- [X] T003 [US1] Cover every existing fatal class and bounded diagnostic shape
   in `tests/test-bootstrap-helpers.bats`
-- [ ] T004 [US1] Wire `tests/test-bootstrap-helpers.bats` into the existing
+- [X] T004 [US1] Wire `tests/test-bootstrap-helpers.bats` into the existing
   `bootstrap-producer-bats` derivation in `nix/checks.nix`
-- [ ] T005 [US1] Capture the direct fatal/clean command outputs sequentially,
+- [X] T005 [US1] Capture the direct fatal/clean command outputs sequentially,
   run `nix build .#checks.x86_64-linux.bootstrap-producer-bats` and
   `./gate.sh`, then commit as `test: fail on fatal Amaru log events` with
   trailer `Tasks: T001, T002, T003, T004, T005`
