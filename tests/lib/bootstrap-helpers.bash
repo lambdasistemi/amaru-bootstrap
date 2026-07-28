@@ -197,42 +197,53 @@ synthesize_live_chain_db() {
   rm -rf "$tmp/state/db/ledger"
 }
 
-# wait_for_node_n2n_port <container> <retries>
+# derive_amaru_global_env <config-dir>
 #
-# Poll `docker port "$container" 3001/tcp` until docker reports a
-# published host port for the cardano-node N2N socket. On success,
-# print the host port (e.g. "32789") on stdout and return 0. On
-# failure (container not publishing within <retries> seconds), return
-# 1 and emit a diagnostic line on stderr. Mirrors the polling shape
-# of wait_for_node_socket.
-#
-# This is the bridge that lets a host-side amaru dial the live node
-# container (005-amaru-run-live-test, R-1).
-wait_for_node_n2n_port() {
-  local name="$1"
-  local retries="${2:-60}"
-  local mapping host_port
-  local i=0
+# Derive and export all seven AMARU_GLOBAL_* overrides from the same
+# temporary genesis the source node runs on, using the arithmetic in
+# scripts/bootstrap-producer.sh:202-215. The consumer must receive
+# the identical parameter set the producer used at bundle-build time;
+# a SYSTEM_START mismatch is the direct route to a self-inflicted
+# roll-back-in-the-future.
+derive_amaru_global_env() {
+  local cfg="$1"
+  local shelley="$cfg/shelley-genesis.json"
+  local byron="$cfg/byron-genesis.json"
 
-  while [[ $i -lt $retries ]]; do
-    mapping="$(docker port "$name" 3001/tcp 2>/dev/null || true)"
-    if [[ -n "$mapping" ]]; then
-      # docker port output: "0.0.0.0:32789" or "127.0.0.1:32789"; one
-      # mapping per line for IPv4 + IPv6. Take the first IPv4 entry.
-      host_port="$(printf '%s\n' "$mapping" \
-        | awk -F: '/^([0-9]+\.){3}[0-9]+:/ {print $NF; exit}')"
-      if [[ -n "$host_port" ]]; then
-        printf '%s\n' "$host_port"
-        return 0
-      fi
-    fi
-    i=$((i + 1))
-    sleep 1
-  done
+  local k active inverse epoch_len scale
+  k="$(jq -r '.securityParam // empty' "$shelley")"
+  active="$(jq -r '.activeSlotsCoeff // empty' "$shelley")"
+  epoch_len="$(jq -r '.epochLength // empty' "$shelley")"
 
-  printf 'wait_for_node_n2n_port: %s did not publish 3001/tcp within %ss\n' \
-    "$name" "$retries" >&2
-  return 1
+  if [[ ! "$k" =~ ^[0-9]+$ ]] || [[ -z "$active" ]] \
+    || [[ ! "$epoch_len" =~ ^[0-9]+$ ]]; then
+    printf 'derive_amaru_global_env: missing securityParam/activeSlotsCoeff/epochLength\n' >&2
+    return 1
+  fi
+
+  inverse="$(jq -n --argjson f "$active" '(1 / $f) | round')"
+  if [[ ! "$inverse" =~ ^[0-9]+$ ]] || (( inverse == 0 )) \
+    || (( epoch_len % (k * inverse) != 0 )); then
+    printf 'derive_amaru_global_env: epochLength %s not representable as (1/f)*scale*k (k=%s 1/f=%s)\n' \
+      "$epoch_len" "$k" "$inverse" >&2
+    return 1
+  fi
+  scale=$(( epoch_len / (k * inverse) ))
+
+  export AMARU_GLOBAL_CONSENSUS_SECURITY_PARAM="$k"
+  export AMARU_GLOBAL_ACTIVE_SLOT_COEFF_INVERSE="$inverse"
+  export AMARU_GLOBAL_EPOCH_LENGTH_SCALE_FACTOR="$scale"
+
+  local max_lovelace kes_period kes_evol system_start_sec
+  max_lovelace="$(jq -r '.maxLovelaceSupply // empty' "$shelley")"
+  kes_period="$(jq -r '.slotsPerKESPeriod // empty' "$shelley")"
+  kes_evol="$(jq -r '.maxKESEvolutions // empty' "$shelley")"
+  system_start_sec="$(jq -r '.startTime // 0' "$byron" 2>/dev/null || echo 0)"
+
+  [[ -n "$max_lovelace" ]] && export AMARU_GLOBAL_MAX_LOVELACE_SUPPLY="$max_lovelace"
+  [[ -n "$kes_period" ]]   && export AMARU_GLOBAL_SLOTS_PER_KES_PERIOD="$kes_period"
+  [[ -n "$kes_evol" ]]     && export AMARU_GLOBAL_MAX_KES_EVOLUTION="$kes_evol"
+  export AMARU_GLOBAL_SYSTEM_START="$(( system_start_sec * 1000 ))"
 }
 
 # parse_hold_window_seconds
@@ -250,49 +261,85 @@ parse_hold_window_seconds() {
   printf '%s\n' "$raw"
 }
 
-# start_amaru_run <bundle-dir> <peer-host-port> <log-path>
+# start_amaru_consumer_container <name> <image> <bundle-dir> <node-container>
 #
-# Background the flake-pinned `amaru run` against the bootstrap bundle
-# at <bundle-dir>, peering with 127.0.0.1:<peer-host-port>. Combined
-# stdout+stderr go to <log-path>. Print the child PID on stdout. CLI
-# shape mirrors nix/checks.nix's amaru-run-bootstrap (line 435), with
-# the dummy peer replaced by the real published port.
-start_amaru_run() {
-  local bundle="$1"
-  local peer_port="$2"
-  local log="$3"
+# Start the pinned Amaru from the producer image as a second Docker
+# container sharing the source node's network namespace, peering with
+# 127.0.0.1:3001. The bundle is mounted read-write because RocksDB
+# rotates runtime files. AMARU_GLOBAL_* must already be exported
+# (derive_amaru_global_env). Current `amaru --with-json-traces node
+# run` interface, never legacy `amaru run`.
+start_amaru_consumer_container() {
+  local name="$1" image="$2" bundle="$3" node="$4"
 
-  local extra=()
-  if [[ -f "$bundle/era-history.json" ]]; then
-    extra+=(--era-history "$bundle/era-history.json")
-  fi
-  # amaru replaced --global-parameters-file with individual AMARU_GLOBAL_*
-  # cli/env overrides; mirror the relay entrypoint by exporting them.
-  if [[ -f "$bundle/global-parameters.json" ]]; then
-    while IFS='=' read -r _k _v; do
-      [[ -n "$_k" ]] && export "AMARU_GLOBAL_${_k}=${_v}"
-    done < <(jq -r 'to_entries[] | "\(.key | ascii_upcase)=\(.value)"' "$bundle/global-parameters.json")
-  fi
-
-  amaru --with-json-traces run \
+  docker run -d --name "$name" \
+    --network "container:$node" \
+    --entrypoint amaru \
+    -e AMARU_GLOBAL_CONSENSUS_SECURITY_PARAM \
+    -e AMARU_GLOBAL_ACTIVE_SLOT_COEFF_INVERSE \
+    -e AMARU_GLOBAL_EPOCH_LENGTH_SCALE_FACTOR \
+    -e AMARU_GLOBAL_MAX_LOVELACE_SUPPLY \
+    -e AMARU_GLOBAL_SLOTS_PER_KES_PERIOD \
+    -e AMARU_GLOBAL_MAX_KES_EVOLUTION \
+    -e AMARU_GLOBAL_SYSTEM_START \
+    -v "$bundle:/bundle:rw" \
+    "$image" \
+    --with-json-traces node run \
     --network testnet_42 \
-    --ledger-dir "$bundle/ledger.testnet_42.db" \
-    --chain-dir "$bundle/chain.testnet_42.db" \
+    --era-history /bundle/era-history.json \
+    --ledger-dir /bundle/ledger.testnet_42.db \
+    --chain-dir /bundle/chain.testnet_42.db \
     --listen-address 127.0.0.1:0 \
-    --peer-address "127.0.0.1:$peer_port" \
-    "${extra[@]}" \
-    >"$log" 2>&1 &
-  printf '%s\n' "$!"
+    --peer-address 127.0.0.1:3001
 }
 
-# assert_amaru_alive <pid>
+# refresh_amaru_consumer_log <container> <log-path>
 #
-# Return 0 if the process is alive, 1 otherwise. Thin wrapper around
-# `kill -0` so callers can attach richer messaging without
-# duplicating the probe.
-assert_amaru_alive() {
-  local pid="$1"
-  kill -0 "$pid" 2>/dev/null
+# Refresh the combined container stdout/stderr into <log-path>.
+# Deterministic injection seam: when AMARU_TEST_SEED_FATAL is set,
+# the needle is appended after docker logs so the poll's cleanliness
+# and liveness steps exercise untouched real code (B-2).
+refresh_amaru_consumer_log() {
+  local container="$1" log="$2"
+  docker logs "$container" > "$log" 2>&1
+  if [[ -n "${AMARU_TEST_SEED_FATAL:-}" ]]; then
+    printf '%s\n' "$AMARU_TEST_SEED_FATAL" >> "$log"
+  fi
+}
+
+# assert_amaru_consumer_running <container>
+#
+# Return 0 if docker reports the container running, 1 otherwise.
+assert_amaru_consumer_running() {
+  local container="$1"
+  local state
+  state="$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null || true)"
+  [[ "$state" == "true" ]]
+}
+
+# poll_amaru_consumer_once <container> <log-path> <hold-seconds> <start-epoch>
+#
+# One live-poll iteration in the contract order:
+#   1. refresh combined container log (seam carrier);
+#   2. assert_amaru_log_clean — fatal wins over a coincident exit;
+#   3. only if clean, check container liveness;
+#   4. return 0 if clean and alive, nonzero otherwise.
+#
+# On a dead container with a clean log, emits the bounded
+# exited-early diagnostic via report_amaru_exited_early.
+poll_amaru_consumer_once() {
+  local container="$1" log="$2" hold="$3" start="$4"
+  refresh_amaru_consumer_log "$container" "$log"
+  if ! assert_amaru_log_clean "$log"; then
+    return 1
+  fi
+  if ! assert_amaru_consumer_running "$container"; then
+    local elapsed
+    elapsed=$(( $(date +%s) - start ))
+    report_amaru_exited_early "$log" "$elapsed" "$hold"
+    return 1
+  fi
+  return 0
 }
 
 # scan_amaru_log_for_fatal <log-path>
@@ -382,17 +429,14 @@ report_amaru_exited_early() {
   } >&2
 }
 
-# stop_amaru_run <pid>
+# stop_amaru_consumer_container <container>
 #
-# SIGTERM the amaru process and wait for it to exit. Tolerates an
-# empty pid (defaulted from a never-set AMARU_PID) and a process that
-# has already exited. Used by both the happy-path consume block and
-# the test-level teardown reaper.
-stop_amaru_run() {
-  local pid="${1:-}"
-  [[ -n "$pid" ]] || return 0
-  kill -TERM "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+# Force-remove the Amaru consumer container. Tolerates a container
+# that has already exited or was never created.
+stop_amaru_consumer_container() {
+  local container="${1:-}"
+  [[ -n "$container" ]] || return 0
+  docker rm -f "$container" >/dev/null 2>&1 || true
 }
 
 # docker_rm_worktree <tmp-dir> <image>
