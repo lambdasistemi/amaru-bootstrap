@@ -18,32 +18,36 @@ producer coverage.
 GREEN after them; `cli-mock-honesty`, the documentation build, `nix flake
 check`, and the live cardano-node verifier all pass.
 
-- [ ] T001 [US1] Write
+- [X] T001 [US1] Write
   `/tmp/epic-55/amaru-bootstrap-61/retire-phase0-driver/handoffs/retirement-audit.sh`,
   run it before repository edits, and freeze raw output proving RED on the
   active smoke surfaces
-- [ ] T002 [US1] Remove the Phase-0 job/check invocation from
+- [X] T002 [US1] Remove the Phase-0 job/check invocation from
   `.github/workflows/ci.yml` and the smoke recipes/stage from `justfile`
-- [ ] T003 [US1] Remove the `smoke-test` flake app from `nix/apps.nix` and the
+- [X] T003 [US1] Remove the `smoke-test` flake app from `nix/apps.nix` and the
   localized smoke source/tree/check definitions from `nix/checks.nix` while
   preserving the general shellcheck and current producer checks
-- [ ] T004 [US1] Delete `scripts/smoke-test.sh`,
+- [X] T004 [US1] Delete `scripts/smoke-test.sh`,
   `tests/test-config-error.bats`, `tests/test-smoke-integration.bats`,
-  `tests/test-tool-error.bats`, and `tests/lib/fixture-helpers.bash`
-- [ ] T005 [US1] Delete every tracked file under `tmp/smoke-out/` and add
+  `tests/test-tool-error.bats`, and `tests/lib/fixture-helpers.bash`; delete
+  only the `tests/test-tool-error.bats` owner-list entry from
+  `tests/check-cli-mock-honesty.sh` while preserving its
+  `convert-ledger-state` negative-control logic byte-identically
+- [X] T005 [US1] Delete every tracked file under `tmp/smoke-out/` and add
   `tmp/` to `.gitignore`
-- [ ] T006 [US1] Add the dated verdict and pivot to
+- [X] T006 [US1] Add the dated verdict and pivot to
   `docs/history/phase-0-snapshot-format.md` and link it from `mkdocs.yml`
-- [ ] T007 [US1] Remove only retired-capability claims from `README.md`,
+- [X] T007 [US1] Remove only retired-capability claims from `README.md`,
   `docs/bootstrap-producer.md`, `AGENTS.md`,
   `skills/amaru-bootstrap-guide/SKILL.md`, and the Haddock claim in
   `lib/AmaruBootstrap.hs`
-- [ ] T008 [US1] Run the identical structural audit GREEN, build
-  `cli-mock-honesty`, build the documentation into an external directory, and
-  run `./gate.sh`, recording raw evidence under
+- [X] T008 [US1] Freeze the owner-approved external-audit amendment and focused
+  CLI-mock-honesty failure as correction RED evidence, run the amended
+  structural audit GREEN, build `cli-mock-honesty`, build the documentation
+  into an external directory, and run `./gate.sh`, recording raw evidence under
   `/tmp/epic-55/amaru-bootstrap-61/retire-phase0-driver/handoffs/` with UTC
   timestamps and real exit codes
-- [ ] T009 [US1] Freeze sequential RED/GREEN evidence, obtain navigator
+- [X] T009 [US1] Freeze sequential RED/GREEN evidence, obtain navigator
   approval through the two
   `/tmp/epic-55/amaru-bootstrap-61/retire-phase0-*/STATUS.md` files, and commit
   with subject
@@ -71,7 +75,9 @@ complete ticket-level verification.
 - T001 is the observed RED barrier and completes before any repository edit.
 - T002-T007 implement one vertical retirement and may not be committed
   separately.
-- T008 runs only after the last edit and must use fresh sequential evidence.
+- T008 runs only after the last edit and must use fresh sequential evidence;
+  the navigator must accept the exact audit-invariant amendment before its
+  replacement GREEN evidence is reviewable.
 - T009 requires literal navigator approval of both RED and GREEN.
 - T010-T012 start only after the implementation commit is independently
   reviewed, task-stamped, pushed, and frozen.

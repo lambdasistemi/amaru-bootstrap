@@ -70,8 +70,10 @@ Remove every path that can invoke, register, or test the old orchestrator:
 - the three dedicated bats files and their shared fixture helper.
 
 The general `shellcheck` check remains and continues checking the two production
-shell entrypoints. The real-binary `cli-mock-honesty` negative control also
-remains unchanged and must still prove the removed command is rejected.
+shell entrypoints. Delete only the retired `tests/test-tool-error.bats` entry
+from the CLI-mock-honesty owner inventory. The checker's real-binary
+`convert-ledger-state` negative-control logic remains byte-identical and must
+still prove the removed command is rejected.
 
 ### Generated-output cleanup
 
@@ -102,7 +104,7 @@ byte-identical.
 Historical specs, `.specify/memory/constitution.md`, and
 `docs/history/what-amaru-needs.md` remain unchanged.
 
-### Removal-only RED/GREEN proof
+### Versioned RED/GREEN proof
 
 The slice does not add a permanent retirement check. Before repository edits,
 the driver writes a structural audit under its external `handoffs/` directory.
@@ -113,6 +115,15 @@ The audit asserts that:
 - `tmp/` is ignored;
 - the new history page is navigable;
 - forbidden historical files are unchanged relative to the slice base.
+
+The initial audit is frozen RED before implementation. During GREEN, the
+focused CLI-mock-honesty check exposed its stale ownership reference to the
+deleted test. Following the ticket owner's scope approval, revise only the
+audit invariant that previously required the whole checker to be
+byte-identical: it must instead prove the exact one-line owner-list deletion
+and byte-identical negative-control logic. Freeze the audit delta and the
+focused failing check as correction RED evidence, obtain navigator acceptance
+of the amendment, then run the revised audit GREEN.
 
 Running the audit on the pre-change tree is RED because all retired surfaces
 exist. The driver freezes the command and raw failure output for navigator
@@ -154,8 +165,9 @@ tmp/smoke-out/**                            # delete tracked generated output
 
 Run the external structural audit RED, remove the complete executable/test
 surface and generated output, add the navigable history page, and correct the
-active documentation. Run the identical audit GREEN, the CLI negative control,
-the documentation build, and the full ticket gate. Land everything in one
+active documentation. Apply the owner-approved one-line CLI-mock-honesty
+inventory correction, run the amended audit GREEN, then run the CLI negative
+control, documentation build, and full ticket gate. Land everything in one
 bisect-safe commit so no intermediate revision exports an app whose script is
 missing or removes the finding before history is reachable.
 
@@ -175,6 +187,7 @@ missing or removes the finding before history is reachable.
 - `scripts/smoke-test.sh`
 - `skills/amaru-bootstrap-guide/SKILL.md`
 - `tests/lib/fixture-helpers.bash`
+- `tests/check-cli-mock-honesty.sh` (remove one owner-list line only)
 - `tests/test-config-error.bats`
 - `tests/test-smoke-integration.bats`
 - `tests/test-tool-error.bats`
@@ -184,6 +197,7 @@ missing or removes the finding before history is reachable.
 
 ```text
 <driver handoffs>/retirement-audit.sh
+git diff -- tests/check-cli-mock-honesty.sh
 nix build .#checks.x86_64-linux.cli-mock-honesty
 nix shell nixpkgs#python3Packages.mkdocs-material -c \
   mkdocs build --strict --site-dir <driver handoffs>/docs-site

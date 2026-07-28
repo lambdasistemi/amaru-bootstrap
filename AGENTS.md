@@ -22,12 +22,10 @@ Cardano code, stock tools + custom orchestration, SHA pinning, Nix-first).
 ## How to work here
 
 - Build/test everything CI builds: `just build-gate`
-- Full local CI mirror (Build Gate + Phase 0 smoke verdict + Docker live
-  verifier): `just ci`
-- Phase 0 smoke test against the vendored fixture: `just smoke`
+- Full local CI mirror (Build Gate + Docker live verifier): `just ci`
 - One flake check: `nix build .#checks.x86_64-linux.<name>` (never
   `nix develop -c cabal test` in CI)
-- Run a tool: `nix run .#bootstrap-producer`, `.#smoke-test`,
+- Run a tool: `nix run .#bootstrap-producer`,
   `.#header-extractor`, `.#amaru`, `.#db-synthesizer`, `.#db-analyser`,
   `.#snapshot-converter`
 - Shell lint: `just shellcheck`; scripts are bash with

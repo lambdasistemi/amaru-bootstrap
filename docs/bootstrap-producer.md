@@ -216,8 +216,7 @@ Local CI:
 just ci
 ```
 
-`just ci` includes the Build Gate, the Phase 0 smoke verdict, and the
-Docker-level live verifier.
+`just ci` includes the Build Gate and the Docker-level live verifier.
 
 Producer-specific checks:
 
