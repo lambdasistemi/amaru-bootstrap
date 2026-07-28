@@ -78,37 +78,44 @@ specific evidence.
 - Require only a positive startup marker: rejected because consensus can die
   after startup.
 
-## R-005 - Reuse an existing CI-built flake check
+## R-005 - Reuse both landed CI-built checks
 
-**Decision**: Add deterministic helper tests and the reachability audit to the
-existing `bootstrap-producer-bats` derivation in `nix/checks.nix`.
+**Decision**: Keep deterministic fatal-log tests in
+`bootstrap-producer-bats`. Extend sibling #51's landed
+`cli-mock-honesty` output for helper reachability.
 
-**Rationale**: The required Build Gate already builds that derivation. Creating
-a new flake check without changing the justfile and workflow would produce a
-check that `nix flake check` sees but the required CI job does not explicitly
-build. Reusing the existing check keeps the owned surface localized and the
-guard live in CI.
+**Rationale**: Both checks are registered flake outputs and run in the Build
+Gate. Reusing each check for the contract it already owns avoids a second audit
+mechanism while keeping the guard live in CI.
 
 **Alternatives considered**:
 
-- New standalone flake output: rejected unless the owned scope expands to the
-  Build Gate lists.
+- A new helper-reachability flake output: rejected because #51 now provides the
+  required extension seam.
+- Put both concerns in `bootstrap-producer-bats`: rejected after #51 merged
+  because it would duplicate the audit framework.
 - Convention or documentation only: rejected by the Nix-first invariant.
 
-## R-006 - Reachability is an explicit test-library audit
+## R-006 - Reachability extends `cli-mock-honesty`
 
-**Decision**: Audit helper declarations under `tests/lib/` for a non-declaration
-call site or an explicit, reviewable exemption. Test the auditor against small
-dead and reachable fixtures before running it on the repository helper set.
+**Decision**: Extend `tests/check-cli-mock-honesty.sh` to audit helper
+declarations under `tests/lib/` for a non-declaration call site or an explicit,
+reviewable exemption. Prove it against uncalled, reachable, and exempt fixtures
+before running it on the repository helper set.
 
 **Rationale**: The defect is static integration drift: code was copied into a
 shared library but never reached from a test entrypoint. A repository audit
-fails at the moment such code lands and names the unreachable helper.
+fails at the moment such code lands and names the unreachable helper. The
+uncalled fixture is the negative control: without it, an auditor that always
+returns success would pass, just as an always-success CLI probe would have
+passed before #51 added its removed-command control.
 
 **Alternatives considered**:
 
 - Guard only `scan_amaru_log_for_fatal`: rejected because it would fix the
   symptom but not the recurrence class.
+- A separate `check-test-helper-reachability.sh`, Bats suite, or flake output:
+  rejected because it would compete with #51's landed audit mechanism.
 - Treat any second textual occurrence as a call: rejected because comments and
   declarations would make the audit vacuous.
 - Full Bash semantic call-graph analysis: rejected as disproportionate for the
@@ -130,4 +137,3 @@ must precede scoring.
   Antithesis property surface exists here.
 - Make this PR wait for the downstream child: rejected by epic-owner ruling
   A-003; the local detector is urgent and independently valuable.
-
