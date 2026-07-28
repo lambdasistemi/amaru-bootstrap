@@ -1,7 +1,7 @@
 # Tasks: Retire Obsolete Phase-0 Smoke
 
 **Input**: Design documents from
-`/specs/061-retire-phase0-smoke/`  
+`/specs/061-retire-phase0-smoke/`
 **Prerequisites**: [spec.md](spec.md), [plan.md](plan.md)
 
 **Tests**: RED-GREEN is mandatory. Because this is a removal-only slice, the
@@ -59,14 +59,14 @@ check`, and the live cardano-node verifier all pass.
 **Goal**: Make the retirement and retained coverage legible to reviewers and
 complete ticket-level verification.
 
-- [ ] T010 [US1] Update pull request #62 from
+- [X] T010 [US1] Update pull request #62 from
   `/tmp/epic-55/amaru-bootstrap-61/pr-body.md` with the measured conversion
   exit, emitted verdict, successful CI job URL, landed retirement chapter, and
   retained producer coverage
-- [ ] T011 [US1] Check the parent inbox, inspect every branch change, rerun the
+- [X] T011 [US1] Check the parent inbox, inspect every branch change, rerun the
   full `./gate.sh`, and run the commit/finalization audit against
   `specs/061-retire-phase0-smoke/tasks.md`
-- [ ] T012 [US1] Mark the orchestrator-owned evidence slice complete in this
+- [X] T012 [US1] Mark the orchestrator-owned evidence slice complete in this
   `specs/061-retire-phase0-smoke/tasks.md` file and commit it with subject
   `docs: finalize Phase-0 retirement evidence`
 

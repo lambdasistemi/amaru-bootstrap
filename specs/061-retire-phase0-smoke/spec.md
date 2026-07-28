@@ -1,8 +1,8 @@
 # Feature Specification: Retire Obsolete Phase-0 Smoke
 
-**Feature Branch**: `fix/61-phase-0-smoke-verdict`  
-**Created**: 2026-07-28  
-**Status**: Ready for planning  
+**Feature Branch**: `fix/61-phase-0-smoke-verdict`
+**Created**: 2026-07-28
+**Status**: Ready for planning
 **Input**: GitHub issue
 [`lambdasistemi/amaru-bootstrap#61`](https://github.com/lambdasistemi/amaru-bootstrap/issues/61)
 
