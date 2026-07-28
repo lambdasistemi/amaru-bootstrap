@@ -118,7 +118,8 @@ plan amendment.
 **RED**:
 
 - write a runtime-only assertion that checks both explicit definitions and the
-  exact requested closure;
+  exact requested closure by extracting the hosted build step and local recipe
+  target lists, requiring them to remain ordered and byte-identical;
 - run it on the baseline and preserve its nonzero exit caused by both missing
   target entries;
 - prove the closure instrument finds the standalone output but not the current
@@ -133,7 +134,7 @@ plan amendment.
 - add exactly one full target line to each owned file, preserving every other
   requested check;
 - run the same runtime assertion and require structural counts plus exact
-  closure reachability to pass;
+  closure reachability to pass over the extracted, identical request lists;
 - freeze complete post-edit evidence and owned-file hashes only after the final
   write;
 - obtain literal navigator GREEN approval of that frozen diff;
