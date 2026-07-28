@@ -72,7 +72,8 @@ deterministic file subset with the frozen pre-change baseline.
 - **FR-006**: Current-facing maintainer and operator documentation MUST no
   longer advertise the executable.
 - **FR-007**: Historical records under `specs/001-*`, `specs/003-*`,
-  `specs/004-*`, `docs/history/`, and the constitution MUST remain unchanged.
+  `specs/004-*`, `specs/051-*`, `docs/history/`, and the constitution MUST
+  remain unchanged.
 - **FR-008**: The synthesized `testnet_42` bundle MUST match the frozen
   49-path inventory and the frozen content hashes for every file except the 18
   explicitly enumerated RocksDB physical files. The exclusion list MUST name
@@ -113,3 +114,6 @@ deterministic file subset with the frozen pre-change baseline.
 - All dependency pins remain unchanged; this is pure dead-code removal.
 - Process documents under `specs/050-remove-dead-emitter/` may retain exact
   names because they are the auditable contract for the removal itself.
+- The merged sibling record under `specs/051-cli-mock-honesty/` may retain
+  exact names because it documents the handoff of emitter removal to this
+  ticket.

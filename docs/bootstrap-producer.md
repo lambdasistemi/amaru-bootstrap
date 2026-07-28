@@ -208,31 +208,6 @@ validates chunk files through APIs that fail on a read-only filesystem;
 the producer detects that case and exits 7 with a pointer to the
 `tip-info` stderr log.
 
-## Ledger-State Projection (standalone emitter)
-
-`ledger-state-emitter` is the in-repo projection tool. It is no longer
-invoked by the producer pipeline (upstream `amaru create-snapshots` +
-`amaru bootstrap` own snapshot materialization now), but it remains in
-the image and as the flake app `nix run .#ledger-state-emitter` for
-standalone emission and debugging. It writes the Amaru bootstrap
-projection of the node-10.7.1 ledger state:
-
-- UTxO entries are canonical `EncCBOR` entries, not consensus
-  ledger-table `MemPack` bytes.
-- The Shelley ledger wrapper is written in the pre-Peras shape that
-  Amaru's converter walks.
-- Conway/Dijkstra pool state is projected to the current pool params,
-  future pool params, and retirements that Amaru imports.
-- Conway/Dijkstra account state is projected into Amaru's legacy
-  delegation-state wrapper while preserving rewards, deposits,
-  stake-pool delegation, and DRep delegation.
-- Empty reward-update state is projected as a completed zero reward
-  update because Amaru's import command decodes snapshots with
-  `has_rewards=true`.
-
-The detailed contract is in
-`specs/003-amaru-bootstrap-producer/research.md#r-011`.
-
 ## Verification
 
 Local CI:

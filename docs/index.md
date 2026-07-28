@@ -38,11 +38,6 @@ bootstrapper and the Amaru node.
 - `header-extractor`: Haskell executable for `tip-info`, `list-blocks`,
   and `get-header` against immutable ChainDB chunks. The producer's
   era-readiness poll and snapshot-target selection are built on it.
-- `ledger-state-emitter`: Haskell executable that projects a pinned
-  cardano-node 10.7.1 ledger state into the legacy shape Amaru imports.
-  Still shipped in the image and exposed as a flake app, but no longer
-  invoked by the producer pipeline since the migration to upstream
-  `amaru create-snapshots` + `amaru bootstrap`.
 - `amaru-runtime/`: deployment-provided runtime files consumed by
   `amaru run`: `era-history.json` and `global-parameters.json`.
 

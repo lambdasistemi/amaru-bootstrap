@@ -1,6 +1,6 @@
 ---
 name: amaru-bootstrap-guide
-description: Working guide for the lambdasistemi/amaru-bootstrap repository, which builds the ghcr.io/lambdasistemi/amaru-bootstrap-producer Docker image and tools for bootstrapping relay-only Amaru nodes on custom Cardano testnets. Load when working on or asking about bootstrap-producer, amaru-relay-bootstrap, header-extractor, ledger-state-emitter, amaru create-snapshots, amaru bootstrap, amaru run, the testnet_42 fixture, era-history.json or global-parameters.json runtime files, bundle layout (ledger.<network>.db, chain.<network>.db), the era-readiness predicate, producer exit codes (cluster-not-ready, chain-not-era-ready), Antithesis amaru-relay-N containers and startup markers, scripts/bootstrap-producer.sh, scripts/amaru-relay-bootstrap.sh, scripts/smoke-test.sh, nix flake checks like bootstrap-producer-synthesized or antithesis-short-epoch-golden, the cardano-node 10.7.1 pin, or the just recipes (just ci, just smoke, just build-gate, just live-bootstrap-producer).
+description: Working guide for the lambdasistemi/amaru-bootstrap repository, which builds the ghcr.io/lambdasistemi/amaru-bootstrap-producer Docker image and tools for bootstrapping relay-only Amaru nodes on custom Cardano testnets. Load when working on or asking about bootstrap-producer, amaru-relay-bootstrap, header-extractor, amaru create-snapshots, amaru bootstrap, amaru run, the testnet_42 fixture, era-history.json or global-parameters.json runtime files, bundle layout (ledger.<network>.db, chain.<network>.db), the era-readiness predicate, producer exit codes (cluster-not-ready, chain-not-era-ready), Antithesis amaru-relay-N containers and startup markers, scripts/bootstrap-producer.sh, scripts/amaru-relay-bootstrap.sh, scripts/smoke-test.sh, nix flake checks like bootstrap-producer-synthesized or antithesis-short-epoch-golden, the cardano-node 10.7.1 pin, or the just recipes (just ci, just smoke, just build-gate, just live-bootstrap-producer).
 ---
 
 # amaru-bootstrap guide
@@ -18,12 +18,10 @@ description: Working guide for the lambdasistemi/amaru-bootstrap repository, whi
   (db-synthesizer → db-analyser `--store-ledger` →
   `amaru convert-ledger-state`).
 - `lib/` — Haskell library: `HeaderExtractor` (tip-info, list-blocks,
-  get-header over the immutable ChainDB), `LedgerStateEmitter`
-  (node-10.7.1 → Amaru legacy `ExtLedgerState` projection),
-  `AmaruBootstrap` (marker module so haskell.nix resolves the pinned
-  consensus packages).
-- `app/header-extractor/`, `app/ledger-state-emitter/` — CLI wrappers
-  over the library (optparse-applicative; failures exit 7).
+  get-header over the immutable ChainDB) and `AmaruBootstrap` (marker
+  module so haskell.nix resolves the pinned consensus packages).
+- `app/header-extractor/` — CLI wrapper over the library
+  (optparse-applicative; failures exit 7).
 - `nix/` — `project.nix` (haskell.nix), `amaru.nix` (crane build of the
   pinned Amaru), `iog-tools.nix` (db-synthesizer, db-analyser,
   snapshot-converter from the pinned consensus), `apps.nix` (flake
@@ -50,7 +48,7 @@ description: Working guide for the lambdasistemi/amaru-bootstrap repository, whi
 - `just live-bootstrap-producer` — Docker-level verifier against a real
   `cardano-node:10.7.1` container.
 - Single check: `nix build .#checks.x86_64-linux.<name>` — names:
-  `amaru`, `db-synthesizer`, `db-analyser`, `ledger-state-emitter`,
+  `amaru`, `db-synthesizer`, `db-analyser`,
   `shellcheck`, `smoke-test-bats`, `header-extractor-spec`,
   `header-extractor-cli-bats`, `bootstrap-producer-bats`,
   `bootstrap-producer-synthesized`, `amaru-run-bootstrap`,
@@ -75,10 +73,6 @@ description: Working guide for the lambdasistemi/amaru-bootstrap repository, whi
   `scripts/amaru-relay-bootstrap.sh` (relay, additionally requires
   RocksDB `CURRENT` files and the `.bootstrap-complete` sentinel).
   Keep them consistent when changing the bundle shape.
-- The ledger projection rules (UTxO canonical CBOR, pre-Peras wrapper,
-  PState/DState projection, completed zero reward update) are in the
-  module haddock of `lib/LedgerStateEmitter.hs` and in
-  `specs/003-amaru-bootstrap-producer/research.md` R-011.
 - The pinned dependency set is in `cabal.project` (CHaP index states,
   consensus 3.0.1.0 source-repository-package with nix32 `--sha256`)
   and `flake.nix` inputs (Amaru pinned to

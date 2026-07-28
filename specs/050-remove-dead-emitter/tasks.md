@@ -33,10 +33,10 @@ tool while leaving historical records unchanged.
 **Independent Test**: The live-surface bucket has zero matches; every remaining
 match belongs to an enumerated process/history exception; the full gate passes.
 
-- [ ] T010 [US1] Record the failing current-facing reference audit in `README.md`, `AGENTS.md`, `docs/index.md`, `docs/architecture.md`, `docs/bootstrap-producer.md`, and `skills/amaru-bootstrap-guide/SKILL.md`
-- [ ] T011 [US1] Remove or rewrite only stale emitter references in `README.md`, `AGENTS.md`, `docs/index.md`, `docs/architecture.md`, `docs/bootstrap-producer.md`, and `skills/amaru-bootstrap-guide/SKILL.md`
-- [ ] T012 [US1] Run both grep buckets from `specs/050-remove-dead-emitter/quickstart.md` and confirm zero live matches with only approved exceptions remaining
-- [ ] T013 [US1] Run `./gate.sh` and commit Slice 2 as `docs: retire dead emitter references`
+- [X] T010 [US1] Record the failing current-facing reference audit in `README.md`, `AGENTS.md`, `docs/index.md`, `docs/architecture.md`, `docs/bootstrap-producer.md`, and `skills/amaru-bootstrap-guide/SKILL.md`
+- [X] T011 [US1] Remove or rewrite only stale emitter references in `README.md`, `AGENTS.md`, `docs/index.md`, `docs/architecture.md`, `docs/bootstrap-producer.md`, and `skills/amaru-bootstrap-guide/SKILL.md`
+- [X] T012 [US1] Run both grep buckets from `specs/050-remove-dead-emitter/quickstart.md` and confirm zero live matches with only approved exceptions remaining
+- [X] T013 [US1] Run `./gate.sh` and commit Slice 2 as `docs: retire dead emitter references`
 
 ## Dependencies and Execution Order
 
