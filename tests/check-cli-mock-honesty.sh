@@ -59,8 +59,7 @@ for bats_file in \
   tests/test-bootstrap-producer-history.bats \
   tests/test-bootstrap-producer-sparse-boundaries.bats \
   tests/test-amaru-relay-bootstrap.bats \
-  tests/test-relay-entrypoint.bats \
-  tests/test-tool-error.bats; do
+  tests/test-relay-entrypoint.bats; do
   if grep -q 'cli_mock_guard' "$bats_file"; then
     printf 'OK: %s invokes cli_mock_guard\n' "$bats_file"
   else

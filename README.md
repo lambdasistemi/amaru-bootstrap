@@ -122,7 +122,6 @@ All tools are exposed as flake apps:
 | App | Purpose |
 |-----|---------|
 | `nix run .#bootstrap-producer` | One-shot bundle producer (`<chain-db> <config-dir> <bundle-dir> <network>`) |
-| `nix run .#smoke-test` | Phase 0 format-compatibility smoke test (`<bundle> <out-dir>`) |
 | `nix run .#header-extractor` | Immutable chain-DB queries: `tip-info`, `list-blocks`, `get-header` |
 | `nix run .#amaru` | The pinned Amaru binary |
 | `nix run .#db-synthesizer` / `.#db-analyser` / `.#snapshot-converter` | Pinned upstream consensus tools |
@@ -196,8 +195,8 @@ For AI agents, start at [AGENTS.md](AGENTS.md).
 just ci
 ```
 
-`just ci` mirrors the GitHub workflow: it runs the Build Gate, runs the
-Phase 0 smoke verdict, and runs the Docker-level live bootstrap verifier.
+`just ci` mirrors the GitHub workflow: it runs the Build Gate and the
+Docker-level live bootstrap verifier.
 Producer-specific checks include:
 
 ```bash

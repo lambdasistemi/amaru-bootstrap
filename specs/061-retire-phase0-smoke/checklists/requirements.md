@@ -34,3 +34,6 @@
 - Retirement and the widened file fence were approved after the measurement
   established that the CI run reaches the removed command and misclassifies
   its rejection.
+- A mid-slice clarification added only the stale
+  `tests/test-tool-error.bats` owner-inventory line to the retirement; the
+  `convert-ledger-state` negative control remains required and unchanged.

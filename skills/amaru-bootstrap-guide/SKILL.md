@@ -1,6 +1,6 @@
 ---
 name: amaru-bootstrap-guide
-description: Working guide for the lambdasistemi/amaru-bootstrap repository, which builds the ghcr.io/lambdasistemi/amaru-bootstrap-producer Docker image and tools for bootstrapping relay-only Amaru nodes on custom Cardano testnets. Load when working on or asking about bootstrap-producer, amaru-relay-bootstrap, header-extractor, amaru create-snapshots, amaru bootstrap, amaru run, the testnet_42 fixture, era-history.json or global-parameters.json runtime files, bundle layout (ledger.<network>.db, chain.<network>.db), the era-readiness predicate, producer exit codes (cluster-not-ready, chain-not-era-ready), Antithesis amaru-relay-N containers and startup markers, scripts/bootstrap-producer.sh, scripts/amaru-relay-bootstrap.sh, scripts/smoke-test.sh, nix flake checks like bootstrap-producer-synthesized or antithesis-short-epoch-golden, the cardano-node 10.7.1 pin, or the just recipes (just ci, just smoke, just build-gate, just live-bootstrap-producer).
+description: Working guide for the lambdasistemi/amaru-bootstrap repository, which builds the ghcr.io/lambdasistemi/amaru-bootstrap-producer Docker image and tools for bootstrapping relay-only Amaru nodes on custom Cardano testnets. Load when working on or asking about bootstrap-producer, amaru-relay-bootstrap, header-extractor, amaru create-snapshots, amaru bootstrap, amaru run, the testnet_42 fixture, era-history.json or global-parameters.json runtime files, bundle layout (ledger.<network>.db, chain.<network>.db), the era-readiness predicate, producer exit codes (cluster-not-ready, chain-not-era-ready), Antithesis amaru-relay-N containers and startup markers, scripts/bootstrap-producer.sh, scripts/amaru-relay-bootstrap.sh, nix flake checks like bootstrap-producer-synthesized or antithesis-short-epoch-golden, the cardano-node 10.7.1 pin, or the just recipes (just ci, just build-gate, just live-bootstrap-producer).
 ---
 
 # amaru-bootstrap guide
@@ -14,9 +14,6 @@ description: Working guide for the lambdasistemi/amaru-bootstrap repository, whi
 - `scripts/amaru-relay-bootstrap.sh` — Antithesis relay container
   entrypoint: startup marker, producer retry loop, bundle promotion,
   final `exec amaru run`.
-- `scripts/smoke-test.sh` — Phase 0 format-compatibility smoke test
-  (db-synthesizer → db-analyser `--store-ledger` →
-  `amaru convert-ledger-state`).
 - `lib/` — Haskell library: `HeaderExtractor` (tip-info, list-blocks,
   get-header over the immutable ChainDB) and `AmaruBootstrap` (marker
   module so haskell.nix resolves the pinned consensus packages).
@@ -27,29 +24,27 @@ description: Working guide for the lambdasistemi/amaru-bootstrap repository, whi
   snapshot-converter from the pinned consensus), `apps.nix` (flake
   apps), `checks.nix` (all flake checks),
   `bootstrap-producer-image.nix` (layered Docker image).
-- `tests/` — bats suites for the producer, relay, and smoke scripts;
+- `tests/` — bats suites for the producer and relay scripts;
   `test/` — hspec suite for `HeaderExtractor`.
 - `specs/` — speckit feature specs; `specs/003-amaru-bootstrap-producer/`
   holds the producer contract, research (R-001…R-011), and data model.
 - `docs/` + `mkdocs.yml` — MkDocs Material site;
   `.specify/memory/constitution.md` — project principles (symlinked at
   `docs/constitution.md`).
-- `.github/workflows/` — `ci.yml` (Build Gate + smoke verdict + live
-  verifier), `publish-bootstrap-image.yml` (GHCR push, SHA tags),
+- `.github/workflows/` — `ci.yml` (Build Gate + live verifier),
+  `publish-bootstrap-image.yml` (GHCR push, SHA tags),
   `deploy-docs.yml` (mkdocs gh-deploy).
 
 ## Build, test, run
 
 - `just build-gate` — build every flake check CI's Build Gate builds.
-- `just ci` — full local CI mirror (Build Gate, Phase 0 smoke verdict,
-  Docker-level live verifier; needs a Docker daemon for the last step).
-- `just smoke` — smoke test against the vendored fixture
-  (`specs/001-snapshot-format-smoke/fixtures/p1-config`).
+- `just ci` — full local CI mirror (Build Gate, Docker-level live
+  verifier; needs a Docker daemon for the last step).
 - `just live-bootstrap-producer` — Docker-level verifier against a real
   `cardano-node:10.7.1` container.
 - Single check: `nix build .#checks.x86_64-linux.<name>` — names:
   `amaru`, `db-synthesizer`, `db-analyser`,
-  `shellcheck`, `smoke-test-bats`, `header-extractor-spec`,
+  `shellcheck`, `header-extractor-spec`,
   `header-extractor-cli-bats`, `bootstrap-producer-bats`,
   `bootstrap-producer-synthesized`, `amaru-run-bootstrap`,
   `antithesis-short-epoch-samples`, `antithesis-short-epoch-golden`,

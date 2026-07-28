@@ -80,6 +80,9 @@ CLI-mock-honesty negative control, and the live producer verifier all pass.
 - **FR-009**: Changes to `nix/checks.nix` MUST be localized to the retired
   smoke definitions and registrations so active sibling work is not
   restructured or overwritten.
+- **FR-010**: The CLI-mock-honesty owner inventory MUST remove only the
+  deleted `tests/test-tool-error.bats` entry; its real-binary
+  `convert-ledger-state` negative control MUST remain byte-identical.
 
 ## Success Criteria
 
@@ -99,6 +102,9 @@ CLI-mock-honesty negative control, and the live producer verifier all pass.
   exit code 0.
 - **SC-007**: Every changed active-documentation reference describes current
   producer verification rather than the retired experiment.
+- **SC-008**: The CLI-mock-honesty checker differs only by removal of the
+  `tests/test-tool-error.bats` owner-list line, and its negative control still
+  passes against the real binary.
 
 ## Assumptions
 

@@ -2,6 +2,7 @@
 result
 result-*
 out/
+tmp/
 *.log
 WIP.md
 .llm/

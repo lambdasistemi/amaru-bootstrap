@@ -10,7 +10,7 @@ package, which lets @haskell.nix@ resolve the cardano-node
 expose its @db-synthesizer@, @db-analyser@, and @snapshot-converter@
 executables.
 
-The project's actual deliverable is @scripts\/smoke-test.sh@ — this
+The project's actual deliverable is the bootstrap producer — this
 module has no runtime role and exports nothing.
 -}
 module AmaruBootstrap () where
