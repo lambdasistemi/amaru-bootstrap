@@ -1,7 +1,7 @@
 # Implementation Plan: Retire Obsolete Phase-0 Smoke
 
 **Branch**: `fix/61-phase-0-smoke-verdict` | **Date**: 2026-07-28 |
-**Spec**: [spec.md](spec.md)  
+**Spec**: [spec.md](spec.md)
 **Input**: Feature specification from
 `/specs/061-retire-phase0-smoke/spec.md`
 
@@ -23,20 +23,20 @@ epic owner approved retirement.
 
 ## Technical Context
 
-**Language/Version**: Bash 5, Nix, GitHub Actions YAML, Markdown  
+**Language/Version**: Bash 5, Nix, GitHub Actions YAML, Markdown
 **Primary Dependencies**: Existing pinned Amaru and IOG consensus tools;
-MkDocs Material navigation  
+MkDocs Material navigation
 **Storage**: Delete the tracked generated `tmp/smoke-out/` tree; add `tmp/` to
-the repository ignore rules  
+the repository ignore rules
 **Testing**: Structural RED/GREEN retirement audit, `cli-mock-honesty`,
-`nix flake check`, documentation build, and Docker live producer verifier  
-**Target Platform**: x86_64 Linux on self-hosted NixOS runners  
-**Project Type**: Build/test harness and documentation retirement  
+`nix flake check`, documentation build, and Docker live producer verifier
+**Target Platform**: x86_64 Linux on self-hosted NixOS runners
+**Project Type**: Build/test harness and documentation retirement
 **Performance Goals**: Remove one obsolete multi-minute CI job without reducing
-current producer coverage  
+current producer coverage
 **Constraints**: Historical specifications and constitution remain unchanged;
 `nix/checks.nix` edits stay localized; the marker module permits only one
-Haddock-claim correction  
+Haddock-claim correction
 **Scale/Scope**: One obsolete command surface and its direct active
 documentation
 
