@@ -17,6 +17,7 @@ setup() {
   export AMARU_CLUSTER_READY_DEADLINE_SECONDS=1
   export AMARU_WAIT_DEADLINE_SECONDS=1
   export AMARU_POLL_INTERVAL_SECONDS=1
+  export CLI_MOCK_SURFACE_LIB="$BATS_TEST_DIRNAME/lib/cli-mock-surface.bash"
 
   # Sparse chain: the last block of completed epochs 1/2/3 lands at slots
   # 188/287/397 (epochLength 100, tip in epoch 4). Hashes are hex so the
@@ -29,6 +30,9 @@ EOF
   {
     printf '#!%s\n' "$BASH"
     cat <<'EOF'
+set -euo pipefail
+source "$CLI_MOCK_SURFACE_LIB"
+cli_mock_guard header-extractor "$@"
 case "$1" in
   tip-info)
     printf '{"slot":405,"era":"Conway"}\n'
@@ -52,6 +56,9 @@ EOF
   {
     printf '#!%s\n' "$BASH"
     cat <<'EOF'
+set -euo pipefail
+source "$CLI_MOCK_SURFACE_LIB"
+cli_mock_guard amaru "$@"
 cmd="$1"; shift
 case "$cmd" in
   snapshot)

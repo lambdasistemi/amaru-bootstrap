@@ -29,6 +29,7 @@ setup() {
   MOCK_BIN="$TMP_DIR/mock-bin"
   mkdir -p "$MOCK_BIN"
   BASH_PATH="$(command -v bash)"
+  export CLI_MOCK_SURFACE_LIB="$BATS_TEST_DIRNAME/lib/cli-mock-surface.bash"
   install_short_epoch_mocks
 
   export PATH="$MOCK_BIN:$PATH"
@@ -46,6 +47,8 @@ install_short_epoch_mocks() {
   cat >"$MOCK_BIN/header-extractor" <<SHIM
 #!${BASH_PATH}
 set -euo pipefail
+source "\$CLI_MOCK_SURFACE_LIB"
+cli_mock_guard header-extractor "\$@"
 cmd="\$1"
 shift
 case "\$cmd" in
@@ -75,6 +78,8 @@ SHIM
   cat >"$MOCK_BIN/amaru" <<SHIM
 #!${BASH_PATH}
 set -euo pipefail
+source "\$CLI_MOCK_SURFACE_LIB"
+cli_mock_guard amaru "\$@"
 cmd="\$1"
 shift
 case "\$cmd" in

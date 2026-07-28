@@ -340,6 +340,27 @@ in
       mkdir -p $out
     '';
 
+  # Issue #51: validate declared mock surfaces against real binaries
+  # and confirm guard coverage in every audited bats owner.
+  cli-mock-honesty =
+    pkgs.runCommand "cli-mock-honesty"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.gnugrep
+          amaruPkg
+          headerExtractorPkgs.header-extractor
+        ];
+      } ''
+      set -euo pipefail
+      cp -rL ${headerExtractorTestTree}/. ./
+      chmod -R u+w .
+      patchShebangs tests
+      bash tests/check-cli-mock-honesty.sh
+      mkdir -p $out
+    '';
+
   # T012-T015: bootstrap-producer bats. Walks each rc class with the
   # T019 pipeline implementation:
   #   - config (rc=3), cluster (rc=1), idempotent (rc=0): no chain DB
