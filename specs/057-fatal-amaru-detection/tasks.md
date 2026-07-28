@@ -41,17 +41,17 @@ node and fails on fatal output or early exit during the hold window.
 fatal-free for the configured hold duration; a seeded fatal seam fails without
 requiring container exit.
 
-- [ ] T006 [US2] Add RED live-boundary assertions and cleanup expectations in
+- [X] T006 [US2] Add RED live-boundary assertions and cleanup expectations in
   `tests/test-bootstrap-producer-live.bats`
-- [ ] T007 [US2] Adapt the Amaru lifecycle helpers for a consumer container
+- [X] T007 [US2] Adapt the Amaru lifecycle helpers for a consumer container
   sharing the live node network and current `amaru node run` contract in
   `tests/lib/bootstrap-helpers.bash`
-- [ ] T008 [US2] Add continuous log-cleanliness and container-liveness polling,
+- [X] T008 [US2] Add continuous log-cleanliness and container-liveness polling,
   bounded early-exit diagnostics, and teardown cleanup in
   `tests/test-bootstrap-producer-live.bats`
-- [ ] T009 [US2] Demonstrate the live check path rejects a seeded fatal line
+- [X] T009 [US2] Demonstrate the live check path rejects a seeded fatal line
   while the consumer remains alive in `tests/test-bootstrap-producer-live.bats`
-- [ ] T010 [US2] Run `just live-bootstrap-producer` and `./gate.sh`, preserve
+- [X] T010 [US2] Run `just live-bootstrap-producer` and `./gate.sh`, preserve
   any real upstream #1095 failure without suppression, then commit as
   `test: restore live Amaru bundle consumption` with trailer
   `Tasks: T006, T007, T008, T009, T010`
