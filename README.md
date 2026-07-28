@@ -34,7 +34,7 @@ standalone compatibility. Antithesis Compose stacks must override it to
 flowchart LR
     node["paired cardano-node\nChainDB + config"] --> producer["bootstrap-producer\n(one-shot)"]
     relay["amaru-relay-bootstrap\n(long-lived container)"] --> producer
-    producer --> extractor["header-extractor\ntip-info / list-blocks"]
+    producer --> analyser["db-analyser\ntip poll + target trace"]
     producer --> snaps["amaru create-snapshots\n(db-analyser engine)"]
     producer --> boot["amaru bootstrap"]
     boot --> bundle["bundle\nledger.net.db + chain.net.db\nsnapshots + era-history.json"]
@@ -46,9 +46,16 @@ flowchart LR
 The production path does not use `db-synthesizer`. It reads a live
 cardano-node ChainDB and runs:
 
-1. `header-extractor tip-info` / `list-blocks` - poll the immutable DB
-   until the chain is era-ready, then pick the last block of each of
-   the three most recent completed epochs as snapshot targets.
+1. `db-analyser` readiness poll - poll the immutable DB with no
+   analysis flag and `--db-validation minimum-block-validation`
+   until a concrete tip appears (Point Origin remains not ready),
+   the tip epoch is at least 3, and one forward
+   `--show-slot-block-no` trace finds the last block of each of
+   the three most recent completed epochs plus its immediate
+   parent, with the oldest target slot at or after the configured
+   Conway fork slot. The three compact target records drive
+   `.logs/targets.json`, snapshot arguments, and era-history
+   sidecars.
 2. `amaru create-snapshots` - materialize per-epoch snapshot
    directories (with packaged bootstrap headers) directly from the
    local chain DB, using `--targets-file` and `--cardano-db-dir` to
@@ -122,7 +129,6 @@ All tools are exposed as flake apps:
 | App | Purpose |
 |-----|---------|
 | `nix run .#bootstrap-producer` | One-shot bundle producer (`<chain-db> <config-dir> <bundle-dir> <network>`) |
-| `nix run .#header-extractor` | Immutable chain-DB queries: `tip-info`, `list-blocks`, `get-header` |
 | `nix run .#amaru` | The pinned Amaru binary |
 | `nix run .#db-synthesizer` / `.#db-analyser` / `.#snapshot-converter` | Pinned upstream consensus tools |
 

@@ -52,9 +52,9 @@ agents look without rewriting historical evidence or generated output.
 the historical/process bucket remains intact, strict MkDocs build passes, and
 the full gate remains green.
 
-- [ ] T014 [US2] Run and freeze the failing current-facing reference audit over `README.md`, `AGENTS.md`, `docs/index.md`, `docs/architecture.md`, `docs/bootstrap-producer.md`, and `skills/amaru-bootstrap-guide/SKILL.md`
-- [ ] T015 [US2] Rewrite only retired-tool claims in `README.md`, `AGENTS.md`, `docs/index.md`, `docs/architecture.md`, `docs/bootstrap-producer.md`, and `skills/amaru-bootstrap-guide/SKILL.md` to describe the measured stock `db-analyser` tip/target flow
-- [ ] T016 [US2] Run the live/history audits, strict MkDocs build outside `site/**`, and `./gate.sh`; obtain navigator RED/GREEN approval and commit Slice 3 as `docs: describe stock db-analyser producer flow` with trailer `Tasks: T014, T015, T016`
+- [x] T014 [US2] Run and freeze the failing current-facing reference audit over `README.md`, `AGENTS.md`, `docs/index.md`, `docs/architecture.md`, `docs/bootstrap-producer.md`, and `skills/amaru-bootstrap-guide/SKILL.md`
+- [x] T015 [US2] Rewrite only retired-tool claims in `README.md`, `AGENTS.md`, `docs/index.md`, `docs/architecture.md`, `docs/bootstrap-producer.md`, and `skills/amaru-bootstrap-guide/SKILL.md` to describe the measured stock `db-analyser` tip/target flow
+- [x] T016 [US2] Run the live/history audits, strict MkDocs build outside `site/**`, and `./gate.sh`; obtain navigator RED/GREEN approval and commit Slice 3 as `docs: describe stock db-analyser producer flow` with trailer `Tasks: T014, T015, T016`
 
 ## Slice 4 - Publish review evidence (orchestrator-owned)
 

@@ -61,14 +61,17 @@ the relay startup marker and the relay process continues as `amaru run`.
 2. Validate the node config and genesis (`config.json`,
    `shelley-genesis.json`, positive `epochLength`) and wait for the
    chain DB to appear.
-3. Poll `header-extractor tip-info` until the era-readiness predicate
-   holds: the immutable tip is in Conway, the tip epoch is at least 3,
-   and `header-extractor list-blocks` finds a block in each of the
-   three most recent completed epochs, all at or after the Conway fork
-   slot. The snapshot targets are the last immutable block of each of
-   those three epochs.
-4. Compose `targets.json` (epoch/slot/hash/parent_point) and
-   `snapshots.json` from the chain's own block list, bypassing Koios.
+3. Poll the pinned stock `db-analyser` with no analysis flag and
+   `--db-validation minimum-block-validation` until the era-readiness
+   predicate holds: the immutable tip is a concrete point
+   (`Point Origin` remains not ready), the tip epoch is at least 3,
+   and one forward `--show-slot-block-no` trace finds the last block
+   of each of the three most recent completed epochs plus its
+   immediate parent, with the oldest target slot at or after the
+   configured Conway fork slot. The three compact target records are
+   written to `.logs/targets.json`.
+4. Copy the target records into staging and compose `snapshots.json`,
+   bypassing Koios.
 5. Run `amaru create-snapshots` with `--targets-file` and an isolated
    `--cardano-db-dir` (immutable chunks symlinked from the source
    chain DB), materializing one snapshot directory per epoch with
@@ -135,7 +138,7 @@ to wait for the chain to mature.
 | 3 | configuration-error: missing/invalid config or genesis |
 | 5 | tool-error: targets composition failed |
 | 6 | tool-error: `amaru create-snapshots` or sidecar write failed |
-| 7 | tool-error: `header-extractor` could not read the chain DB (for example a read-only mount) |
+| 7 | tool-error: `db-analyser` could not open the chain DB (for example a read-only mount) |
 | 9 | tool-error: `amaru bootstrap` failed |
 | 10 | output-write-error: atomic rename failed |
 | >= 64 | internal error (bash `ERR` trap: `64 + rc`) |
@@ -197,7 +200,7 @@ volumes:
   - amaru-bundle:/srv/amaru
 ```
 
-This is not a write contract for the producer. `header-extractor` opens
+This is not a write contract for the producer. `db-analyser` opens
 only the immutable DB and the readiness predicate is derived only from
 immutable chunks. `amaru create-snapshots` works against an isolated
 `--cardano-db-dir` in which the immutable chunks are symlinked from the
@@ -206,7 +209,7 @@ materializes never land in the node-owned LedgerDB. The read-write
 mount is required because the node-10.7.1 consensus ImmutableDB opener
 validates chunk files through APIs that fail on a read-only filesystem;
 the producer detects that case and exits 7 with a pointer to the
-`tip-info` stderr log.
+readiness poll's stderr log under `<bundle-dir>/.logs/`.
 
 ## Verification
 

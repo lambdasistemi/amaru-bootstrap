@@ -35,9 +35,11 @@ bootstrapper and the Amaru node.
 - `bootstrap-producer`: one-shot primitive used by the relay wrapper and
   by local checks. It produces the Amaru ledger and chain stores from a
   cardano-node ChainDB.
-- `header-extractor`: Haskell executable for `tip-info`, `list-blocks`,
-  and `get-header` against immutable ChainDB chunks. The producer's
-  era-readiness poll and snapshot-target selection are built on it.
+- `db-analyser`: pinned stock upstream consensus tool. The producer
+  polls it with no analysis flag and minimum block validation for
+  era-readiness, then runs one forward `--show-slot-block-no` trace
+  to select snapshot targets. Also bundled in the image because
+  `amaru create-snapshots` drives its engine internally.
 - `amaru-runtime/`: deployment-provided runtime files consumed by
   `amaru run`: `era-history.json` and `global-parameters.json`.
 
@@ -47,18 +49,20 @@ The production bootstrap pipeline is:
 
 ```text
 cardano-node ChainDB
-  -> header-extractor tip-info / list-blocks   (era-readiness + targets)
-  -> targets.json + snapshots.json             (from the chain's own blocks)
-  -> amaru create-snapshots                    (db-analyser engine, offline)
-  -> era-history sidecars                      (from genesis epochLength)
-  -> amaru bootstrap                           (ledger + chain stores)
+  -> db-analyser tip poll                    (era-readiness, no analysis flag)
+  -> db-analyser --show-slot-block-no        (one forward trace, targets)
+  -> targets.json + snapshots.json           (from the chain's own blocks)
+  -> amaru create-snapshots                  (db-analyser engine, offline)
+  -> era-history sidecars                    (from genesis epochLength)
+  -> amaru bootstrap                         (ledger + chain stores)
   -> amaru run
 ```
 
 `db-synthesizer` is not part of this runtime path. It remains available
-for fixture generation and CI checks. `amaru create-snapshots` drives the
-`db-analyser` engine internally, which is why `db-analyser` is bundled in
-the published image.
+for fixture generation and CI checks. `db-analyser` is bundled in the
+published image both because the producer invokes it directly for the
+readiness poll and target trace, and because `amaru create-snapshots`
+drives its engine internally.
 
 ## Specs And History
 

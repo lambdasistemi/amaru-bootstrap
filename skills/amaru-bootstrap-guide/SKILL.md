@@ -1,6 +1,6 @@
 ---
 name: amaru-bootstrap-guide
-description: Working guide for the lambdasistemi/amaru-bootstrap repository, which builds the ghcr.io/lambdasistemi/amaru-bootstrap-producer Docker image and tools for bootstrapping relay-only Amaru nodes on custom Cardano testnets. Load when working on or asking about bootstrap-producer, amaru-relay-bootstrap, header-extractor, amaru create-snapshots, amaru bootstrap, amaru run, the testnet_42 fixture, era-history.json or global-parameters.json runtime files, bundle layout (ledger.<network>.db, chain.<network>.db), the era-readiness predicate, producer exit codes (cluster-not-ready, chain-not-era-ready), Antithesis amaru-relay-N containers and startup markers, scripts/bootstrap-producer.sh, scripts/amaru-relay-bootstrap.sh, nix flake checks like bootstrap-producer-synthesized or antithesis-short-epoch-golden, the cardano-node 10.7.1 pin, or the just recipes (just ci, just build-gate, just live-bootstrap-producer).
+description: Working guide for the lambdasistemi/amaru-bootstrap repository, which builds the ghcr.io/lambdasistemi/amaru-bootstrap-producer Docker image and tools for bootstrapping relay-only Amaru nodes on custom Cardano testnets. Load when working on or asking about bootstrap-producer, amaru-relay-bootstrap, db-analyser, amaru create-snapshots, amaru bootstrap, amaru run, the testnet_42 fixture, era-history.json or global-parameters.json runtime files, bundle layout (ledger.<network>.db, chain.<network>.db), the era-readiness predicate, producer exit codes (cluster-not-ready, chain-not-era-ready), Antithesis amaru-relay-N containers and startup markers, scripts/bootstrap-producer.sh, scripts/amaru-relay-bootstrap.sh, nix flake checks like bootstrap-producer-synthesized or antithesis-short-epoch-golden, the cardano-node 10.7.1 pin, or the just recipes (just ci, just build-gate, just live-bootstrap-producer).
 ---
 
 # amaru-bootstrap guide
@@ -14,18 +14,14 @@ description: Working guide for the lambdasistemi/amaru-bootstrap repository, whi
 - `scripts/amaru-relay-bootstrap.sh` — Antithesis relay container
   entrypoint: startup marker, producer retry loop, bundle promotion,
   final `exec amaru run`.
-- `lib/` — Haskell library: `HeaderExtractor` (tip-info, list-blocks,
-  get-header over the immutable ChainDB) and `AmaruBootstrap` (marker
-  module so haskell.nix resolves the pinned consensus packages).
-- `app/header-extractor/` — CLI wrapper over the library
-  (optparse-applicative; failures exit 7).
+- `lib/` — Haskell library: `AmaruBootstrap` (marker module exporting
+  `NodeConfig` so haskell.nix resolves the pinned consensus packages).
 - `nix/` — `project.nix` (haskell.nix), `amaru.nix` (crane build of the
   pinned Amaru), `iog-tools.nix` (db-synthesizer, db-analyser,
   snapshot-converter from the pinned consensus), `apps.nix` (flake
   apps), `checks.nix` (all flake checks),
   `bootstrap-producer-image.nix` (layered Docker image).
-- `tests/` — bats suites for the producer and relay scripts;
-  `test/` — hspec suite for `HeaderExtractor`.
+- `tests/` — bats suites for the producer and relay scripts.
 - `specs/` — speckit feature specs; `specs/003-amaru-bootstrap-producer/`
   holds the producer contract, research (R-001…R-011), and data model.
 - `docs/` + `mkdocs.yml` — MkDocs Material site;
@@ -43,10 +39,10 @@ description: Working guide for the lambdasistemi/amaru-bootstrap repository, whi
 - `just live-bootstrap-producer` — Docker-level verifier against a real
   `cardano-node:10.7.1` container.
 - Single check: `nix build .#checks.x86_64-linux.<name>` — names:
-  `amaru`, `db-synthesizer`, `db-analyser`,
-  `shellcheck`, `header-extractor-spec`,
-  `header-extractor-cli-bats`, `bootstrap-producer-bats`,
-  `bootstrap-producer-synthesized`, `amaru-run-bootstrap`,
+  `amaru`, `db-synthesizer`, `db-analyser`, `snapshot-converter`,
+  `shellcheck`, `cli-mock-honesty`, `bootstrap-producer-bats`,
+  `bootstrap-producer-synthesized`, `db-analyser-points`,
+  `amaru-run-bootstrap`,
   `antithesis-short-epoch-samples`, `antithesis-short-epoch-golden`,
   `bootstrap-producer-image`.
 - Run the producer locally:
@@ -94,7 +90,7 @@ description: Working guide for the lambdasistemi/amaru-bootstrap repository, whi
   write permissions); the relay copies `/live` to scratch for this.
 - Producer exit codes: 0 success/already-complete, 1 cluster-not-ready,
   2 chain-not-era-ready, 3 configuration error, 5 targets error,
-  6 create-snapshots error, 7 header-extractor error, 9 bootstrap
+  6 create-snapshots error, 7 db-analyser error, 9 bootstrap
   error, 10 commit error, >=64 internal. The relay retries 1/2/5/6/7/8.
 - The bundle that `amaru run` consumes: `ledger.<network>.db/` (live +
   >=3 numeric epoch snapshots), `chain.<network>.db/` (nonces and
