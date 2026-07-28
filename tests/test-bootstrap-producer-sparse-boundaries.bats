@@ -18,44 +18,97 @@ setup() {
   export AMARU_WAIT_DEADLINE_SECONDS=1
   export AMARU_POLL_INTERVAL_SECONDS=1
   export CLI_MOCK_SURFACE_LIB="$BATS_TEST_DIRNAME/lib/cli-mock-surface.bash"
+  BASH_PATH="$(command -v bash)"
 
-  # Sparse chain: the last block of completed epochs 1/2/3 lands at slots
-  # 188/287/397 (epochLength 100, tip in epoch 4). Hashes are hex so the
-  # producer's <slot>.<hash> snapshot-dir validation accepts them.
+  # Sparse chain (epochLength 100, tip in epoch 4): the last block of
+  # completed epochs 1/2/3 lands at slots 188/287/397, and each target's
+  # immediate predecessor in chain order is 88/188/287 (the first of which
+  # lies in the PREVIOUS epoch). Hashes are hex so the producer's
+  # <slot>.<hash> snapshot-dir validation accepts them.
   hexhash() { printf '%064x' "$1"; }
-  cat >"$TMP_DIR/list-blocks.json" <<EOF
-{"data":[[88,"$(hexhash 88)"],[188,"$(hexhash 188)"],[287,"$(hexhash 287)"],[397,"$(hexhash 397)"],[401,"$(hexhash 401)"]]}
-EOF
 
+  # The db-analyser --show-slot-block-no trace payload, verbatim shape of
+  # the real pinned binary: bracketed by `Started ShowSlotBlockNo` / `Done`,
+  # tab-delimited data rows `[<elapsed>s] BlockNo N\tSlotNo S\t<hash>` on
+  # STDERR. The bracketing lines exercise the production parser's row anchor.
   {
-    printf '#!%s\n' "$BASH"
-    cat <<'EOF'
+    printf '[0.070592s] Started ShowSlotBlockNo\n'
+    printf '[0.070947s] BlockNo 0\tSlotNo 88\t%s\n' "$(hexhash 88)"
+    printf '[0.071080s] BlockNo 1\tSlotNo 188\t%s\n' "$(hexhash 188)"
+    printf '[0.071200s] BlockNo 2\tSlotNo 287\t%s\n' "$(hexhash 287)"
+    printf '[0.071300s] BlockNo 3\tSlotNo 397\t%s\n' "$(hexhash 397)"
+    printf '[0.071400s] BlockNo 4\tSlotNo 401\t%s\n' "$(hexhash 401)"
+    printf '[0.084724s] Done\n'
+  } >"$TMP_DIR/trace.stderr"
+
+  export DB_ANALYSER_TIP_STDOUT="ImmutableDB tip: Point (At (Block {blockPointSlot = SlotNo 405, blockPointHash = $(hexhash 405)}))"
+  export DB_ANALYSER_TRACE_STDERR_FILE="$TMP_DIR/trace.stderr"
+  export DB_ANALYSER_CALLS="$TMP_DIR/db-analyser-calls.log"
+  : >"$DB_ANALYSER_CALLS"
+
+  install_db_analyser_double
+  install_amaru_double
+
+  chmod +x "$TMP_DIR/bin/db-analyser" "$TMP_DIR/bin/amaru"
+}
+
+teardown() {
+  rm -rf "$TMP_DIR"
+}
+
+# Strict db-analyser double reproducing the measured stream split: the
+# `ImmutableDB tip:` line on STDOUT, the --show-slot-block-no rows on
+# STDERR. Rejects any argv outside the measured surface so an inexact
+# producer invocation fails the run.
+install_db_analyser_double() {
+  printf '#!%s\n' "$BASH_PATH" >"$TMP_DIR/bin/db-analyser"
+  cat >>"$TMP_DIR/bin/db-analyser" <<'SHIM'
 set -euo pipefail
-source "$CLI_MOCK_SURFACE_LIB"
-cli_mock_guard header-extractor "$@"
-case "$1" in
-  tip-info)
-    printf '{"slot":405,"era":"Conway"}\n'
-    ;;
-  list-blocks)
-    cat "$TMP_DIR/list-blocks.json"
-    ;;
-  *)
-    printf 'unexpected header-extractor command: %s\n' "$*" >&2
-    exit 64
-    ;;
-esac
-EOF
-  } >"$TMP_DIR/bin/header-extractor"
+printf '%s\n' "$*" >> "${DB_ANALYSER_CALLS:-/dev/null}"
+db="" cfg="" val="" inmem=0 trace=0
+args=("$@"); i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  a="${args[$i]}"
+  case "$a" in
+    --db) db="${args[$((i+1))]}"; i=$((i+2)) ;;
+    --config) cfg="${args[$((i+1))]}"; i=$((i+2)) ;;
+    --db-validation) val="${args[$((i+1))]}"; i=$((i+2)) ;;
+    --in-mem) inmem=1; i=$((i+1)) ;;
+    --show-slot-block-no) trace=1; i=$((i+1)) ;;
+    --analyse-from|--num-blocks-to-process|--count-blocks|--store-ledger|--analyse-only|--analyse-ledger)
+      printf 'db-analyser double: forbidden analysis flag %s\n' "$a" >&2
+      exit 2 ;;
+    *)
+      printf 'db-analyser double: unexpected arg %s\n' "$a" >&2
+      exit 2 ;;
+  esac
+done
+[ -n "$db" ] || { printf 'db-analyser double: --db required\n' >&2; exit 2; }
+[ -n "$cfg" ] || { printf 'db-analyser double: --config required\n' >&2; exit 2; }
+[ "$inmem" -eq 1 ] || { printf 'db-analyser double: --in-mem required\n' >&2; exit 2; }
+[ "$val" = minimum-block-validation ] \
+  || { printf 'db-analyser double: --db-validation must be minimum-block-validation\n' >&2; exit 2; }
+if [ -n "${DB_ANALYSER_STDERR_FILE:-}" ]; then
+  cat "$DB_ANALYSER_STDERR_FILE" >&2
+  exit "${DB_ANALYSER_EXIT:-1}"
+fi
+printf '%s\n' "${DB_ANALYSER_TIP_STDOUT}"
+if [ "$trace" -eq 1 ]; then
+  cat "${DB_ANALYSER_TRACE_STDERR_FILE}" >&2
+else
+  printf '[0.077619s] Started OnlyValidation\n[0.077736s] Done\n' >&2
+fi
+SHIM
+}
 
-  # amaru stub, canonical bare-main CLI: `snapshot create` materializes
-  # one node-snapshot dir per --snapshot point (Koios/Mithril/db-analyser
-  # all bypassed via the flags); `node bootstrap` produces the ledger +
-  # chain DBs. The legacy aliases are rejected so this suite keeps
-  # guarding the native-CLI migration.
-  {
-    printf '#!%s\n' "$BASH"
-    cat <<'EOF'
+# amaru stub, canonical bare-main CLI: `snapshot create` materializes
+# one node-snapshot dir per --snapshot point (Koios/Mithril/db-analyser
+# all bypassed via the flags); `node bootstrap` produces the ledger +
+# chain DBs. The legacy aliases are rejected so this suite keeps
+# guarding the native-CLI migration.
+install_amaru_double() {
+  printf '#!%s\n' "$BASH_PATH" >"$TMP_DIR/bin/amaru"
+  cat >>"$TMP_DIR/bin/amaru" <<'SHIM'
 set -euo pipefail
 source "$CLI_MOCK_SURFACE_LIB"
 cli_mock_guard amaru "$@"
@@ -111,14 +164,7 @@ case "$cmd" in
     exit 64
     ;;
 esac
-EOF
-  } >"$TMP_DIR/bin/amaru"
-
-  chmod +x "$TMP_DIR/bin/header-extractor" "$TMP_DIR/bin/amaru"
-}
-
-teardown() {
-  rm -rf "$TMP_DIR"
+SHIM
 }
 
 @test "sparse epoch boundaries select actual blocks from three distinct completed epochs" {
@@ -135,4 +181,41 @@ teardown() {
       | cut -d. -f1 | sort -n | tr '\n' ' '
   )"
   [ "$slots" = "188 287 397 " ]
+}
+
+@test "sparse immediate parents are the predecessor blocks in chain order" {
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 0 ]
+  # P04: parents 88/188/287 - the parent of epoch-1 tail 188 is 88, which
+  # lies in the PREVIOUS epoch (epoch 0).
+  parents="$(
+    jq -r '.[].parent_point | split(".")[0]' \
+      "$TMP_DIR/bundle/.logs/targets.json" | tr '\n' ' '
+  )"
+  [ "$parents" = "88 188 287 " ]
+}
+
+@test "readiness and trace argv are exactly the measured db-analyser surface" {
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 0 ]
+  # P01/P18: full-argv equality (same form as canonical-cli). The readiness
+  # invocation carries no analysis flag; exactly one --show-slot-block-no
+  # pass follows it; neither carries a forbidden analysis selector.
+  readiness="$(grep -v -- '--show-slot-block-no' "$DB_ANALYSER_CALLS" | head -1)"
+  [ "$readiness" = "--db $TMP_DIR/chain-db --config $TMP_DIR/config/config.json --in-mem --db-validation minimum-block-validation" ]
+  trace_count=$(grep -c -- '--show-slot-block-no$' "$DB_ANALYSER_CALLS")
+  [ "$trace_count" -eq 1 ]
+  trace="$(grep -- '--show-slot-block-no$' "$DB_ANALYSER_CALLS" | head -1)"
+  [ "$trace" = "--db $TMP_DIR/chain-db --config $TMP_DIR/config/config.json --in-mem --db-validation minimum-block-validation --show-slot-block-no" ]
+  ! grep -qE -- '--analyse-from|--num-blocks-to-process|--count-blocks|--store-ledger' "$DB_ANALYSER_CALLS"
 }
