@@ -21,22 +21,38 @@ Both commands must exit 0.
 ## 2. Exact closure reachability
 
 ```bash
+mapfile -t hosted_targets < <(
+  awk '
+    /- name: Build all flake checks/ { in_step=1; next }
+    in_step && /^[[:space:]]+- name:/ { exit }
+    in_step { print }
+  ' .github/workflows/ci.yml \
+    | grep -oE '\.#checks\.x86_64-linux\.[a-z0-9-]+'
+)
+
+mapfile -t local_targets < <(
+  awk '
+    /^build-gate:/ { in_recipe=1; next }
+    in_recipe && /^[a-zA-Z0-9_-]+:/ { exit }
+    in_recipe { print }
+  ' justfile \
+    | grep -oE '\.#checks\.x86_64-linux\.[a-z0-9-]+'
+)
+
+diff -u \
+  <(printf '%s\n' "${hosted_targets[@]}") \
+  <(printf '%s\n' "${local_targets[@]}")
+
+target=.#checks.x86_64-linux.cli-mock-honesty
+test "$(printf '%s\n' "${hosted_targets[@]}" | grep -Fxc "$target")" -eq 1
+test "$(printf '%s\n' "${local_targets[@]}" | grep -Fxc "$target")" -eq 1
+
 cli_out=$(nix eval --raw \
   .#checks.x86_64-linux.cli-mock-honesty.outPath)
 
-mapfile -t requested < <(nix build --no-link --print-out-paths \
-  .#checks.x86_64-linux.amaru \
-  .#checks.x86_64-linux.db-synthesizer \
-  .#checks.x86_64-linux.db-analyser \
-  .#checks.x86_64-linux.shellcheck \
-  .#checks.x86_64-linux.cli-mock-honesty \
-  .#checks.x86_64-linux.db-analyser-points \
-  .#checks.x86_64-linux.bootstrap-producer-bats \
-  .#checks.x86_64-linux.bootstrap-producer-synthesized \
-  .#checks.x86_64-linux.amaru-run-bootstrap \
-  .#checks.x86_64-linux.antithesis-short-epoch-samples \
-  .#checks.x86_64-linux.antithesis-short-epoch-golden \
-  .#checks.x86_64-linux.bootstrap-producer-image)
+mapfile -t requested < <(
+  nix build --no-link --print-out-paths "${hosted_targets[@]}"
+)
 
 nix path-info -r "${requested[@]}" \
   | sort -u \
