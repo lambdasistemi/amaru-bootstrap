@@ -134,10 +134,11 @@ plan amendment.
   requested check;
 - run the same runtime assertion and require structural counts plus exact
   closure reachability to pass;
-- require the restored standalone check, `just build-gate`, and `./gate.sh` to
-  exit zero;
 - freeze complete post-edit evidence and owned-file hashes only after the final
   write;
+- obtain literal navigator GREEN approval of that frozen diff;
+- require the restored standalone check, `just build-gate`, and `./gate.sh` to
+  exit zero after approval;
 - commit exactly the two owned files.
 
 **Commit**: `fix(ci): execute CLI mock honesty in Build Gate`
