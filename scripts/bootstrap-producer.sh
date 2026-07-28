@@ -282,9 +282,6 @@ phase_preflight() {
     # stability_window, often early on short-epoch testnets) advances
     # the deque before the K-1->K boundary, breaking the rotation.
     #
-    # ledger-state-emitter takes the FIRST immutable block at-or-after
-    # the requested slot (lib/LedgerStateEmitter.hs:410), so a fixed
-    # offset (e.g. K*L-1) can overshoot into epoch K on sparse chains.
     # Pre-query the immutable block list and pick the actual highest
     # slot < K*L: the resulting bundle is guaranteed to anchor in K-1.
     local era_deadline

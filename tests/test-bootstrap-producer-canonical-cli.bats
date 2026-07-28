@@ -81,22 +81,6 @@ esac
 SHIM
   chmod +x "$MOCK_BIN/header-extractor"
 
-  cat >"$MOCK_BIN/ledger-state-emitter" <<SHIM
-#!${BASH_PATH}
-set -euo pipefail
-out=""
-while [[ \$# -gt 0 ]]; do
-  case "\$1" in
-    --out) out="\$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-[[ -n "\$out" ]] || exit 1
-mkdir -p "\$(dirname "\$out")"
-printf 'legacy' >"\$out"
-SHIM
-  chmod +x "$MOCK_BIN/ledger-state-emitter"
-
   # amaru mock: ONLY canonical native commands.
   cat >"$MOCK_BIN/amaru" <<SHIM
 #!${BASH_PATH}

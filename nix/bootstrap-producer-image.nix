@@ -2,7 +2,6 @@
 , amaruPkg
 , iogTools
 , headerExtractor
-, ledgerStateEmitter
 }:
 
 # Layered docker image carrying the bootstrap-producer.
@@ -13,7 +12,7 @@
 # breaks bashisms; we use /bin/bash via the script's executable bit).
 #
 # Layered for cache-friendliness: heavy binary layers
-# (ledger-state-emitter, amaru, header-extractor) persist across
+# (amaru, header-extractor) persist across
 # builds; only the orchestrator script's layer rebuilds when the
 # orchestrator changes (it changes most often).
 #
@@ -29,7 +28,6 @@ let
     pkgs.gawk
     pkgs.gnused
     pkgs.jq
-    ledgerStateEmitter
     headerExtractor
     iogTools.db-analyser
     amaruPkg
@@ -69,7 +67,6 @@ pkgs.dockerTools.buildLayeredImage {
     pkgs.gnused
     pkgs.jq
     pkgs.cacert
-    ledgerStateEmitter
     headerExtractor
     iogTools.db-analyser
     amaruPkg

@@ -36,7 +36,6 @@ let
     amaruPkg
     iogTools.db-analyser
     headerExtractorPkgs.header-extractor
-    headerExtractorPkgs.ledger-state-emitter
   ];
 
   # T012-T016: bats sees the orchestrator script + fixtures + tests/.
@@ -108,7 +107,6 @@ let
           pkgs.jq
           amaruPkg
           headerExtractorPkgs.header-extractor
-          headerExtractorPkgs.ledger-state-emitter
           pkgs.cacert
         ];
       } ''
@@ -254,7 +252,6 @@ in
   db-analyser = iogTools.db-analyser;
   snapshot-converter = iogTools.snapshot-converter;
   header-extractor = headerExtractorPkgs.header-extractor;
-  ledger-state-emitter = headerExtractorPkgs.ledger-state-emitter;
   bootstrap-producer-image = bootstrapProducerImage;
   antithesis-short-epoch-samples =
     pkgs.runCommand "antithesis-short-epoch-samples"
@@ -322,7 +319,6 @@ in
           pkgs.jq
           amaruPkg
           headerExtractorPkgs.header-extractor
-          headerExtractorPkgs.ledger-state-emitter
         ];
       } ''
       set -euo pipefail
@@ -421,7 +417,7 @@ in
   # T019b end-to-end: assert the real producer pipeline, run in
   # synthesizedBootstrapBundle above, leaves the canonical Amaru bundle
   # layout. This is the regression check for the node-10.7.1
-  # ledger-state projection in ledger-state-emitter.
+  # ledger-state projection.
   bootstrap-producer-synthesized =
     pkgs.runCommand "bootstrap-producer-synthesized"
       {

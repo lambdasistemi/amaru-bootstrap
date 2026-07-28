@@ -15,15 +15,15 @@ bundle semantics or deterministic bytes.
 inspection, deterministic-equivalent synthesized bundle, the four semantic
 bundle checks, and the full gate all pass.
 
-- [ ] T001 [US1] Record the failing live-surface, flake-output, and image-layer acceptance audits from `specs/050-remove-dead-emitter/quickstart.md`
-- [ ] T002 [US1] Delete `app/ledger-state-emitter/Main.hs` and `lib/LedgerStateEmitter.hs`
-- [ ] T003 [US1] Remove the module and executable declarations from `amaru-bootstrap.cabal`
-- [ ] T004 [US1] Remove only emitter attributes/runtime inputs/comments from `nix/apps.nix`, `nix/header-extractor.nix`, `nix/bootstrap-producer-image.nix`, and `nix/checks.nix`
-- [ ] T005 [US1] Remove only emitter package/image arguments from `flake.nix` and explicit check entries from `justfile` and `.github/workflows/ci.yml`
-- [ ] T006 [US1] Remove only the stale emitter comment from `scripts/bootstrap-producer.sh`
-- [ ] T007 [US1] Remove only the emitter mock block from `tests/test-bootstrap-producer-canonical-cli.bats` and verify `tests/lib/cli-mock-surface.bash` has no emitter declaration
-- [ ] T008 [US1] Prove mock honesty, flake absence, image absence, and deterministic equivalence of the synthesized bundle using `specs/050-remove-dead-emitter/quickstart.md`
-- [ ] T009 [US1] Run `./gate.sh` and commit Slice 1 as `chore: remove dead ledger-state emitter`
+- [X] T001 [US1] Record the failing live-surface, flake-output, and image-layer acceptance audits from `specs/050-remove-dead-emitter/quickstart.md`
+- [X] T002 [US1] Delete `app/ledger-state-emitter/Main.hs` and `lib/LedgerStateEmitter.hs`
+- [X] T003 [US1] Remove the module and executable declarations from `amaru-bootstrap.cabal`
+- [X] T004 [US1] Remove only emitter attributes/runtime inputs/comments from `nix/apps.nix`, `nix/header-extractor.nix`, `nix/bootstrap-producer-image.nix`, and `nix/checks.nix`
+- [X] T005 [US1] Remove only emitter package/image arguments from `flake.nix` and explicit check entries from `justfile` and `.github/workflows/ci.yml`
+- [X] T006 [US1] Remove only the stale emitter comment from `scripts/bootstrap-producer.sh`
+- [X] T007 [US1] Remove only the emitter mock block from `tests/test-bootstrap-producer-canonical-cli.bats` and verify `tests/lib/cli-mock-surface.bash` has no emitter declaration
+- [X] T008 [US1] Prove mock honesty, flake absence, image absence, and deterministic equivalence of the synthesized bundle using `specs/050-remove-dead-emitter/quickstart.md`
+- [X] T009 [US1] Run `./gate.sh` and commit Slice 1 as `chore: remove dead ledger-state emitter`
 
 ## Slice 2 - Align current-facing documentation
 
