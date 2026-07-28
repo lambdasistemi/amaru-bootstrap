@@ -16,7 +16,6 @@ build-gate:
         .#checks.x86_64-linux.db-synthesizer \
         .#checks.x86_64-linux.db-analyser \
         .#checks.x86_64-linux.shellcheck \
-        .#checks.x86_64-linux.header-extractor-spec \
         .#checks.x86_64-linux.db-analyser-points \
         .#checks.x86_64-linux.bootstrap-producer-bats \
         .#checks.x86_64-linux.bootstrap-producer-synthesized \

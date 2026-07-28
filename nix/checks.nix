@@ -1,7 +1,6 @@
 { pkgs
 , amaruPkg
 , iogTools
-, headerExtractorPkgs
 , bootstrapProducerImage
 }:
 
@@ -12,7 +11,7 @@
 # avoids surprising path-resolution bugs that came from manually
 # stitching files into a runCommand output.
 let
-  headerExtractorTestTree = pkgs.linkFarm "header-extractor-test-tree" [
+  cliMockTestTree = pkgs.linkFarm "cli-mock-test-tree" [
     { name = "tests"; path = ../tests; }
   ];
 
@@ -24,7 +23,6 @@ let
     pkgs.jq
     amaruPkg
     iogTools.db-analyser
-    headerExtractorPkgs.header-extractor
   ];
 
   # T012-T016: bats sees the orchestrator script + fixtures + tests/.
@@ -83,7 +81,7 @@ let
   # last slot of the latest *completed* epoch and requires
   # tip_epoch >= 3) holds for T016 + T019.
   synthesizedChainDb =
-    mkSynthesizedChainDb "header-extractor-fixture-chain-db" 400000;
+    mkSynthesizedChainDb "bootstrap-producer-fixture-chain-db" 400000;
 
   synthesizedBootstrapBundle =
     pkgs.runCommand "bootstrap-producer-synthesized-bundle"
@@ -95,7 +93,6 @@ let
           pkgs.gawk
           pkgs.jq
           amaruPkg
-          headerExtractorPkgs.header-extractor
           pkgs.cacert
         ];
       } ''
@@ -208,7 +205,6 @@ let
           pkgs.jq
           amaruPkg
           iogTools.db-analyser
-          headerExtractorPkgs.header-extractor
           pkgs.cacert
         ];
       } ''
@@ -240,7 +236,6 @@ in
   db-synthesizer = iogTools.db-synthesizer;
   db-analyser = iogTools.db-analyser;
   snapshot-converter = iogTools.snapshot-converter;
-  header-extractor = headerExtractorPkgs.header-extractor;
   bootstrap-producer-image = bootstrapProducerImage;
   antithesis-short-epoch-samples =
     pkgs.runCommand "antithesis-short-epoch-samples"
@@ -270,60 +265,6 @@ in
     mkdir -p $out
   '';
 
-  # T005: HeaderExtractor library API tests. Reuses the shared
-  # synthesized chain DB and runs the hspec exe with env vars pointing
-  # to it.
-  header-extractor-spec = pkgs.runCommand "header-extractor-spec"
-    {
-      nativeBuildInputs = [
-        pkgs.bash
-        pkgs.coreutils
-        headerExtractorPkgs.header-extractor-spec
-      ];
-    } ''
-    set -euo pipefail
-    # ImmutableDB needs writable chunk + lock-file paths even for
-    # read-only queries. The synthesized chain DB lives in /nix/store
-    # which is read-only, so copy it into the build sandbox first.
-    cp -rL ${synthesizedChainDb}/chain-db $TMPDIR/chain-db
-    chmod -R u+w $TMPDIR/chain-db
-    export HEADER_EXTRACTOR_TEST_CHAIN_DB=$TMPDIR/chain-db
-    export HEADER_EXTRACTOR_TEST_CONFIG=${fixture}/configs/configs/config.json
-    header-extractor-spec
-    mkdir -p $out
-  '';
-
-  # T006: CLI-level coverage of the header-extractor binary. Brings the
-  # real exe plus a synthesized chain DB on-fixture.
-  header-extractor-cli-bats =
-    pkgs.runCommand "header-extractor-cli-bats"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.bats
-          pkgs.coreutils
-          pkgs.findutils
-          pkgs.gawk
-          pkgs.jq
-          amaruPkg
-          headerExtractorPkgs.header-extractor
-        ];
-      } ''
-      set -euo pipefail
-      cp -rL ${headerExtractorTestTree}/. ./
-      chmod -R u+w .
-      patchShebangs tests
-      # ImmutableDB needs writable chunk + lock-file paths even for
-      # read-only queries (see header-extractor-spec for the same
-      # workaround).
-      cp -rL ${synthesizedChainDb}/chain-db $TMPDIR/chain-db
-      chmod -R u+w $TMPDIR/chain-db
-      export HEADER_EXTRACTOR_CHAIN_DB=$TMPDIR/chain-db
-      export HEADER_EXTRACTOR_CONFIG=${fixture}/configs/configs/config.json
-      bats --tap tests/test-header-extractor-cli.bats
-      mkdir -p $out
-    '';
-
   # Issue #51: validate declared mock surfaces against real binaries
   # and confirm guard coverage in every audited bats owner.
   cli-mock-honesty =
@@ -334,11 +275,10 @@ in
           pkgs.coreutils
           pkgs.gnugrep
           amaruPkg
-          headerExtractorPkgs.header-extractor
         ];
       } ''
       set -euo pipefail
-      cp -rL ${headerExtractorTestTree}/. ./
+      cp -rL ${cliMockTestTree}/. ./
       chmod -R u+w .
       patchShebangs tests
       bash tests/check-cli-mock-honesty.sh
@@ -360,7 +300,6 @@ in
           pkgs.cacert
           pkgs.coreutils
           pkgs.jq
-          headerExtractorPkgs.header-extractor
         ];
       } ''
       set -euo pipefail
@@ -384,7 +323,7 @@ in
         tests/test-bootstrap-producer-idempotent.bats
 
       # T014: short chain DB - era-readiness predicate never holds.
-      # phase_preflight runs header-extractor tip-info during the
+      # phase_preflight runs db-analyser tip poll during the
       # polling loop and times out at rc=2 before any T019 phase fires.
       cp -rL ${shortSynthesizedChainDb}/chain-db $TMPDIR/short-chain-db
       chmod -R u+w $TMPDIR/short-chain-db

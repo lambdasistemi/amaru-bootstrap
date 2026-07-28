@@ -7,9 +7,6 @@
 #
 # Issue #52 slice 1: the producer's chain queries are served by a strict
 # db-analyser double (tip on stdout, --show-slot-block-no rows on stderr).
-# The header-extractor double is retained ONLY for the standalone
-# prev-epoch-tail rejection test; it records and rejects every producer
-# command so the suite proves the producer no longer calls it (P23).
 
 load 'lib/bootstrap-helpers'
 
@@ -54,9 +51,7 @@ setup() {
   export DB_ANALYSER_TIP_STDOUT="ImmutableDB tip: Point (At (Block {blockPointSlot = SlotNo 1600, blockPointHash = $(hexhash 1600)}))"
   export DB_ANALYSER_TRACE_STDERR_FILE="$TMP_DIR/trace.stderr"
   export DB_ANALYSER_CALLS="$TMP_DIR/db-analyser-calls.log"
-  export HEADER_EXTRACTOR_CALLS="$TMP_DIR/header-extractor-calls.log"
   : >"$DB_ANALYSER_CALLS"
-  : >"$HEADER_EXTRACTOR_CALLS"
 
   install_canonical_mocks
 
@@ -72,28 +67,6 @@ teardown() {
 }
 
 install_canonical_mocks() {
-  # Retained header-extractor double: records producer-relevant commands
-  # and rejects them (retired), so the suite can assert the producer never
-  # calls header-extractor. cli_mock_guard still rejects prev-epoch-tail
-  # for the standalone test below and keeps the honesty grep satisfied.
-  printf '#!%s\n' "$BASH_PATH" >"$MOCK_BIN/header-extractor"
-  cat >>"$MOCK_BIN/header-extractor" <<'SHIM'
-set -euo pipefail
-source "$CLI_MOCK_SURFACE_LIB"
-cmd="${1:-}"
-case "$cmd" in
-  tip-info|list-blocks|get-header)
-    printf '%s\n' "$*" >> "${HEADER_EXTRACTOR_CALLS:-/dev/null}"
-    printf 'header-extractor %s retired from the producer path (db-analyser now)\n' "$cmd" >&2
-    exit 1
-    ;;
-esac
-cli_mock_guard header-extractor "$@"
-printf 'unexpected header-extractor command: %s\n' "$cmd" >&2
-exit 1
-SHIM
-  chmod +x "$MOCK_BIN/header-extractor"
-
   # Strict db-analyser double reproducing the measured stream split.
   printf '#!%s\n' "$BASH_PATH" >"$MOCK_BIN/db-analyser"
   cat >>"$MOCK_BIN/db-analyser" <<'SHIM'
@@ -257,8 +230,6 @@ SHIM
   [ -d "$TMP_DIR/bundle/testnet_42/ledger.testnet_42.db" ]
   [ -d "$TMP_DIR/bundle/testnet_42/chain.testnet_42.db" ]
 
-  # P23: the producer run never invokes the retired header-extractor.
-  [ ! -s "$HEADER_EXTRACTOR_CALLS" ]
   # P05/P08: the run wrote the compact target records.
   [ -s "$TMP_DIR/bundle/.logs/targets.json" ]
 }
@@ -368,9 +339,4 @@ SHIM
   # P02/P17: classified read-only access exits 7.
   [ "$status" -eq 7 ]
   [[ "$output" == *"read-write"* ]]
-}
-
-@test "header-extractor mock rejects prev-epoch-tail (removed upstream)" {
-  run "$MOCK_BIN/header-extractor" prev-epoch-tail --out "$TMP_DIR/tail.json"
-  [ "$status" -ne 0 ]
 }

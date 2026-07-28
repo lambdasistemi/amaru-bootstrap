@@ -1,6 +1,8 @@
+{-# LANGUAGE DerivingStrategies #-}
+
 {- |
 Module      : AmaruBootstrap
-Description : Marker module for the bootstrap producer package
+Description : Marker module and retained types for the bootstrap producer package
 Copyright   : (c) Paolo Veronelli, 2026
 License     : Apache-2.0
 
@@ -10,7 +12,17 @@ package, which lets @haskell.nix@ resolve the cardano-node
 expose its @db-synthesizer@, @db-analyser@, and @snapshot-converter@
 executables.
 
-The project's actual deliverable is the bootstrap producer — this
-module has no runtime role and exports nothing.
+The project's actual deliverable is the bootstrap producer. This
+module exports the retained 'NodeConfig' type used by the producer
+orchestration.
 -}
-module AmaruBootstrap () where
+module AmaruBootstrap
+    ( -- * Types
+      NodeConfig (..)
+    ) where
+
+-- | The path to the cardano-node @config.json@. Referenced genesis
+-- files (byron / shelley / alonzo / conway) are resolved relative to
+-- the file's directory by the node's protocol-info initialisation.
+newtype NodeConfig = NodeConfig {nodeConfigPath :: FilePath}
+    deriving stock (Show, Eq)

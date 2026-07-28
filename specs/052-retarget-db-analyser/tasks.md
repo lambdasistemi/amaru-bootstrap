@@ -36,12 +36,12 @@ mock, CI, application, and image surface while retaining `NodeConfig`.
 image layers contain no retired executable; the deterministic and semantic
 bundle proofs remain green.
 
-- [ ] T008 [US2] Run and freeze failing live build/config/test, flake-output, and image-layer audits from `specs/052-retarget-db-analyser/quickstart.md`
-- [ ] T009 [US2] Move `NodeConfig` into `lib/AmaruBootstrap.hs`, delete `lib/HeaderExtractor.hs`, `app/header-extractor/Main.hs`, `test/HeaderExtractorSpec.hs`, `test/Spec.hs`, and `tests/test-header-extractor-cli.bats`, and reduce `amaru-bootstrap.cabal` to the retained library surface
-- [ ] T010 [US2] Delete `nix/header-extractor.nix` and remove only retired package/app/check/runtime/image wiring from `flake.nix`, `nix/apps.nix`, `nix/bootstrap-producer-image.nix`, and `nix/checks.nix`
-- [ ] T011 [US2] Remove only retired mock declarations and checks from `tests/test-bootstrap-producer-canonical-cli.bats`, `tests/check-cli-mock-honesty.sh`, and `tests/lib/cli-mock-surface.bash`, plus only the retired spec-check entries from `justfile` and `.github/workflows/ci.yml`
-- [ ] T012 [US2] Run the exact live build/config/test audit, flake absence, CLI mock honesty, image-layer absence, deterministic bundle comparison, and semantic checks from `specs/052-retarget-db-analyser/quickstart.md`, freezing sequential GREEN evidence
-- [ ] T013 [US2] Obtain navigator RED/GREEN approval, run `./gate.sh`, and commit Slice 2 as `refactor: remove header extractor build surface` with trailer `Tasks: T008, T009, T010, T011, T012, T013`
+- [x] T008 [US2] Run and freeze failing live build/config/test, flake-output, and image-layer audits from `specs/052-retarget-db-analyser/quickstart.md`
+- [x] T009 [US2] Move `NodeConfig` into `lib/AmaruBootstrap.hs`, delete `lib/HeaderExtractor.hs`, `app/header-extractor/Main.hs`, `test/HeaderExtractorSpec.hs`, `test/Spec.hs`, and `tests/test-header-extractor-cli.bats`, and reduce `amaru-bootstrap.cabal` to the retained library surface
+- [x] T010 [US2] Delete `nix/header-extractor.nix` and remove only retired package/app/check/runtime/image wiring from `flake.nix`, `nix/apps.nix`, `nix/bootstrap-producer-image.nix`, and `nix/checks.nix`
+- [x] T011 [US2] Remove only retired mock declarations and checks from `tests/test-bootstrap-producer-canonical-cli.bats`, `tests/check-cli-mock-honesty.sh`, and `tests/lib/cli-mock-surface.bash`, plus only the retired spec-check entries from `justfile` and `.github/workflows/ci.yml`
+- [x] T012 [US2] Run the exact live build/config/test audit, flake absence, CLI mock honesty, image-layer absence, deterministic bundle comparison, and semantic checks from `specs/052-retarget-db-analyser/quickstart.md`, freezing sequential GREEN evidence
+- [x] T013 [US2] Obtain navigator RED/GREEN approval, run `./gate.sh`, and commit Slice 2 as `refactor: remove header extractor build surface` with trailer `Tasks: T008, T009, T010, T011, T012, T013`
 
 ## Slice 3 - Align current-facing documentation
 

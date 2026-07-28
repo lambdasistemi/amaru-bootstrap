@@ -6,7 +6,6 @@
 # against the real flake-built binaries.
 
 # Accepted command paths per binary.
-CLI_MOCK_ACCEPTED_HEADER_EXTRACTOR=(tip-info list-blocks get-header)
 CLI_MOCK_ACCEPTED_AMARU=("snapshot create" "node bootstrap" "node run" "run")
 
 # Helpers exempt from the reachability audit. Each entry is a function
@@ -24,9 +23,6 @@ cli_mock_guard() {
   shift
   local cmd_path
   case "$binary" in
-    header-extractor)
-      cmd_path="${1:-}"
-      ;;
     amaru)
       case "${1:-}" in
         snapshot | node) cmd_path="${1:-} ${2:-}" ;;
@@ -41,7 +37,6 @@ cli_mock_guard() {
 
   local -a surface=()
   case "$binary" in
-    header-extractor) surface=("${CLI_MOCK_ACCEPTED_HEADER_EXTRACTOR[@]}") ;;
     amaru) surface=("${CLI_MOCK_ACCEPTED_AMARU[@]}") ;;
   esac
 

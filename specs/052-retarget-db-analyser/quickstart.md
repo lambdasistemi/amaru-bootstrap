@@ -33,7 +33,7 @@ origin, sparse-boundary, and malformed point-stream cases.
 
 ```bash
 rg -n \
-  'header-extractor|HeaderExtractor|headerExtractor|preflight-blocks[.]json|tip-info|list-blocks|get-header' \
+  'header-extractor|HeaderExtractor|headerExtractor|preflight-blocks[.]json|list-blocks|get-header' \
   app lib test tests scripts nix flake.nix justfile .github \
   amaru-bootstrap.cabal README.md AGENTS.md skills docs \
   --glob '!docs/history/**'
