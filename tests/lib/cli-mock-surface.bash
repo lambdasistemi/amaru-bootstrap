@@ -9,6 +9,12 @@
 CLI_MOCK_ACCEPTED_HEADER_EXTRACTOR=(tip-info list-blocks get-header)
 CLI_MOCK_ACCEPTED_AMARU=("snapshot create" "node bootstrap" "node run" "run")
 
+# Helpers exempt from the reachability audit. Each entry is a function
+# name declared under tests/lib/. Adding an entry is a reviewable diff.
+# A stale entry (matching no declaration) or a redundant entry (the
+# helper already has a call site) is a hard failure in the checker.
+HELPER_REACHABILITY_EXEMPT=()
+
 # cli_mock_guard <binary> [args...]
 # Extracts the command path from the leading positional arguments and
 # exits 1 if the path is not in the declared accepted surface.
