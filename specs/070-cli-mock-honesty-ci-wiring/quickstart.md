@@ -79,7 +79,7 @@ Temporarily append `convert-ledger-state` to
 
 ```bash
 set +e
-nix build -L --rebuild --no-link \
+nix build -L --no-link \
   .#checks.x86_64-linux.cli-mock-honesty \
   2>&1 \
   | tee /tmp/epic-55/amaru-bootstrap-70/logs/seeded-mock-drift.log
