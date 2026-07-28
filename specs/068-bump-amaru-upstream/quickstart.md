@@ -85,7 +85,44 @@ diff -u "$DRIVER_ROOT/handoffs/lock-before.json" \
 
 The diff must exit 0 and print no differences.
 
-## 5. Focused GREEN
+## 5. Preserve the amended offline-build RED
+
+The already-captured
+`$DRIVER_ROOT/handoffs/cli-green.raw.log` ends with
+`CLI_GREEN_EXIT=1` because the clean source archive has no Git metadata and
+no staged peer snapshots. That raw output is the accepted RED for this
+amendment. Do not rerun it merely to create a second failure.
+
+Before implementation, the navigator verifies that the log records:
+
+- the failed `git show` date lookup;
+- absent mainnet, preprod, and preview snapshots;
+- the upstream-documented placeholder instruction;
+- a real nonzero pipeline exit.
+
+## 6. Stage the documented offline inputs
+
+In `nix/amaru.nix` only, stage
+`peer-snapshot.json` below each of:
+
+```text
+crates/amaru-node/config/peer-snapshots/mainnet/
+crates/amaru-node/config/peer-snapshots/preprod/
+crates/amaru-node/config/peer-snapshots/preview/
+```
+
+Use the upstream-documented minimal schema: origin point, empty
+`bigLedgerPools`, node-to-client version 23, and network magic 764824073,
+1, and 2 respectively. Set `AMARU_SKIP_PEER_SNAPSHOT_FETCH=1` in the build
+environment and stamp the recipe with:
+
+```text
+workaround-for=https://github.com/pragma-org/amaru/issues/1102
+```
+
+Do not patch upstream sources or fetch live peer data.
+
+## 7. Focused GREEN
 
 ```bash
 set -o pipefail
@@ -99,7 +136,10 @@ test "$rc" -eq 0
 
 Re-run the exact-pin assertion from step 2 and require exit 0.
 
-## 6. Full GREEN
+The fresh raw log must show that the skip path is used and must not contain
+the earlier failed Git-date fetch.
+
+## 8. Full GREEN
 
 ```bash
 set -o pipefail

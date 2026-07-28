@@ -106,3 +106,34 @@ The existing Docker verifier crosses that exact boundary.
   wiring and bundle consumption.
 - Treat local green as hosted green: rejected because runner and Docker
   state are separate evidence.
+
+## R-007 - Stage deterministic peer snapshots for offline builds
+
+**Decision**: Treat the existing
+`cli-green.raw.log`/`CLI_GREEN_EXIT=1` as the RED for an amended single
+vertical slice. In `nix/amaru.nix` only, stage the minimal valid
+upstream-documented placeholder JSON below
+`crates/amaru-node/config/peer-snapshots/{mainnet,preprod,preview}/` and
+set `AMARU_SKIP_PEER_SNAPSHOT_FETCH=1`. Stamp the workaround with
+`workaround-for=https://github.com/pragma-org/amaru/issues/1102`.
+
+**Rationale**: The selected upstream revision's build script first tries to
+derive a snapshot date with `git show`, which is unavailable in a clean Nix
+source archive, and then hard-fails when staged snapshots are absent. The
+upstream README explicitly documents placeholder snapshots and the skip
+environment variable for offline builds. The downstream adaptation keeps
+the Amaru source bare and makes the single pin commit buildable.
+
+The placeholders use the documented schema, zero origin point, empty
+`bigLedgerPools`, node-to-client version 23, and the network magic values
+764824073 (mainnet), 1 (preprod), and 2 (preview).
+
+**Alternatives considered**:
+
+- Split the workaround into a later commit: rejected because the pin commit
+  would not build and would therefore not be bisect-safe.
+- Patch or fork Amaru: rejected by Constitution Principle I.
+- Fetch live peer data during the Nix build: rejected because it violates
+  the offline/reproducible build boundary.
+- Manufacture a second RED after the ruling: rejected because the existing
+  raw failure already proves the amended behavior gap.
