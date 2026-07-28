@@ -143,6 +143,93 @@ JSON
 
 # ─── State diagram ────────────────────────────────────────────────
 
+# extract_targets <tip_epoch> <conway_first_slot>
+#
+# Run one forward `db-analyser --show-slot-block-no` pass over the chain
+# DB and parse the tab-delimited trace rows the tool emits on stderr
+# (`[<elapsed>s] BlockNo N\tSlotNo S\t<hash>`, bracketed by non-data
+# `Started ShowSlotBlockNo` / `Done` lines). Select the last block of each
+# of the three completed epochs (tip_epoch-3 .. tip_epoch-1) and each
+# target's immediate predecessor in chain order. On success write the
+# compact records to .logs/targets.json, set SNAPSHOT_SLOTS, and return 0;
+# return 1 (WAIT) when fewer than three valid records exist or the oldest
+# target precedes the configured Conway first slot.
+# shellcheck disable=SC2329  # invoked indirectly by phase_preflight.
+extract_targets() {
+    local tip_epoch="$1"
+    local conway_first_slot="$2"
+    local config_json="${CONFIG_DIR}/config.json"
+    local points_log="${BUNDLE_DIR}/.logs/preflight-points.stderr"
+    local targets_log="${BUNDLE_DIR}/.logs/targets.json"
+    if ! db-analyser \
+            --db "${CHAIN_DB}" \
+            --config "${config_json}" \
+            --in-mem \
+            --db-validation minimum-block-validation \
+            --show-slot-block-no \
+            >/dev/null 2>"${points_log}"; then
+        printf '+ target extraction trace pass failed; will retry\n'
+        return 1
+    fi
+    local first_epoch=$(( tip_epoch - 3 ))
+    local -A tail_slot=() tail_hash=() par_point=()
+    local prev_slot="" prev_hash="" s h e
+    while read -r s h; do
+        e=$(( s / EPOCH_LENGTH ))
+        tail_slot["${e}"]="${s}"
+        tail_hash["${e}"]="${h}"
+        if [[ -n "${prev_slot}" ]]; then
+            par_point["${e}"]="${prev_slot}.${prev_hash}"
+        else
+            par_point["${e}"]=""
+        fi
+        prev_slot="${s}"
+        prev_hash="${h}"
+    done < <(
+        gawk -F'\t' '
+            NF == 3 \
+            && $1 ~ /^\[[0-9.]+s\] BlockNo [0-9]+$/ \
+            && $2 ~ /^SlotNo [0-9]+$/ \
+            && $3 ~ /^[0-9a-f]+$/ {
+                slot = $2
+                sub(/^SlotNo /, "", slot)
+                print slot, $3
+            }
+        ' "${points_log}"
+    )
+    local targets="[]" n=0 ee ss hh pp
+    for ee in "${first_epoch}" "$(( first_epoch + 1 ))" "$(( first_epoch + 2 ))"; do
+        ss="${tail_slot["${ee}"]:-}"
+        hh="${tail_hash["${ee}"]:-}"
+        pp="${par_point["${ee}"]:-}"
+        # Reject an empty/zero slot, an empty hash, and a missing or
+        # self-referential parent point - never emit a placeholder record.
+        { [[ "${ss}" =~ ^[0-9]+$ ]] && (( ss > 0 )); } || break
+        [[ -n "${hh}" ]] || break
+        [[ -n "${pp}" && "${pp}" != "${ss}.${hh}" ]] || break
+        targets=$(jq -c \
+            --argjson e "${ee}" --argjson s "${ss}" \
+            --arg h "${hh}" --arg p "${pp}" \
+            '. + [{epoch: $e, slot: $s, hash: $h, parent_point: $p}]' \
+            <<<"${targets}")
+        n=$(( n + 1 ))
+    done
+    if (( n != 3 )); then
+        printf '+ target extraction found %d/3 valid records; will retry\n' "${n}"
+        return 1
+    fi
+    local oldest
+    oldest=$(jq -r '.[0].slot' <<<"${targets}")
+    if (( oldest < conway_first_slot )); then
+        printf '+ oldest target slot %d precedes Conway first slot %d; will retry\n' \
+               "${oldest}" "${conway_first_slot}"
+        return 1
+    fi
+    printf '%s\n' "${targets}" >"${targets_log}"
+    mapfile -t SNAPSHOT_SLOTS < <(jq -r '.[].slot' <<<"${targets}")
+    return 0
+}
+
 # Step 1: pre-flight (wait + validate + era-readiness predicate).
 # Five sub-steps per R-006 + data-model.md state diagram step 1:
 #   1.A existing-bundle short-circuit (FR-008 idempotency)
@@ -257,13 +344,16 @@ phase_preflight() {
     done
 
     # 1.E poll for era-readiness predicate -------------------------
-    # Predicate (R-010):
-    #   tip.era >= Conway
+    # Predicate (R-010, retargeted at stock db-analyser per issue #52):
+    #   the immutable tip is a concrete Point (At ...) — Point Origin or
+    #   unparseable successful output stays not-ready —
     # AND
-    #   chain has crossed the boundary into epoch >= 3
+    #   tip_epoch >= 3,
     # AND
-    #   the chain has at least one immutable block in completed epoch
-    #   (tip_epoch - 1).
+    #   one forward --show-slot-block-no pass yields three valid target
+    #   records (the last block of each of tip_epoch-3 .. tip_epoch-1 and
+    #   each target's immediate predecessor) whose oldest slot is at or
+    #   after the configured Conway first slot.
     #
     # Rationale: amaru's bootstrap invariant
     # (initial_stake_distributions in crates/amaru-ledger/src/state.rs,
@@ -281,77 +371,47 @@ phase_preflight() {
     # path, and compute_rewards (which fires when relative_slot >=
     # stability_window, often early on short-epoch testnets) advances
     # the deque before the K-1->K boundary, breaking the rotation.
-    #
-    # Pre-query the immutable block list and pick the actual highest
-    # slot < K*L: the resulting bundle is guaranteed to anchor in K-1.
+    # The single forward trace pass picks the actual highest slot in each
+    # completed epoch, so the resulting bundle anchors in K-1.
     local era_deadline
     era_deadline=$(( $(date +%s) + AMARU_WAIT_DEADLINE_SECONDS ))
     poll_start=$(date +%s)
-    local info slot era tip_err tip_epoch target_slot
-    local list_json
+    local tip_out slot tip_err tip_epoch
+    local tip_re='^ImmutableDB tip: Point \(At \(Block \{blockPointSlot = SlotNo ([0-9]+)'
     tip_err="${BUNDLE_DIR}/.logs/tip-info.stderr"
-    list_json="${BUNDLE_DIR}/.logs/preflight-blocks.json"
     mkdir -p "${BUNDLE_DIR}/.logs"
     while :; do
-        info=""
-        if info=$(header-extractor tip-info \
+        tip_out=""
+        if tip_out=$(db-analyser \
                       --db "${CHAIN_DB}" \
-                      --config "${config_json}" 2>"${tip_err}"); then
-            slot=$(jq -r '.slot' <<<"${info}")
-            era=$(jq -r '.era' <<<"${info}")
-            tip_epoch=$(( slot / EPOCH_LENGTH ))
-            if [[ "${era}" == "Conway" ]] \
-                && (( tip_epoch >= 3 )); then
-                if ! header-extractor list-blocks \
-                        --db "${CHAIN_DB}" \
-                        --config "${config_json}" \
-                        >"${list_json}" 2>"${BUNDLE_DIR}/.logs/preflight-list-blocks.stderr"
-                then
-                    printf '+ preflight list-blocks failed; will retry\n'
-                else
-                    local completed_epoch=$(( tip_epoch - 1 ))
-                    local first_epoch=$(( completed_epoch - 2 ))
-                    local snapshot_slots=()
-                    local snapshot_epoch snapshot_start snapshot_end snapshot_slot
-                    if (( first_epoch >= 0 )); then
-                        for snapshot_epoch in "${first_epoch}" "$(( first_epoch + 1 ))" "${completed_epoch}"; do
-                            snapshot_start=$(( snapshot_epoch * EPOCH_LENGTH ))
-                            snapshot_end=$(( (snapshot_epoch + 1) * EPOCH_LENGTH ))
-                            snapshot_slot=$(jq -r \
-                                --argjson start "${snapshot_start}" \
-                                --argjson end "${snapshot_end}" \
-                                '.data
-                                 | map(select(.[0] >= $start and .[0] < $end))
-                                 | (max_by(.[0]) // empty)
-                                 | .[0]' \
-                                "${list_json}")
-                            [[ "${snapshot_slot}" =~ ^[0-9]+$ ]] || break
-                            snapshot_slots+=("${snapshot_slot}")
-                        done
-                    fi
-                    if (( ${#snapshot_slots[@]} == 3 )) \
-                        && (( snapshot_slots[0] >= conway_first_slot )); then
-                        target_slot="${snapshot_slots[2]}"
-                        printf '+ era-readiness predicate satisfied - target_slot=%d (last block of completed epoch %d) snapshot_slots=%s,%s,%s tip_slot=%d era=%s\n' \
-                               "${target_slot}" "${completed_epoch}" \
-                               "${snapshot_slots[0]}" "${snapshot_slots[1]}" "${snapshot_slots[2]}" \
-                               "${slot}" "${era}"
-                        SNAPSHOT_SLOTS=("${snapshot_slots[@]}")
-                        return 0
-                    fi
+                      --config "${CONFIG_DIR}/config.json" \
+                      --in-mem \
+                      --db-validation minimum-block-validation \
+                      2>"${tip_err}"); then
+            if [[ "${tip_out}" =~ ${tip_re} ]]; then
+                slot="${BASH_REMATCH[1]}"
+                tip_epoch=$(( slot / EPOCH_LENGTH ))
+                if (( tip_epoch >= 3 )) \
+                    && extract_targets "${tip_epoch}" "${conway_first_slot}"; then
+                    printf '+ era-readiness predicate satisfied - tip_slot=%d tip_epoch=%d snapshot_slots=%s\n' \
+                           "${slot}" "${tip_epoch}" "${SNAPSHOT_SLOTS[*]}"
+                    return 0
                 fi
+                printf '+ waiting for chain to cross 3rd-epoch boundary - tip_slot=%d tip_epoch=%d (need >=3) (elapsed=%ds)\n' \
+                       "${slot}" "${tip_epoch}" \
+                       $(( $(date +%s) - poll_start ))
+            else
+                printf '+ waiting for concrete chain DB tip (origin or unparseable, elapsed=%ds)\n' \
+                       $(( $(date +%s) - poll_start ))
             fi
-            printf '+ waiting for chain to cross 3rd-epoch boundary - tip_slot=%d tip_epoch=%d (need >=3) era=%s (elapsed=%ds)\n' \
-                   "${slot}" "${tip_epoch}" "${era}" \
-                   $(( $(date +%s) - poll_start ))
         else
             if grep -qiE 'FsInsufficientPermissions|Read-only file system|permission denied' "${tip_err}" 2>/dev/null; then
-                printf 'header-extractor tip-info cannot open chain DB; mount the cardano-node chain DB read-write (the producer only reads immutable chunks, but consensus validation opens chunk files with write permissions). See %s\n' \
+                printf 'db-analyser cannot open chain DB; mount the cardano-node chain DB read-write (the producer only reads immutable chunks, but consensus validation opens chunk files with write permissions). See %s\n' \
                        "${tip_err}" >&2
                 tail_phase_log tip-info
                 exit 7
             fi
-            printf '+ waiting for chain DB tip (header-extractor pending, elapsed=%ds)\n' \
+            printf '+ waiting for chain DB tip (db-analyser pending, elapsed=%ds)\n' \
                    $(( $(date +%s) - poll_start ))
         fi
         if (( $(date +%s) >= era_deadline )); then
@@ -428,49 +488,22 @@ phase_stage_init() {
 # Step 2: compose targets.json + snapshots.json. rc=5 on failure.
 # create-snapshots needs, per snapshot epoch, the last block's
 # (epoch, slot, hash, parent_point) — the same shape Koios resolution
-# yields on public networks. We read it straight from the chain's own
-# block list (preflight-blocks.json), bypassing Koios entirely.
+# yields on public networks. Both artefacts derive from the compact
+# records the pre-flight trace pass wrote to .logs/targets.json, so the
+# chain is read exactly once and staging carries no second source of truth.
 phase_targets() {
-    local list_json="${BUNDLE_DIR}/.logs/preflight-blocks.json"
-    [[ -s "${list_json}" ]] \
-        || { printf 'missing preflight block list %s\n' "${list_json}" >&2; exit 5; }
+    local targets_log="${BUNDLE_DIR}/.logs/targets.json"
+    [[ -s "${targets_log}" ]] \
+        || { printf 'missing target records %s\n' "${targets_log}" >&2; exit 5; }
     if (( ${#SNAPSHOT_SLOTS[@]} != 3 )); then
         printf 'expected 3 snapshot slots, got %d\n' "${#SNAPSHOT_SLOTS[@]}" >&2
         exit 5
     fi
 
-    local targets="[]"
-    local snapshots_meta="[]"
-    local slot hash parent epoch parent_point
-    for slot in "${SNAPSHOT_SLOTS[@]}"; do
-        hash=$(jq -r --argjson s "${slot}" \
-            '.data | map(select(.[0] == $s)) | (.[0][1] // empty)' "${list_json}")
-        if [[ -z "${hash}" ]]; then
-            printf 'no block hash for snapshot slot %s in %s\n' "${slot}" "${list_json}" >&2
-            exit 5
-        fi
-        parent=$(jq -c --argjson s "${slot}" \
-            '.data | map(select(.[0] < $s)) | (max_by(.[0]) // empty)' "${list_json}")
-        if [[ -n "${parent}" && "${parent}" != "null" ]]; then
-            parent_point="$(jq -r '.[0]' <<<"${parent}").$(jq -r '.[1]' <<<"${parent}")"
-        else
-            printf 'no parent block for snapshot slot %s (chain too short?)\n' "${slot}" >&2
-            exit 5
-        fi
-        epoch=$(( slot / EPOCH_LENGTH ))
-        targets=$(jq \
-            --argjson e "${epoch}" --argjson s "${slot}" \
-            --arg h "${hash}" --arg p "${parent_point}" \
-            '. + [{epoch: $e, slot: $s, hash: $h, parent_point: $p}]' \
-            <<<"${targets}")
-        snapshots_meta=$(jq \
-            --argjson e "${epoch}" --arg pt "${slot}.${hash}" --arg pp "${parent_point}" \
-            '. + [{epoch: $e, point: $pt, parent_point: $pp, url: ""}]' \
-            <<<"${snapshots_meta}")
-    done
-
-    printf '%s\n' "${targets}" >"${UNIQUE_TMP}/targets.json"
-    printf '%s\n' "${snapshots_meta}" >"${UNIQUE_TMP}/bootstrap-config/${NET_LC}/snapshots.json"
+    cp "${targets_log}" "${UNIQUE_TMP}/targets.json"
+    jq -c '[ .[] | {epoch: .epoch, point: "\(.slot).\(.hash)", parent_point: .parent_point, url: ""} ]' \
+        "${targets_log}" \
+        >"${UNIQUE_TMP}/bootstrap-config/${NET_LC}/snapshots.json"
     printf '+ wrote targets.json (%d epochs) + snapshots.json\n' "${#SNAPSHOT_SLOTS[@]}"
 }
 
@@ -539,11 +572,11 @@ phase_create_snapshots() {
 # reads era-history.json from the bundle root via --era-history.
 phase_era_sidecars() {
     local snap_root="${UNIQUE_TMP}/snapshots/${NET_LC}"
+    local targets="${UNIQUE_TMP}/targets.json"
     local slot hash count=0
     for slot in "${SNAPSHOT_SLOTS[@]}"; do
         hash=$(jq -r --argjson s "${slot}" \
-            '.data | map(select(.[0] == $s)) | (.[0][1] // empty)' \
-            "${BUNDLE_DIR}/.logs/preflight-blocks.json")
+            '.[] | select(.slot == $s) | .hash' "${targets}")
         [[ -n "${hash}" ]] || { printf 'no hash for sidecar slot %s\n' "${slot}" >&2; exit 6; }
         ensure_era_history_input "${snap_root}/history.${slot}.${hash}.json"
         count=$(( count + 1 ))

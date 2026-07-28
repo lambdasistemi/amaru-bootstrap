@@ -4,6 +4,12 @@
 # (snapshot create, node bootstrap) — not legacy aliases
 # (create-snapshots, bootstrap) or dev-CLI subcommands.
 # Per lambdasistemi/amaru-bootstrap#48 slice 2.
+#
+# Issue #52 slice 1: the producer's chain queries are served by a strict
+# db-analyser double (tip on stdout, --show-slot-block-no rows on stderr).
+# The header-extractor double is retained ONLY for the standalone
+# prev-epoch-tail rejection test; it records and rejects every producer
+# command so the suite proves the producer no longer calls it (P23).
 
 load 'lib/bootstrap-helpers'
 
@@ -26,6 +32,32 @@ setup() {
   mkdir -p "$MOCK_BIN"
   BASH_PATH="$(command -v bash)"
   export CLI_MOCK_SURFACE_LIB="$BATS_TEST_DIRNAME/lib/cli-mock-surface.bash"
+
+  hexhash() { printf '%064x' "$1"; }
+
+  # Trace spanning epochs 0-4 (epochLength=400, tip 1600 in epoch 4):
+  # completed epochs 1/2/3 tail at 795/1195/1595 with parents
+  # 790/1190/1590. Verbatim db-analyser --show-slot-block-no shape.
+  {
+    printf '[0.070592s] Started ShowSlotBlockNo\n'
+    printf '[0.070947s] BlockNo 0\tSlotNo 390\t%s\n' "$(hexhash 390)"
+    printf '[0.071080s] BlockNo 1\tSlotNo 395\t%s\n' "$(hexhash 395)"
+    printf '[0.071200s] BlockNo 2\tSlotNo 790\t%s\n' "$(hexhash 790)"
+    printf '[0.071300s] BlockNo 3\tSlotNo 795\t%s\n' "$(hexhash 795)"
+    printf '[0.071400s] BlockNo 4\tSlotNo 1190\t%s\n' "$(hexhash 1190)"
+    printf '[0.071500s] BlockNo 5\tSlotNo 1195\t%s\n' "$(hexhash 1195)"
+    printf '[0.071600s] BlockNo 6\tSlotNo 1590\t%s\n' "$(hexhash 1590)"
+    printf '[0.071700s] BlockNo 7\tSlotNo 1595\t%s\n' "$(hexhash 1595)"
+    printf '[0.084724s] Done\n'
+  } >"$TMP_DIR/trace.stderr"
+
+  export DB_ANALYSER_TIP_STDOUT="ImmutableDB tip: Point (At (Block {blockPointSlot = SlotNo 1600, blockPointHash = $(hexhash 1600)}))"
+  export DB_ANALYSER_TRACE_STDERR_FILE="$TMP_DIR/trace.stderr"
+  export DB_ANALYSER_CALLS="$TMP_DIR/db-analyser-calls.log"
+  export HEADER_EXTRACTOR_CALLS="$TMP_DIR/header-extractor-calls.log"
+  : >"$DB_ANALYSER_CALLS"
+  : >"$HEADER_EXTRACTOR_CALLS"
+
   install_canonical_mocks
 
   export PATH="$MOCK_BIN:$PATH"
@@ -39,47 +71,69 @@ teardown() {
   rm -rf "$TMP_DIR"
 }
 
-# Mock amaru that ONLY accepts canonical native commands:
-#   amaru snapshot create ...
-#   amaru node bootstrap ...
-# Rejects legacy aliases (create-snapshots, bootstrap) and dev-CLI.
 install_canonical_mocks() {
-  cat >"$MOCK_BIN/header-extractor" <<SHIM
-#!${BASH_PATH}
+  # Retained header-extractor double: records producer-relevant commands
+  # and rejects them (retired), so the suite can assert the producer never
+  # calls header-extractor. cli_mock_guard still rejects prev-epoch-tail
+  # for the standalone test below and keeps the honesty grep satisfied.
+  printf '#!%s\n' "$BASH_PATH" >"$MOCK_BIN/header-extractor"
+  cat >>"$MOCK_BIN/header-extractor" <<'SHIM'
 set -euo pipefail
-source "\$CLI_MOCK_SURFACE_LIB"
-cli_mock_guard header-extractor "\$@"
-cmd="\$1"
-shift
-case "\$cmd" in
-  tip-info)
-    printf '{"slot":1600,"era":"Conway"}\n'
-    ;;
-  list-blocks)
-    # Blocks spanning epochs 0-4 (epochLength=400):
-    # epoch 0: slots 0-399, epoch 1: 400-799, epoch 2: 800-1199
-    # epoch 3: 1200-1599, epoch 4: 1600+
-    h390="\$(printf '%064x' 390)"
-    h395="\$(printf '%064x' 395)"
-    h790="\$(printf '%064x' 790)"
-    h795="\$(printf '%064x' 795)"
-    h1190="\$(printf '%064x' 1190)"
-    h1195="\$(printf '%064x' 1195)"
-    h1590="\$(printf '%064x' 1590)"
-    h1595="\$(printf '%064x' 1595)"
-    printf '{"data":[[390,"%s"],[395,"%s"],[790,"%s"],[795,"%s"],[1190,"%s"],[1195,"%s"],[1590,"%s"],[1595,"%s"]]}\n' \
-      "\$h390" "\$h395" "\$h790" "\$h795" "\$h1190" "\$h1195" "\$h1590" "\$h1595"
-    ;;
-  get-header)
-    printf 'header'
-    ;;
-  *)
-    printf 'unexpected header-extractor command: %s\n' "\$cmd" >&2
+source "$CLI_MOCK_SURFACE_LIB"
+cmd="${1:-}"
+case "$cmd" in
+  tip-info|list-blocks|get-header)
+    printf '%s\n' "$*" >> "${HEADER_EXTRACTOR_CALLS:-/dev/null}"
+    printf 'header-extractor %s retired from the producer path (db-analyser now)\n' "$cmd" >&2
     exit 1
     ;;
 esac
+cli_mock_guard header-extractor "$@"
+printf 'unexpected header-extractor command: %s\n' "$cmd" >&2
+exit 1
 SHIM
   chmod +x "$MOCK_BIN/header-extractor"
+
+  # Strict db-analyser double reproducing the measured stream split.
+  printf '#!%s\n' "$BASH_PATH" >"$MOCK_BIN/db-analyser"
+  cat >>"$MOCK_BIN/db-analyser" <<'SHIM'
+set -euo pipefail
+printf '%s\n' "$*" >> "${DB_ANALYSER_CALLS:-/dev/null}"
+db="" cfg="" val="" inmem=0 trace=0
+args=("$@"); i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  a="${args[$i]}"
+  case "$a" in
+    --db) db="${args[$((i+1))]}"; i=$((i+2)) ;;
+    --config) cfg="${args[$((i+1))]}"; i=$((i+2)) ;;
+    --db-validation) val="${args[$((i+1))]}"; i=$((i+2)) ;;
+    --in-mem) inmem=1; i=$((i+1)) ;;
+    --show-slot-block-no) trace=1; i=$((i+1)) ;;
+    --analyse-from|--num-blocks-to-process|--count-blocks|--store-ledger|--analyse-only|--analyse-ledger)
+      printf 'db-analyser double: forbidden analysis flag %s\n' "$a" >&2
+      exit 2 ;;
+    *)
+      printf 'db-analyser double: unexpected arg %s\n' "$a" >&2
+      exit 2 ;;
+  esac
+done
+[ -n "$db" ] || { printf 'db-analyser double: --db required\n' >&2; exit 2; }
+[ -n "$cfg" ] || { printf 'db-analyser double: --config required\n' >&2; exit 2; }
+[ "$inmem" -eq 1 ] || { printf 'db-analyser double: --in-mem required\n' >&2; exit 2; }
+[ "$val" = minimum-block-validation ] \
+  || { printf 'db-analyser double: --db-validation must be minimum-block-validation\n' >&2; exit 2; }
+if [ -n "${DB_ANALYSER_STDERR_FILE:-}" ]; then
+  cat "$DB_ANALYSER_STDERR_FILE" >&2
+  exit "${DB_ANALYSER_EXIT:-1}"
+fi
+printf '%s\n' "${DB_ANALYSER_TIP_STDOUT}"
+if [ "$trace" -eq 1 ]; then
+  cat "${DB_ANALYSER_TRACE_STDERR_FILE}" >&2
+else
+  printf '[0.077619s] Started OnlyValidation\n[0.077736s] Done\n' >&2
+fi
+SHIM
+  chmod +x "$MOCK_BIN/db-analyser"
 
   # amaru mock: ONLY canonical native commands.
   cat >"$MOCK_BIN/amaru" <<SHIM
@@ -202,6 +256,118 @@ SHIM
   # Bundle must have the canonical layout
   [ -d "$TMP_DIR/bundle/testnet_42/ledger.testnet_42.db" ]
   [ -d "$TMP_DIR/bundle/testnet_42/chain.testnet_42.db" ]
+
+  # P23: the producer run never invokes the retired header-extractor.
+  [ ! -s "$HEADER_EXTRACTOR_CALLS" ]
+  # P05/P08: the run wrote the compact target records.
+  [ -s "$TMP_DIR/bundle/.logs/targets.json" ]
+}
+
+@test "readiness argv is exactly the measured no-analysis surface" {
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 0 ]
+  # P01: the readiness invocation carries --db, --config, --in-mem and
+  # --db-validation minimum-block-validation, and NO analysis flag.
+  readiness="$(grep -v -- '--show-slot-block-no' "$DB_ANALYSER_CALLS" | head -1)"
+  [ "$readiness" = "--db $TMP_DIR/chain-db --config $TMP_DIR/config/config.json --in-mem --db-validation minimum-block-validation" ]
+  ! grep -qE -- '--analyse-from|--num-blocks-to-process|--count-blocks|--store-ledger' "$DB_ANALYSER_CALLS"
+}
+
+@test "exactly one forward trace pass, never invoked by readiness ticks" {
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 0 ]
+  # P03/P18: one --show-slot-block-no pass with the pinned argv.
+  trace_count=$(grep -c -- '--show-slot-block-no$' "$DB_ANALYSER_CALLS")
+  [ "$trace_count" -eq 1 ]
+  trace="$(grep -- '--show-slot-block-no$' "$DB_ANALYSER_CALLS" | head -1)"
+  [ "$trace" = "--db $TMP_DIR/chain-db --config $TMP_DIR/config/config.json --in-mem --db-validation minimum-block-validation --show-slot-block-no" ]
+}
+
+@test "Point Origin at exit 0 stays not-ready (rc=2)" {
+  export DB_ANALYSER_TIP_STDOUT="ImmutableDB tip: Point Origin"
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  # P02: Origin yields no slot; the poll loop times out at rc=2.
+  [ "$status" -eq 2 ]
+  # The db-analyser readiness path was actually exercised.
+  [ -s "$DB_ANALYSER_CALLS" ]
+  # No trace pass is attempted while the tip is not concrete.
+  ! grep -q -- '--show-slot-block-no' "$DB_ANALYSER_CALLS"
+}
+
+@test "unparseable successful tip output stays not-ready (rc=2)" {
+  export DB_ANALYSER_TIP_STDOUT="ImmutableDB tip: garbage that is not a point"
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 2 ]
+  [ -s "$DB_ANALYSER_CALLS" ]
+  ! grep -q -- '--show-slot-block-no' "$DB_ANALYSER_CALLS"
+}
+
+@test "malformed trace rows stay not-ready (rc=2)" {
+  {
+    printf '[0.070592s] Started ShowSlotBlockNo\n'
+    printf 'this row has no tab-delimited BlockNo/SlotNo/hash shape\n'
+    printf '[0.084724s] Done\n'
+  } >"$TMP_DIR/malformed.stderr"
+  export DB_ANALYSER_TRACE_STDERR_FILE="$TMP_DIR/malformed.stderr"
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  # P02/P14: a concrete tip but fewer than three valid trace records is
+  # WAIT, never a target record with an empty/zero slot or hash.
+  [ "$status" -eq 2 ]
+  grep -q -- '--show-slot-block-no' "$DB_ANALYSER_CALLS"
+
+  # P14 second half: the WAIT path must not write any placeholder record.
+  # If targets.json exists at all, every record needs a positive numeric
+  # slot, a non-empty hash, and a <slot>.<hash> parent_point.
+  if [ -s "$TMP_DIR/bundle/.logs/targets.json" ]; then
+    bad=$(jq '[ .[] | select(
+          ((.slot | type) != "number") or (.slot <= 0)
+          or ((.hash | type) != "string") or (.hash == "")
+          or ((.parent_point | type) != "string")
+          or (.parent_point | test("^[0-9]+\\.[0-9a-f]+$") | not)
+        ) ] | length' "$TMP_DIR/bundle/.logs/targets.json")
+    [ "$bad" -eq 0 ]
+  fi
+}
+
+@test "permission-denied readiness exits 7 with the diagnostic" {
+  printf 'db-analyser: FsInsufficientPermissions: openFile: permission denied\n' \
+    >"$TMP_DIR/perm.stderr"
+  export DB_ANALYSER_STDERR_FILE="$TMP_DIR/perm.stderr"
+  export DB_ANALYSER_EXIT=1
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  # P02/P17: classified read-only access exits 7.
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"read-write"* ]]
 }
 
 @test "header-extractor mock rejects prev-epoch-tail (removed upstream)" {

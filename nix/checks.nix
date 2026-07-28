@@ -440,6 +440,66 @@ in
       mkdir -p $out
     '';
 
+  # Issue #52 slice 1 (T005): exact six-point proof. Runs the production
+  # parser path (the producer above writes .logs/targets.json from one
+  # db-analyser --show-slot-block-no pass over the real synthesized chain
+  # DB) and asserts all three target points and all three parent points
+  # from research.md. The SAME assertion is then run against an empty
+  # array and required to fail, so a vacuous parser that accepts zero
+  # records cannot pass this check.
+  db-analyser-points =
+    pkgs.runCommand "db-analyser-points"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      } ''
+      set -euo pipefail
+
+      targets=${synthesizedBootstrapBundle}/.logs/targets.json
+      expected='[
+        {"epoch":1,"slot":172731,"hash":"e1fb2a7b5a5b01d9b2cb5f2a5b8e2559b6929c695abf7e523e3b3cf6d4c02278","parent_point":"172652.3420432a02ae631e3b3cfd2dcbac97b415144764bcb554b074092b9b2bbb9352"},
+        {"epoch":2,"slot":259176,"hash":"dddf69466f866b9898024502f99efb0ed73daa65a2543c0e9c413f078318345e","parent_point":"259173.e945d6beed5f99be2f618e43d1fe063941ed9d2466fdae18e9345a8137f24ee8"},
+        {"epoch":3,"slot":345164,"hash":"3102adf971aecbc9d47c12e3cf8b883c53b55f61ef19b5d377c91e9bd4c68342","parent_point":"345159.19fa713646ce859bc47756c47af2a04cb28cef4944331ef70be2f999883e881d"}
+      ]'
+
+      assert_points() {
+        jq -e --argjson expected "$expected" '
+          ( [ .[] | {epoch, slot, hash, parent_point} ] == $expected )
+          and
+          ( [ .[] | keys ] | all(. == ["epoch","hash","parent_point","slot"]) )
+        ' "$1"
+      }
+
+      if [ ! -s "$targets" ]; then
+        echo "db-analyser-points: production .logs/targets.json missing or empty: $targets" >&2
+        exit 1
+      fi
+
+      if ! assert_points "$targets"; then
+        echo "db-analyser-points: production targets.json does not match the six frozen points" >&2
+        echo "--- actual ---" >&2
+        cat "$targets" >&2
+        exit 1
+      fi
+      echo "db-analyser-points: all six frozen points match production targets.json"
+
+      printf '[]\n' > "$TMPDIR/empty.json"
+      set +e
+      assert_points "$TMPDIR/empty.json" 2>/dev/null
+      ctrl_rc=$?
+      set -e
+      if [ "$ctrl_rc" -ne 1 ]; then
+        echo "db-analyser-points: NEGATIVE CONTROL FAILED - empty array assertion exited $ctrl_rc (want exactly 1)" >&2
+        exit 1
+      fi
+      echo "db-analyser-points: negative control OK - empty array rejected (assertion exit=$ctrl_rc)"
+
+      mkdir -p $out
+    '';
+
   # Prove that the produced bootstrap bundle is not only importable but
   # usable as Amaru startup state. The command is intentionally run
   # without a live upstream peer; success means Amaru opened the ledger

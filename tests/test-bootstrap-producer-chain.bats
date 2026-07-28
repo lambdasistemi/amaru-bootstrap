@@ -50,4 +50,17 @@ teardown() {
   [ "$status" -eq 2 ]
   # Must enter the wait loop (≥ deadline-2s).
   [ "$duration" -ge 8 ]
+
+  # P17: the real db-analyser readiness path parsed a concrete tip slot
+  # from the REAL binary (the short chain's tip is concrete but its
+  # tip_epoch < 3, so the predicate never holds). This is the only place
+  # the bats suite exercises the real db-analyser tip format.
+  tip_slot=$(printf '%s\n' "$output" \
+    | grep -oE 'tip_slot=[0-9]+' | head -1 | cut -d= -f2)
+  [ -n "$tip_slot" ]
+  [ "$tip_slot" -gt 0 ]
+  # The readiness diagnostic carries the real db-analyser only-validation
+  # markers (stderr, per the measured stream split), proving db-analyser -
+  # not the retired header-extractor - served the poll.
+  grep -q 'Started OnlyValidation' "$TMP_DIR/bundle/.logs/tip-info.stderr"
 }

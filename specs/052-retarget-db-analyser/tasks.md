@@ -19,13 +19,13 @@ tip and single-pass target extraction while preserving the bundle contract.
 synthesized-chain check asserts all six exact points and proves its empty-array
 negative control; producer semantic checks and the live gate pass.
 
-- [ ] T001 [US1] Add failing concrete-tip, `Point Origin`, malformed-trace, exact-argument, and sparse-parent assertions in `tests/test-bootstrap-producer-canonical-cli.bats`, `tests/test-bootstrap-producer-chain.bats`, `tests/test-bootstrap-producer-history.bats`, and `tests/test-bootstrap-producer-sparse-boundaries.bats`, then freeze raw RED output
-- [ ] T002 [US1] Replace only the three producer-test `header-extractor` doubles with strict tip/trace `db-analyser` doubles in `tests/test-bootstrap-producer-canonical-cli.bats`, `tests/test-bootstrap-producer-history.bats`, and `tests/test-bootstrap-producer-sparse-boundaries.bats`
-- [ ] T003 [US1] Implement the no-analysis minimum-validation concrete-tip poll, explicit origin handling, single forward trace parser, and configured Conway-slot readiness guard in `scripts/bootstrap-producer.sh`
-- [ ] T004 [US1] Make `.logs/targets.json`, staging `targets.json`, snapshot arguments, and era-history sidecars share the three compact target records and remove every `preflight-blocks.json` reader from `scripts/bootstrap-producer.sh`
-- [ ] T005 [US1] Replace the obsolete CLI check with `db-analyser-points` and its empty-array negative control in `nix/checks.nix`, add `db-analyser` to the local producer runtime in `nix/apps.nix`, and update only the matching entries in `justfile` and `.github/workflows/ci.yml`
-- [ ] T006 [US1] Run the exact-point, shellcheck, producer bats, synthesized producer, Amaru startup, short-epoch, deterministic bundle, and image-build proofs from `specs/052-retarget-db-analyser/quickstart.md`, freezing sequential GREEN evidence
-- [ ] T007 [US1] Obtain navigator RED/GREEN approval, run `./gate.sh`, and commit Slice 1 as `refactor: derive snapshot targets with db-analyser` with trailer `Tasks: T001, T002, T003, T004, T005, T006, T007`
+- [x] T001 [US1] Add failing concrete-tip, `Point Origin`, malformed-trace, exact-argument, and sparse-parent assertions in `tests/test-bootstrap-producer-canonical-cli.bats`, `tests/test-bootstrap-producer-chain.bats`, `tests/test-bootstrap-producer-history.bats`, and `tests/test-bootstrap-producer-sparse-boundaries.bats`, then freeze raw RED output
+- [x] T002 [US1] Replace only the three producer-test `header-extractor` doubles with strict tip/trace `db-analyser` doubles in `tests/test-bootstrap-producer-canonical-cli.bats`, `tests/test-bootstrap-producer-history.bats`, and `tests/test-bootstrap-producer-sparse-boundaries.bats`
+- [x] T003 [US1] Implement the no-analysis minimum-validation concrete-tip poll, explicit origin handling, single forward trace parser, and configured Conway-slot readiness guard in `scripts/bootstrap-producer.sh`
+- [x] T004 [US1] Make `.logs/targets.json`, staging `targets.json`, snapshot arguments, and era-history sidecars share the three compact target records and remove every `preflight-blocks.json` reader from `scripts/bootstrap-producer.sh`
+- [x] T005 [US1] Replace the obsolete CLI check with `db-analyser-points` and its empty-array negative control in `nix/checks.nix`, add `db-analyser` to the local producer runtime in `nix/apps.nix`, and update only the matching entries in `justfile` and `.github/workflows/ci.yml`
+- [x] T006 [US1] Run the exact-point, shellcheck, producer bats, synthesized producer, Amaru startup, short-epoch, deterministic bundle, and image-build proofs from `specs/052-retarget-db-analyser/quickstart.md`, freezing sequential GREEN evidence
+- [x] T007 [US1] Obtain navigator RED/GREEN approval, run `./gate.sh`, and commit Slice 1 as `refactor: derive snapshot targets with db-analyser` with trailer `Tasks: T001, T002, T003, T004, T005, T006, T007`
 
 ## Slice 2 - Remove the header-extractor build and image surface
 

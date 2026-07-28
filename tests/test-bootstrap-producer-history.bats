@@ -30,6 +30,30 @@ setup() {
   mkdir -p "$MOCK_BIN"
   BASH_PATH="$(command -v bash)"
   export CLI_MOCK_SURFACE_LIB="$BATS_TEST_DIRNAME/lib/cli-mock-surface.bash"
+
+  hexhash() { printf '%064x' "$1"; }
+
+  # Short-epoch trace (epochLength 120, tip 370 in epoch 3): completed
+  # epochs 0/1/2 tail at 9/129/249 with parents 8/120/248. Verbatim
+  # db-analyser --show-slot-block-no shape (bracketed, tab-delimited, stderr).
+  {
+    printf '[0.070592s] Started ShowSlotBlockNo\n'
+    printf '[0.070947s] BlockNo 0\tSlotNo 8\t%s\n' "$(hexhash 8)"
+    printf '[0.071080s] BlockNo 1\tSlotNo 9\t%s\n' "$(hexhash 9)"
+    printf '[0.071200s] BlockNo 2\tSlotNo 120\t%s\n' "$(hexhash 120)"
+    printf '[0.071300s] BlockNo 3\tSlotNo 129\t%s\n' "$(hexhash 129)"
+    printf '[0.071400s] BlockNo 4\tSlotNo 248\t%s\n' "$(hexhash 248)"
+    printf '[0.071500s] BlockNo 5\tSlotNo 249\t%s\n' "$(hexhash 249)"
+    printf '[0.071600s] BlockNo 6\tSlotNo 360\t%s\n' "$(hexhash 360)"
+    printf '[0.071700s] BlockNo 7\tSlotNo 370\t%s\n' "$(hexhash 370)"
+    printf '[0.084724s] Done\n'
+  } >"$TMP_DIR/trace.stderr"
+
+  export DB_ANALYSER_TIP_STDOUT="ImmutableDB tip: Point (At (Block {blockPointSlot = SlotNo 370, blockPointHash = $(hexhash 370)}))"
+  export DB_ANALYSER_TRACE_STDERR_FILE="$TMP_DIR/trace.stderr"
+  export DB_ANALYSER_CALLS="$TMP_DIR/db-analyser-calls.log"
+  : >"$DB_ANALYSER_CALLS"
+
   install_short_epoch_mocks
 
   export PATH="$MOCK_BIN:$PATH"
@@ -44,36 +68,45 @@ teardown() {
 }
 
 install_short_epoch_mocks() {
-  cat >"$MOCK_BIN/header-extractor" <<SHIM
-#!${BASH_PATH}
+  printf '#!%s\n' "$BASH_PATH" >"$MOCK_BIN/db-analyser"
+  cat >>"$MOCK_BIN/db-analyser" <<'SHIM'
 set -euo pipefail
-source "\$CLI_MOCK_SURFACE_LIB"
-cli_mock_guard header-extractor "\$@"
-cmd="\$1"
-shift
-case "\$cmd" in
-  tip-info)
-    printf '{"slot":370,"era":"Conway"}\n'
-    ;;
-  list-blocks)
-    h8="\$(printf '%064x' 8)"
-    h9="\$(printf '%064x' 9)"
-    h120="\$(printf '%064x' 120)"
-    h129="\$(printf '%064x' 129)"
-    h248="\$(printf '%064x' 248)"
-    h249="\$(printf '%064x' 249)"
-    h360="\$(printf '%064x' 360)"
-    h370="\$(printf '%064x' 370)"
-    printf '{"data":[[8,"%s"],[9,"%s"],[120,"%s"],[129,"%s"],[248,"%s"],[249,"%s"],[360,"%s"],[370,"%s"]]}\n' \
-      "\$h8" "\$h9" "\$h120" "\$h129" "\$h248" "\$h249" "\$h360" "\$h370"
-    ;;
-  *)
-    printf 'unexpected header-extractor command: %s\n' "\$cmd" >&2
-    exit 1
-    ;;
-esac
+printf '%s\n' "$*" >> "${DB_ANALYSER_CALLS:-/dev/null}"
+db="" cfg="" val="" inmem=0 trace=0
+args=("$@"); i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  a="${args[$i]}"
+  case "$a" in
+    --db) db="${args[$((i+1))]}"; i=$((i+2)) ;;
+    --config) cfg="${args[$((i+1))]}"; i=$((i+2)) ;;
+    --db-validation) val="${args[$((i+1))]}"; i=$((i+2)) ;;
+    --in-mem) inmem=1; i=$((i+1)) ;;
+    --show-slot-block-no) trace=1; i=$((i+1)) ;;
+    --analyse-from|--num-blocks-to-process|--count-blocks|--store-ledger|--analyse-only|--analyse-ledger)
+      printf 'db-analyser double: forbidden analysis flag %s\n' "$a" >&2
+      exit 2 ;;
+    *)
+      printf 'db-analyser double: unexpected arg %s\n' "$a" >&2
+      exit 2 ;;
+  esac
+done
+[ -n "$db" ] || { printf 'db-analyser double: --db required\n' >&2; exit 2; }
+[ -n "$cfg" ] || { printf 'db-analyser double: --config required\n' >&2; exit 2; }
+[ "$inmem" -eq 1 ] || { printf 'db-analyser double: --in-mem required\n' >&2; exit 2; }
+[ "$val" = minimum-block-validation ] \
+  || { printf 'db-analyser double: --db-validation must be minimum-block-validation\n' >&2; exit 2; }
+if [ -n "${DB_ANALYSER_STDERR_FILE:-}" ]; then
+  cat "$DB_ANALYSER_STDERR_FILE" >&2
+  exit "${DB_ANALYSER_EXIT:-1}"
+fi
+printf '%s\n' "${DB_ANALYSER_TIP_STDOUT}"
+if [ "$trace" -eq 1 ]; then
+  cat "${DB_ANALYSER_TRACE_STDERR_FILE}" >&2
+else
+  printf '[0.077619s] Started OnlyValidation\n[0.077736s] Done\n' >&2
+fi
 SHIM
-  chmod +x "$MOCK_BIN/header-extractor"
+  chmod +x "$MOCK_BIN/db-analyser"
 
   cat >"$MOCK_BIN/amaru" <<SHIM
 #!${BASH_PATH}
@@ -161,4 +194,24 @@ SHIM
     [ "$epoch_size" -eq 120 ]
   done
   [ "$found" -eq 1 ]
+}
+
+@test "short-epoch targets derive from the db-analyser trace, not a second read" {
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 0 ]
+  # P08/P16: the sidecar filenames and .logs/targets.json share the same
+  # compact records {epoch,slot,hash,parent_point}.
+  slots="$(jq -r '.[].slot' "$TMP_DIR/bundle/.logs/targets.json" | tr '\n' ' ')"
+  [ "$slots" = "9 129 249 " ]
+  shopt -s nullglob
+  sidecars=0
+  for history in "$TMP_DIR"/bundle/testnet_42/snapshots/testnet_42/history.*.json; do
+    sidecars=$((sidecars + 1))
+  done
+  [ "$sidecars" -eq 3 ]
 }

@@ -20,6 +20,7 @@ let
       pkgs.gawk
       pkgs.jq
       amaruPkg
+      iogTools.db-analyser
       headerExtractorPkgs.header-extractor
     ];
     text = ''
