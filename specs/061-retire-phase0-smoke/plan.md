@@ -185,7 +185,8 @@ missing or removes the finding before history is reachable.
 ```text
 <driver handoffs>/retirement-audit.sh
 nix build .#checks.x86_64-linux.cli-mock-honesty
-mkdocs build --strict
+nix shell nixpkgs#python3Packages.mkdocs-material -c \
+  mkdocs build --strict --site-dir <driver handoffs>/docs-site
 ./gate.sh
 ```
 
