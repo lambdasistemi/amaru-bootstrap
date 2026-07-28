@@ -32,6 +32,8 @@ latest sibling merge, satisfying the epic's evidence-over-assumption rule.
 
 - `specs/001-*`, `specs/003-*`, and `specs/004-*`: historical feature records;
 - `specs/050-*`: the actionable process contract for this removal;
+- `specs/051-*`: the merged sibling process record that hands emitter removal
+  to this ticket;
 - `docs/history/`: project history;
 - the constitution and amendment log: governance history.
 

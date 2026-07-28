@@ -8,9 +8,8 @@ The repository has two layers:
 
 The critical code boundary is still the release-pinned ledger-state
 format: the whole toolset (`header-extractor`, the `db-analyser` engine
-that `amaru create-snapshots` drives, and the standalone
-`ledger-state-emitter`) targets one cardano-node release at a time. This
-branch targets `cardano-node 10.7.1`.
+that `amaru create-snapshots` drives) targets one cardano-node release
+at a time. This branch targets `cardano-node 10.7.1`.
 
 ## Relay Runtime
 
@@ -187,7 +186,7 @@ flowchart TB
         ledger["cardano-ledger-* versions"]
     end
 
-    Pinned --> tools["in-repo tools\nheader-extractor\nledger-state-emitter"]
+    Pinned --> tools["in-repo tools\nheader-extractor"]
     Pinned --> analyser["db-analyser\ncreate-snapshots engine"]
     analyser --> amaru["amaru create-snapshots\n+ amaru bootstrap"]
     tools --> amaru
@@ -198,32 +197,6 @@ flowchart TB
 Retargeting to another node release is an explicit project task. It is
 not just a Cabal compile check: the ledger-state CBOR that the pinned
 tools read and that Amaru imports has to match for that release.
-
-## Ledger-State Projection (standalone emitter)
-
-```mermaid
-flowchart LR
-    raw["node 10.7.1 ledger state"] --> utxo["UTxOState\ncanonical TxIn/TxOut"]
-    raw --> wrapper["Shelley wrapper\npre-Peras shape"]
-    raw --> pstate["Conway/Dijkstra PState\ncurrent/future/retiring pools"]
-    raw --> dstate["Conway/Dijkstra DState\nlegacy delegation wrapper"]
-
-    utxo --> out["Legacy ExtLedgerState\nfor Amaru"]
-    wrapper --> out
-    pstate --> out
-    dstate --> out
-```
-
-The projection preserves the fields Amaru imports and omits node-side
-acceleration or wrapper fields that Amaru does not consume during
-bootstrap.
-
-`ledger-state-emitter` implements this projection as an in-repo
-executable. Since the producer migrated to upstream
-`amaru create-snapshots` + `amaru bootstrap`, the emitter is no longer
-part of the producer pipeline; it remains in the image and as the flake
-app `nix run .#ledger-state-emitter` for standalone snapshot emission
-and debugging against the pinned node release.
 
 ## CI Startup Proof
 

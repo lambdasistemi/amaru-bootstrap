@@ -21,6 +21,7 @@ rg -n 'ledger-state-emitter|LedgerStateEmitter|ledgerStateEmitter' \
   specs/003-* \
   specs/004-* \
   specs/050-remove-dead-emitter \
+  specs/051-cli-mock-honesty \
   docs/history \
   .specify/memory/constitution.md
 ```

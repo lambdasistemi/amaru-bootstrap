@@ -66,10 +66,7 @@ cardano-node ChainDB and runs:
 
 `db-synthesizer` remains in this repository only for fixtures and checks.
 It fabricates ChainDB inputs for CI; it is not in the Antithesis runtime
-path. `ledger-state-emitter` (the in-repo node-10.7.1 ledger projection
-tool) is still built, shipped, and exposed as a flake app, but it is no
-longer invoked by the producer pipeline since the migration to upstream
-`create-snapshots` + `bootstrap`.
+path.
 
 ## Install
 
@@ -127,7 +124,6 @@ All tools are exposed as flake apps:
 | `nix run .#bootstrap-producer` | One-shot bundle producer (`<chain-db> <config-dir> <bundle-dir> <network>`) |
 | `nix run .#smoke-test` | Phase 0 format-compatibility smoke test (`<bundle> <out-dir>`) |
 | `nix run .#header-extractor` | Immutable chain-DB queries: `tip-info`, `list-blocks`, `get-header` |
-| `nix run .#ledger-state-emitter` | Standalone node-10.7.1 ledger-state projection (not in the producer pipeline) |
 | `nix run .#amaru` | The pinned Amaru binary |
 | `nix run .#db-synthesizer` / `.#db-analyser` / `.#snapshot-converter` | Pinned upstream consensus tools |
 

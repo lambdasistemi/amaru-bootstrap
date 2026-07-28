@@ -28,8 +28,8 @@ Cardano code, stock tools + custom orchestration, SHA pinning, Nix-first).
 - One flake check: `nix build .#checks.x86_64-linux.<name>` (never
   `nix develop -c cabal test` in CI)
 - Run a tool: `nix run .#bootstrap-producer`, `.#smoke-test`,
-  `.#header-extractor`, `.#ledger-state-emitter`, `.#amaru`,
-  `.#db-synthesizer`, `.#db-analyser`, `.#snapshot-converter`
+  `.#header-extractor`, `.#amaru`, `.#db-synthesizer`, `.#db-analyser`,
+  `.#snapshot-converter`
 - Shell lint: `just shellcheck`; scripts are bash with
   `set -euo pipefail`, shellcheck-clean
 - Haskell: GHC 9.6, fourmolu (70-char limit, leading commas/arrows),
