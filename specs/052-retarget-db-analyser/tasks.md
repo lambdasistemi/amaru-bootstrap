@@ -61,9 +61,9 @@ the full gate remains green.
 **Goal**: Make the delivered behavior, deletion, decisions, and verification
 legible to reviewers and complete ticket-level accounting.
 
-- [ ] T017 [US1] Refresh pull request #63 with plain-language landed chapters and a linked technical appendix covering the exact six points, Decision 1, bundle equivalence, image absence, and live boundary evidence
-- [ ] T018 [US1] Check `/tmp/epic-55/amaru-bootstrap-52/inbox/`, independently inspect every branch change, rerun `./gate.sh`, and audit every commit/task mapping against `specs/052-retarget-db-analyser/tasks.md`
-- [ ] T019 [US1] Mark the orchestrator-owned evidence slice complete in `specs/052-retarget-db-analyser/tasks.md` and commit it as `docs: finalize db-analyser retarget evidence` with trailer `Tasks: T017, T018, T019`
+- [x] T017 [US1] Refresh pull request #63 with plain-language landed chapters and a linked technical appendix covering the exact six points, Decision 1, bundle equivalence, image absence, and live boundary evidence
+- [x] T018 [US1] Check `/tmp/epic-55/amaru-bootstrap-52/inbox/`, independently inspect every branch change, rerun `./gate.sh`, and audit every commit/task mapping against `specs/052-retarget-db-analyser/tasks.md`
+- [x] T019 [US1] Mark the orchestrator-owned evidence slice complete in `specs/052-retarget-db-analyser/tasks.md` and commit it as `docs: finalize db-analyser retarget evidence` with trailer `Tasks: T017, T018, T019`
 
 ## Dependencies and Execution Order
 

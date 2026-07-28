@@ -32,16 +32,25 @@ origin, sparse-boundary, and malformed point-stream cases.
 ## 3. Live-surface audit
 
 ```bash
+audit_paths=()
+for path in \
+  app lib test tests scripts nix flake.nix justfile .github \
+  amaru-bootstrap.cabal README.md AGENTS.md skills docs
+do
+  [[ -e "$path" ]] && audit_paths+=("$path")
+done
+((${#audit_paths[@]} > 0))
 rg -n \
   'header-extractor|HeaderExtractor|headerExtractor|preflight-blocks[.]json|list-blocks|get-header' \
-  app lib test tests scripts nix flake.nix justfile .github \
-  amaru-bootstrap.cabal README.md AGENTS.md skills docs \
+  "${audit_paths[@]}" \
   --glob '!docs/history/**'
 ```
 
-Expected after Slice 3: no output and exit 1. Process records under
-`specs/`, historical `docs/history/**`, the constitution, and generated
-`site/**` are intentionally outside this live audit.
+Expected after Slice 3: no output and exit 1. The path loop deliberately skips
+the deleted `app/` and `test/` trees so their absence cannot turn the audit
+into an `rg` path error. Process records under `specs/`, historical
+`docs/history/**`, the constitution, and generated `site/**` are intentionally
+outside this live audit.
 
 ## 4. Flake and image absence
 
