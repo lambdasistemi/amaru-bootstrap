@@ -64,15 +64,15 @@ requiring container exit.
 **Independent Test**: An uncalled fixture fails and names its helper; reachable
 and explicitly exempt fixtures plus the repository helper tree pass.
 
-- [ ] T011 [US3] Add RED uncalled and GREEN reachable/exempt fixture controls
+- [X] T011 [US3] Add RED uncalled and GREEN reachable/exempt fixture controls
   to the existing `tests/check-cli-mock-honesty.sh`
-- [ ] T012 [US3] Implement declaration, call-site, and explicit-exemption
+- [X] T012 [US3] Implement declaration, call-site, and explicit-exemption
   handling inside `tests/check-cli-mock-honesty.sh`, with reviewable
   exemptions declared in `tests/lib/cli-mock-surface.bash`
-- [ ] T013 [US3] Audit the real `tests/lib/` helper set through the existing
+- [X] T013 [US3] Audit the real `tests/lib/` helper set through the existing
   `cli-mock-honesty` flake output, adjusting only that check's runtime inputs
   in `nix/checks.nix` if required
-- [ ] T014 [US3] Run
+- [X] T014 [US3] Run
   `nix build .#checks.x86_64-linux.cli-mock-honesty` and `./gate.sh`, then
   commit as `test: reject unreachable test helpers` with trailer
   `Tasks: T011, T012, T013, T014`
