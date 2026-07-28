@@ -37,9 +37,9 @@ the full live gate, and the complete owned-file diff pass review.
 hosted execution legible to a reviewer, then close task accounting without
 merging.
 
-- [ ] T009 [US1] Refresh pull request #71 from `/tmp/epic-55/amaru-bootstrap-70/pr-body.md` with a plain-language landed chapter and a technical evidence appendix covering baseline absence, final closure reachability, seeded failure, restoration, and local/live gate results
-- [ ] T010 [US1] Capture successful hosted `Build Gate` and `Live Bootstrap Producer` conclusions plus the hosted Build Gate log line requesting `.#checks.x86_64-linux.cli-mock-honesty` under `/tmp/epic-55/amaru-bootstrap-70/logs/`
-- [ ] T011 [US1] Independently rerun the final local gate, audit every branch commit and task mapping, mark the orchestrator-owned tasks complete in `specs/070-cli-mock-honesty-ci-wiring/tasks.md`, and commit `docs: finalize Build Gate CLI honesty evidence` with trailer `Tasks: T009, T010, T011`
+- [X] T009 [US1] Refresh pull request #71 from `/tmp/epic-55/amaru-bootstrap-70/pr-body.md` with a plain-language landed chapter and a technical evidence appendix covering baseline absence, final closure reachability, seeded failure, restoration, and local/live gate results
+- [X] T010 [US1] Capture successful hosted `Build Gate` and `Live Bootstrap Producer` conclusions plus the hosted Build Gate log line requesting `.#checks.x86_64-linux.cli-mock-honesty` under `/tmp/epic-55/amaru-bootstrap-70/logs/`
+- [X] T011 [US1] Independently rerun the final local gate, audit every branch commit and task mapping, mark the orchestrator-owned tasks complete in `specs/070-cli-mock-honesty-ci-wiring/tasks.md`, and commit `docs: finalize Build Gate CLI honesty evidence` with trailer `Tasks: T009, T010, T011`
 
 ## Dependencies and Execution Order
 
