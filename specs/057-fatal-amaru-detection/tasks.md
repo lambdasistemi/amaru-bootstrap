@@ -1,7 +1,7 @@
 # Tasks: Fatal Amaru Detection
 
 **Input**: Design documents from
-`/specs/057-fatal-amaru-detection/`  
+`/specs/057-fatal-amaru-detection/`
 **Prerequisites**: [spec.md](spec.md), [plan.md](plan.md),
 [research.md](research.md),
 [fatal-log-contract.md](contracts/fatal-log-contract.md)
@@ -82,12 +82,12 @@ and explicitly exempt fixtures plus the repository helper tree pass.
 **Goal**: Make the corrected cause, slice outcomes, direct evidence, and
 remaining downstream work clear to a reviewer.
 
-- [ ] T015 [US1] Update pull request #59 after every implementation push with
+- [X] T015 [US1] Update pull request #59 after every implementation push with
   a plain-language slice chapter and the direct fatal/clean evidence in the
   technical appendix
-- [ ] T016 [US2] Check the parent inbox, inspect the complete owned-file diff,
+- [X] T016 [US2] Check the parent inbox, inspect the complete owned-file diff,
   run `just ci`, and run the final commit/task audit
-- [ ] T017 [US3] Mark the orchestrator-owned tasks complete in
+- [X] T017 [US3] Mark the orchestrator-owned tasks complete in
   `specs/057-fatal-amaru-detection/tasks.md`, commit the final evidence update,
   remove `gate.sh`, and mark pull request #59 ready
 

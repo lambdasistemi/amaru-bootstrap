@@ -1,7 +1,7 @@
 # Implementation Plan: Fatal Amaru Detection
 
 **Branch**: `fix/57-fatal-log-guard` | **Date**: 2026-07-28 |
-**Spec**: [spec.md](spec.md)  
+**Spec**: [spec.md](spec.md)
 **Input**: Feature specification from
 `/specs/057-fatal-amaru-detection/spec.md`
 
@@ -21,18 +21,18 @@ The corrected ancestry and detailed decisions are in
 
 ## Technical Context
 
-**Language/Version**: Bash 5 and Bats  
+**Language/Version**: Bash 5 and Bats
 **Primary Dependencies**: Existing Nix-pinned Amaru producer image,
-cardano-node 10.7.1 image, Docker, coreutils, grep  
-**Storage**: Temporary ChainDB, bundle, container log, and RocksDB stores  
+cardano-node 10.7.1 image, Docker, coreutils, grep
+**Storage**: Temporary ChainDB, bundle, container log, and RocksDB stores
 **Testing**: Bats, existing `bootstrap-producer-bats` flake check, Docker live
-verifier, `nix flake check`, and `just ci`  
-**Target Platform**: x86_64 Linux on self-hosted NixOS runners with Docker  
-**Project Type**: Test harness and Nix check  
+verifier, `nix flake check`, and `just ci`
+**Target Platform**: x86_64 Linux on self-hosted NixOS runners with Docker
+**Project Type**: Test harness and Nix check
 **Performance Goals**: Fatal or early-exit live failures surface on the next
-short poll; clean runs complete one configurable hold window  
+short poll; clean runs complete one configurable hold window
 **Constraints**: `tests/` plus localized `nix/checks.nix`; no production,
-workflow, justfile, dependency, pin, or upstream changes  
+workflow, justfile, dependency, pin, or upstream changes
 **Scale/Scope**: Five fatal signatures, one live node, one producer, one Amaru
 consumer, and the repository's Bash test-helper library
 
@@ -145,7 +145,7 @@ suite into `bootstrap-producer-bats`.
   exits nonzero on a seeded real `Consensus died` line and zero on clean input.
 - GREEN: `nix build .#checks.x86_64-linux.bootstrap-producer-bats`.
 
-**Commit**: `test: fail on fatal Amaru log events`  
+**Commit**: `test: fail on fatal Amaru log events`
 **Trailer**: `Tasks: T001, T002, T003, T004, T005`
 
 ### Slice 2 - Build the peered live consume boundary
@@ -167,7 +167,7 @@ hold window and clean up on every path.
 - Negative proof: seed or inject a fatal line through the test seam and show
   the live cleanliness path fails without depending on container exit.
 
-**Commit**: `test: restore live Amaru bundle consumption`  
+**Commit**: `test: restore live Amaru bundle consumption`
 **Trailer**: `Tasks: T006, T007, T008, T009, T010`
 
 ### Slice 3 - Extend `cli-mock-honesty` with helper reachability
@@ -191,7 +191,7 @@ the real `tests/lib/` tree through the existing `cli-mock-honesty` flake output.
 - Focused gate:
   `nix build .#checks.x86_64-linux.cli-mock-honesty`.
 
-**Commit**: `test: reject unreachable test helpers`  
+**Commit**: `test: reject unreachable test helpers`
 **Trailer**: `Tasks: T011, T012, T013, T014`
 
 ### Slice 4 - Publish evidence (orchestrator-owned)

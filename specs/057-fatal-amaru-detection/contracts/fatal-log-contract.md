@@ -58,4 +58,3 @@ Each live poll:
 This order preserves a fatal class when a container emitted the signature and
 then exited. An early exit with no fatal match uses the existing
 `exited-early` diagnostic contract and includes a bounded log tail.
-
