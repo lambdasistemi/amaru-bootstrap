@@ -12,7 +12,8 @@ prove it directly on seeded fatal and clean logs, and wire those tests into the
 CI-built `bootstrap-producer-bats` flake check. Extend the existing Docker live
 verifier to run the producer image's pinned Amaru against the live source node,
 polling both logs and liveness for a configured hold window. Finish with a
-general reachability audit for helpers under `tests/lib/`.
+test-helper reachability audit inside the existing `cli-mock-honesty` check
+landed by sibling issue #51.
 
 The corrected ancestry and detailed decisions are in
 [research.md](research.md). The exact log behavior is frozen in
@@ -42,8 +43,9 @@ consumer, and the repository's Bash test-helper library
 - **Stock tools**: Pass. Docker orchestrates stock cardano-node and the existing
   producer image; no upstream behavior is reimplemented.
 - **Pin by SHA**: Pass. No input, lock, or image-reference pin changes.
-- **Nix-first**: Pass. Deterministic and reachability proofs run inside the
-  already CI-built `bootstrap-producer-bats` derivation.
+- **Nix-first**: Pass. Deterministic fatal proofs run inside
+  `bootstrap-producer-bats`; the reachability proof extends the already
+  registered `cli-mock-honesty` flake check.
 - **Smallest provable step**: Pass. The fatal contract lands before the live
   boundary, and both precede the generalized recurrence control.
 - **Bundle output contract**: Pass by construction. Producer code and bundle
@@ -79,18 +81,21 @@ then verifies the container remains running. Teardown removes the consumer on
 every path. A reproduced upstream #1095 signature remains a real failure; no
 whitelist is introduced.
 
-### Test-helper reachability audit
+### Test-helper reachability in `cli-mock-honesty`
 
-`tests/check-test-helper-reachability.sh` discovers Bash helper declarations
-under `tests/lib/`, distinguishes declarations/comments from call sites, and
-requires either a reachable call or explicit exemption. A small Bats suite
-proves both dead and reachable fixtures before the audit runs on the real tree.
-The checker exposes simple file/function inputs so sibling audits can reuse it
-without creating another framework.
+Sibling issue #51 / PR #56 has landed
+`tests/check-cli-mock-honesty.sh`, its shared declarations in
+`tests/lib/cli-mock-surface.bash`, and the registered `cli-mock-honesty` flake
+check. Extend that mechanism in place: discover Bash helper declarations under
+`tests/lib/`, distinguish declarations/comments from call sites, and require
+either a reachable call or an explicit exemption.
 
-Before this slice starts, inspect PR #56. If its check seam has landed on
-`main`, extend that seam where the mechanics genuinely align. Otherwise land
-the standalone audit above and leave its interface obvious, per ruling A-001.
+The existing script owns its own positive and negative controls. Add an
+uncalled fixture that must be rejected and named, plus reachable and explicitly
+exempt fixtures that must pass, before auditing the real helper tree. This
+mirrors #51's real-path/removed-path controls and prevents an auditor that
+always returns success from passing. Do not add a second checker, Bats suite, or
+flake output.
 
 ## Project Structure
 
@@ -104,11 +109,12 @@ specs/057-fatal-amaru-detection/
 ├── spec.md
 └── tasks.md
 tests/
-├── check-test-helper-reachability.sh
-├── lib/bootstrap-helpers.bash
+├── check-cli-mock-honesty.sh
+├── lib/
+│   ├── bootstrap-helpers.bash
+│   └── cli-mock-surface.bash
 ├── test-bootstrap-helpers.bats
-├── test-bootstrap-producer-live.bats
-└── test-test-helper-reachability.bats
+└── test-bootstrap-producer-live.bats
 nix/
 └── checks.nix
 ```
@@ -164,24 +170,26 @@ hold window and clean up on every path.
 **Commit**: `test: restore live Amaru bundle consumption`  
 **Trailer**: `Tasks: T006, T007, T008, T009, T010`
 
-### Slice 3 - Reject unreachable test helpers
+### Slice 3 - Extend `cli-mock-honesty` with helper reachability
 
-Add and test the repository helper-reachability audit, run it against
-`tests/lib/`, and wire it into the existing CI-built flake check. Check sibling
-PR #56 immediately before dispatch and follow A-001's seam ruling.
+Extend sibling #51's landed checker with declaration, call-site, and explicit
+exemption handling. Run its positive and negative fixture controls, then audit
+the real `tests/lib/` tree through the existing `cli-mock-honesty` flake output.
 
 **Owned files**:
 
-- `tests/check-test-helper-reachability.sh`
-- `tests/test-test-helper-reachability.bats`
-- `nix/checks.nix`
+- `tests/check-cli-mock-honesty.sh`
+- `tests/lib/cli-mock-surface.bash`
+- `nix/checks.nix` only if the existing check needs another runtime input
 
 **RED/GREEN proof**:
 
-- RED: an uncalled fixture helper makes the checker exit nonzero and names it.
-- GREEN: a reachable fixture and the repository helper set pass.
+- RED: the existing check fails when asked to audit an uncalled fixture and
+  names the helper.
+- GREEN: the uncalled negative control is still rejected, while reachable,
+  explicitly exempt, and repository-tree controls pass.
 - Focused gate:
-  `nix build .#checks.x86_64-linux.bootstrap-producer-bats`.
+  `nix build .#checks.x86_64-linux.cli-mock-honesty`.
 
 **Commit**: `test: reject unreachable test helpers`  
 **Trailer**: `Tasks: T011, T012, T013, T014`
@@ -196,6 +204,7 @@ the parent inbox, run `just ci`, run the final commit/task audit, and remove
 
 ```text
 nix build .#checks.x86_64-linux.bootstrap-producer-bats
+nix build .#checks.x86_64-linux.cli-mock-honesty
 nix flake check
 just live-bootstrap-producer
 just ci

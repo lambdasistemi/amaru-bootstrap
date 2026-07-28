@@ -56,23 +56,25 @@ requiring container exit.
   `test: restore live Amaru bundle consumption` with trailer
   `Tasks: T006, T007, T008, T009, T010`
 
-## Slice 3 - Reject unreachable test helpers
+## Slice 3 - Extend `cli-mock-honesty` with helper reachability
 
-**Goal**: A CI-built audit rejects helpers under `tests/lib/` that have no
-caller and no explicit exemption.
+**Goal**: The existing CI-built `cli-mock-honesty` audit rejects helpers under
+`tests/lib/` that have no caller and no explicit exemption.
 
-**Independent Test**: An uncalled fixture fails and names its helper; a
-reachable fixture and the repository helper tree pass.
+**Independent Test**: An uncalled fixture fails and names its helper; reachable
+and explicitly exempt fixtures plus the repository helper tree pass.
 
-- [ ] T011 [US3] Add RED unreachable and GREEN reachable fixture cases in
-  `tests/test-test-helper-reachability.bats`
+- [ ] T011 [US3] Add RED uncalled and GREEN reachable/exempt fixture controls
+  to the existing `tests/check-cli-mock-honesty.sh`
 - [ ] T012 [US3] Implement declaration, call-site, and explicit-exemption
-  handling in `tests/check-test-helper-reachability.sh`
-- [ ] T013 [US3] Audit the real `tests/lib/` helper set and wire the checker
-  plus fixture suite into `bootstrap-producer-bats` in `nix/checks.nix`
-- [ ] T014 [US3] Inspect sibling PR #56 for a landed reusable seam, run
-  `nix build .#checks.x86_64-linux.bootstrap-producer-bats` and `./gate.sh`,
-  then commit as `test: reject unreachable test helpers` with trailer
+  handling inside `tests/check-cli-mock-honesty.sh`, with reviewable
+  exemptions declared in `tests/lib/cli-mock-surface.bash`
+- [ ] T013 [US3] Audit the real `tests/lib/` helper set through the existing
+  `cli-mock-honesty` flake output, adjusting only that check's runtime inputs
+  in `nix/checks.nix` if required
+- [ ] T014 [US3] Run
+  `nix build .#checks.x86_64-linux.cli-mock-honesty` and `./gate.sh`, then
+  commit as `test: reject unreachable test helpers` with trailer
   `Tasks: T011, T012, T013, T014`
 
 ## Slice 4 - Publish evidence (orchestrator-owned)
@@ -96,8 +98,8 @@ remaining downstream work clear to a reviewer.
 - T005 closes and freezes Slice 1 before Slice 2 starts.
 - T006 is reviewed RED before T007-T009 begin.
 - T010 closes and freezes Slice 2 before Slice 3 starts.
-- Immediately before T011, inspect PR #56 and apply ruling A-001. The sibling
-  check never blocks Slices 1 or 2.
+- Sibling issue #51 / PR #56 has merged; T011-T014 extend its
+  `cli-mock-honesty` mechanism in place, per ruling A-001.
 - T011 is reviewed RED before T012-T013 begin.
 - T014 closes and freezes Slice 3 before orchestrator-owned finalization.
 - T015 is refreshed throughout; T016-T017 run only after all worker slices are

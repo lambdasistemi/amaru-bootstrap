@@ -7,7 +7,16 @@ nix build .#checks.x86_64-linux.bootstrap-producer-bats
 ```
 
 The check covers every fatal class, the direct cleanliness return contract,
-missing-log behavior, and the helper-reachability audit.
+and missing/unreadable-log behavior.
+
+The recurrence control extends sibling #51's landed audit:
+
+```bash
+nix build .#checks.x86_64-linux.cli-mock-honesty
+```
+
+That check retains #51's real/invalid CLI surface controls and also rejects
+uncalled helpers under `tests/lib/` unless they have an explicit exemption.
 
 ## Live consume boundary
 
@@ -39,4 +48,3 @@ just ci
 
 This remains the local mirror of the Build Gate, Phase 0 verdict, and Docker
 live verifier.
-

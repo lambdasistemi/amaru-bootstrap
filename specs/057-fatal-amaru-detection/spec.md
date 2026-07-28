@@ -98,8 +98,9 @@ success or failure.
 
 ### User Story 3 - Dead test helpers cannot land silently (Priority: P2)
 
-As a maintainer, I can run the flake checks and know that a helper declared
-under `tests/lib/` has a reachable caller or an explicit, reviewable exemption.
+As a maintainer, I can run the existing `cli-mock-honesty` flake check and know
+that a helper declared under `tests/lib/` has a reachable caller or an
+explicit, reviewable exemption.
 
 **Why this priority**: The fatal scanner was born orphaned on `main`. A caller
 fix without a recurrence control leaves the actual integration failure intact.
@@ -114,8 +115,9 @@ it pass.
    **then** it fails and names the helper.
 2. **Given** each discovered test helper has a caller or explicit exemption,
    **when** the audit runs, **then** it passes.
-3. **Given** the complete ticket change, **when** the flake checks run,
-   **then** the reachability audit is included in the result.
+3. **Given** the complete ticket change, **when** `cli-mock-honesty` runs,
+   **then** the reachability audit and its negative control are included in the
+   result without a second flake output.
 
 ### Edge Cases
 
@@ -154,8 +156,10 @@ it pass.
   container, and temporary artifact introduced by the consume phase.
 - **FR-009**: A repository-level audit MUST fail when a helper under
   `tests/lib/` has no caller and no explicit exemption.
-- **FR-010**: The deterministic fatal-log and helper-reachability proofs MUST
-  be wired into Nix flake checks.
+- **FR-010**: The deterministic fatal-log proof MUST remain in
+  `bootstrap-producer-bats`, and helper reachability MUST extend sibling #51's
+  existing `cli-mock-honesty` flake check rather than create a second audit
+  mechanism.
 - **FR-011**: The Docker live verification path MUST remain part of the full
   local CI mirror.
 - **FR-012**: Producer behavior and the emitted bundle MUST remain unchanged.
@@ -192,7 +196,5 @@ it pass.
 - The downstream scored property is independently owned by
   `cardano-node-antithesis#193` and is not an acceptance dependency for this
   pull request.
-- Sibling PR #56 may land before the helper-reachability slice. If it does,
-  this ticket reuses its check seam where practical; otherwise the audit stays
-  standalone and exposes an obvious extension point.
-
+- Sibling issue #51 / PR #56 has merged. Its `cli-mock-honesty` script and
+  flake check are the required extension seam for helper reachability.
