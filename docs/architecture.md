@@ -7,9 +7,9 @@ The repository has two layers:
   relay wrapper and by local checks.
 
 The critical code boundary is still the release-pinned ledger-state
-format: the whole toolset (`header-extractor`, the `db-analyser` engine
-that `amaru create-snapshots` drives) targets one cardano-node release
-at a time. This branch targets `cardano-node 10.7.1`.
+format: the whole toolset (the pinned stock `db-analyser`, the
+`db-analyser` engine that `amaru create-snapshots` drives) targets one
+cardano-node release at a time. This branch targets `cardano-node 10.7.1`.
 
 ## Relay Runtime
 
@@ -43,9 +43,8 @@ not stop after bootstrap; it `exec`s `amaru run`.
 
 ```mermaid
 flowchart LR
-    mount["ChainDB snapshot\nconfig"] --> preflight["pre-flight\nconfig + era readiness\nheader-extractor tip-info"]
-    preflight --> blocks["preflight block list\nheader-extractor list-blocks"]
-    blocks --> targets["targets.json\nsnapshots.json\nlast block of each of the\n3 completed epochs"]
+    mount["ChainDB snapshot\nconfig"] --> preflight["pre-flight\nconfig + era readiness\ndb-analyser tip poll"]
+    preflight --> targets["targets.json\nsnapshots.json\none forward --show-slot-block-no trace\nlast block + parent of each of the\n3 completed epochs"]
     targets --> snaps["amaru create-snapshots\ndb-analyser engine\n--targets-file + --cardano-db-dir"]
     snaps --> snapdirs["snapshots/&lt;net&gt;/&lt;slot&gt;.&lt;hash&gt;/\nwith packaged bootstrap headers"]
     snapdirs --> sidecars["era-history sidecars\nhistory.&lt;slot&gt;.&lt;hash&gt;.json\n+ bundle era-history.json"]
@@ -82,8 +81,7 @@ flowchart LR
     state --> imm["immutable chunks\nread by tools"]
     state --> ledger["ledger DB\ncopied but not mutated"]
     state --> vol["volatile DB\ncopied for ChainDB shape"]
-    imm --> tip["header-extractor tip-info"]
-    imm --> headers["header-extractor headers"]
+    imm --> tip["db-analyser\ntip poll + target trace"]
     state -. "mounted read-only in relay\ncopied to writable scratch" .-> relay["amaru-relay-bootstrap"]
     relay --> scratch["scratch ChainDB\nopened read-write by producer tools"]
 ```
@@ -186,10 +184,8 @@ flowchart TB
         ledger["cardano-ledger-* versions"]
     end
 
-    Pinned --> tools["in-repo tools\nheader-extractor"]
-    Pinned --> analyser["db-analyser\ncreate-snapshots engine"]
+    Pinned --> analyser["db-analyser\nproducer readiness + targets\ncreate-snapshots engine"]
     analyser --> amaru["amaru create-snapshots\n+ amaru bootstrap"]
-    tools --> amaru
 
     other["Future node release"] -. "requires retargeting" .-> Pinned
 ```
