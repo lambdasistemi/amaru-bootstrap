@@ -36,7 +36,6 @@ let
       pkgs.jq
       amaruPkg
       headerExtractorPkgs.header-extractor
-      headerExtractorPkgs.ledger-state-emitter
     ];
     text = ''
       exec ${pkgs.bash}/bin/bash ${../scripts/bootstrap-producer.sh} "$@"
@@ -56,5 +55,4 @@ in
   db-analyser = mkApp iogTools.db-analyser "db-analyser";
   snapshot-converter = mkApp iogTools.snapshot-converter "snapshot-converter";
   header-extractor = mkApp headerExtractorPkgs.header-extractor "header-extractor";
-  ledger-state-emitter = mkApp headerExtractorPkgs.ledger-state-emitter "ledger-state-emitter";
 }
