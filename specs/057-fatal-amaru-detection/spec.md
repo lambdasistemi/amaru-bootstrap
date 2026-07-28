@@ -1,8 +1,8 @@
 # Feature Specification: Fatal Amaru Detection
 
-**Feature Branch**: `fix/57-fatal-log-guard`  
-**Created**: 2026-07-28  
-**Status**: Ready for planning  
+**Feature Branch**: `fix/57-fatal-log-guard`
+**Created**: 2026-07-28
+**Status**: Ready for planning
 **Input**: GitHub issue
 [`lambdasistemi/amaru-bootstrap#57`](https://github.com/lambdasistemi/amaru-bootstrap/issues/57),
 with the live-boundary detail from superseded issue
