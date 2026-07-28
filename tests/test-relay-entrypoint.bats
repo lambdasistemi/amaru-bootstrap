@@ -19,9 +19,12 @@ setup() {
   # Mock amaru
   MOCK_BIN="$TMP_DIR/mock-bin"
   mkdir -p "$MOCK_BIN"
+  export CLI_MOCK_SURFACE_LIB="$BATS_TEST_DIRNAME/lib/cli-mock-surface.bash"
   cat >"$MOCK_BIN/amaru" <<'SHIM'
 #!/usr/bin/env bash
 set -euo pipefail
+source "$CLI_MOCK_SURFACE_LIB"
+cli_mock_guard amaru "$@"
 cmd="$1"; shift
 case "$cmd" in
   node)

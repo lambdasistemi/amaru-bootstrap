@@ -20,10 +20,14 @@ setup() {
   export BOOTSTRAP_PRODUCER_BIN="$TMP_DIR/bin/bootstrap-producer"
   export AMARU_BIN="$TMP_DIR/bin/amaru"
   export FAKE_AMARU_ARGS="$TMP_DIR/amaru.args"
+  export CLI_MOCK_SURFACE_LIB="$BATS_TEST_DIRNAME/lib/cli-mock-surface.bash"
 
   {
     printf '#!%s\n' "$BASH"
     cat <<'EOF'
+set -euo pipefail
+source "$CLI_MOCK_SURFACE_LIB"
+cli_mock_guard amaru "$@"
 printf '%s\n' "$@" >"$FAKE_AMARU_ARGS"
 EOF
   } >"$AMARU_BIN"

@@ -23,6 +23,7 @@ setup() {
   # Nix sandboxes that don't ship /usr/bin/env. Capture the actual
   # bash on PATH so install_*_mock can write a hardcoded shebang.
   BASH_PATH="$(command -v bash)"
+  export CLI_MOCK_SURFACE_LIB="$BATS_TEST_DIRNAME/lib/cli-mock-surface.bash"
   # Shim every tool to a passing no-op by default; individual tests
   # override one shim to a failing variant.
   install_passing_mock db-synthesizer
@@ -84,6 +85,9 @@ SHIM
     amaru)
       cat >"$MOCK_BIN/$tool" <<SHIM
 #!${BASH_PATH}
+set -euo pipefail
+source "\$CLI_MOCK_SURFACE_LIB"
+cli_mock_guard amaru "\$@"
 target=""
 while [[ \$# -gt 0 ]]; do
   case "\$1" in
@@ -91,7 +95,7 @@ while [[ \$# -gt 0 ]]; do
     *) shift ;;
   esac
 done
-[[ -n "\$target" ]] && mkdir -p "\$target"
+if [[ -n "\$target" ]]; then mkdir -p "\$target"; fi
 exit 0
 SHIM
       ;;
@@ -171,4 +175,9 @@ SHIM
   [ -e "$OUT/convert.stderr.log" ]
   [ ! -s "$OUT/dump.stderr.log" ]
   [ ! -s "$OUT/convert.stderr.log" ]
+}
+
+@test "default amaru shim rejects convert-ledger-state (removed upstream)" {
+  run "$MOCK_BIN/amaru" convert-ledger-state --target-dir "$TMP_DIR/x"
+  [ "$status" -ne 0 ]
 }

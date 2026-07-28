@@ -17,19 +17,19 @@ binary is fail-closed and verified against that real binary.
 makes `cli-mock-honesty` fail; all audited real paths and existing bats
 suites pass.
 
-- [ ] T001 [US1] Add RED assertions for the invalid
+- [X] T001 [US1] Add RED assertions for the invalid
   `header-extractor prev-epoch-tail` response in
   `tests/test-bootstrap-producer-canonical-cli.bats` and the permissive
   default Amaru shim in `tests/test-tool-error.bats`
-- [ ] T002 [US1] Define the declared surfaces and fail-closed runtime guard
+- [X] T002 [US1] Define the declared surfaces and fail-closed runtime guard
   in `tests/lib/cli-mock-surface.bash`
-- [ ] T003 [US1] Apply the guard to all audited success-capable Amaru and
+- [X] T003 [US1] Apply the guard to all audited success-capable Amaru and
   header-extractor mocks in the six owned bats files
-- [ ] T004 [US1] Add real-binary surface and guard-coverage verification in
+- [X] T004 [US1] Add real-binary surface and guard-coverage verification in
   `tests/check-cli-mock-honesty.sh`
-- [ ] T005 [US1] Add the localized `cli-mock-honesty` flake check in
+- [X] T005 [US1] Add the localized `cli-mock-honesty` flake check in
   `nix/checks.nix`
-- [ ] T006 [US1] Run the focused checks and `./gate.sh`, then commit with
+- [X] T006 [US1] Run the focused checks and `./gate.sh`, then commit with
   subject `test: keep mocked CLI surfaces honest` and trailer
   `Tasks: T001, T002, T003, T004, T005, T006`
 

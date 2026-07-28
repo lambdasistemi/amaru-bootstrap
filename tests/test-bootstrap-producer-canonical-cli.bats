@@ -25,6 +25,7 @@ setup() {
   MOCK_BIN="$TMP_DIR/mock-bin"
   mkdir -p "$MOCK_BIN"
   BASH_PATH="$(command -v bash)"
+  export CLI_MOCK_SURFACE_LIB="$BATS_TEST_DIRNAME/lib/cli-mock-surface.bash"
   install_canonical_mocks
 
   export PATH="$MOCK_BIN:$PATH"
@@ -46,6 +47,8 @@ install_canonical_mocks() {
   cat >"$MOCK_BIN/header-extractor" <<SHIM
 #!${BASH_PATH}
 set -euo pipefail
+source "\$CLI_MOCK_SURFACE_LIB"
+cli_mock_guard header-extractor "\$@"
 cmd="\$1"
 shift
 case "\$cmd" in
@@ -69,20 +72,6 @@ case "\$cmd" in
     ;;
   get-header)
     printf 'header'
-    ;;
-  prev-epoch-tail)
-    out=""
-    while [[ \$# -gt 0 ]]; do
-      case "\$1" in
-        --out) out="\$2"; shift 2 ;;
-        *) shift ;;
-      esac
-    done
-    [[ -n "\$out" ]] || exit 1
-    mkdir -p "\$(dirname "\$out")"
-    printf 'header' >"\$out"
-    h120="\$(printf '%064x' 120)"
-    printf '{"slot":120,"hash":"%s","out":"%s"}\n' "\$h120" "\$out"
     ;;
   *)
     printf 'unexpected header-extractor command: %s\n' "\$cmd" >&2
@@ -112,6 +101,8 @@ SHIM
   cat >"$MOCK_BIN/amaru" <<SHIM
 #!${BASH_PATH}
 set -euo pipefail
+source "\$CLI_MOCK_SURFACE_LIB"
+cli_mock_guard amaru "\$@"
 cmd="\$1"
 shift
 case "\$cmd" in
@@ -227,4 +218,9 @@ SHIM
   # Bundle must have the canonical layout
   [ -d "$TMP_DIR/bundle/testnet_42/ledger.testnet_42.db" ]
   [ -d "$TMP_DIR/bundle/testnet_42/chain.testnet_42.db" ]
+}
+
+@test "header-extractor mock rejects prev-epoch-tail (removed upstream)" {
+  run "$MOCK_BIN/header-extractor" prev-epoch-tail --out "$TMP_DIR/tail.json"
+  [ "$status" -ne 0 ]
 }
