@@ -1,8 +1,8 @@
 # Feature Specification: CLI Mock Honesty
 
-**Feature Branch**: `test/51-cli-mock-honesty`  
-**Created**: 2026-07-28  
-**Status**: Ready for planning  
+**Feature Branch**: `test/51-cli-mock-honesty`
+**Created**: 2026-07-28
+**Status**: Ready for planning
 **Input**: GitHub issue
 [`lambdasistemi/amaru-bootstrap#51`](https://github.com/lambdasistemi/amaru-bootstrap/issues/51)
 
