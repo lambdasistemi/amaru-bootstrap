@@ -26,20 +26,20 @@ SHA; the unrelated-lock comparison is empty; seeded CLI drift exits
 nonzero; the restored real surface, Build Gate, and Docker live verifier
 exit zero.
 
-- [ ] T001 [US1] Capture raw execution-time upstream main and
+- [X] T001 [US1] Capture raw execution-time upstream main and
   `pragma-org/amaru#1098` state under the driver runtime
   `handoffs/`, stopping with a Q-file if the expected-red premise changed
-- [ ] T002 [US1] Prove the current revisions in `flake.nix` and
+- [X] T002 [US1] Prove the current revisions in `flake.nix` and
   `flake.lock` fail the exact-target assertion, seed one rejected command
   in `tests/lib/cli-mock-surface.bash`, and freeze the raw nonzero
   `cli-mock-honesty` result plus complete RED diff
-- [ ] T003 [US1] Restore only the temporary CLI seed, update the Amaru SHA
+- [X] T003 [US1] Restore only the temporary CLI seed, update the Amaru SHA
   in `flake.nix`, refresh only `.nodes.amaru` in `flake.lock`, and prove
   structurally that every unrelated lock node is unchanged
-- [ ] T004 [US1] Preserve the existing raw `cli-mock-honesty` build result,
+- [X] T004 [US1] Preserve the existing raw `cli-mock-honesty` build result,
   including its peer-snapshot failure and real nonzero exit, as the amended
   RED and obtain navigator approval before editing the consumer recipe
-- [ ] T005 [US1] In `nix/amaru.nix` only, stage the minimal valid
+- [X] T005 [US1] In `nix/amaru.nix` only, stage the minimal valid
   upstream-documented placeholders for mainnet, preprod, and preview, set
   `AMARU_SKIP_PEER_SNAPSHOT_FETCH=1`, stamp
   `workaround-for=https://github.com/pragma-org/amaru/issues/1102`, then
@@ -48,10 +48,10 @@ exit zero.
   reconcile the fenced CLI declaration/test surface only if that successful
   build proves command drift, and freeze post-edit hashes plus a complete
   GREEN diff under the driver runtime `handoffs/`
-- [ ] T006 [US1] Capture raw zero-exit `just build-gate` and `./gate.sh`
+- [X] T006 [US1] Capture raw zero-exit `just build-gate` and `./gate.sh`
   runs, including the live producer/consumer observation, after the final
   edit
-- [ ] T007 [US1] Obtain navigator RED and GREEN approvals, run the
+- [X] T007 [US1] Obtain navigator RED and GREEN approvals, run the
   handoff-completeness gate, and commit the reviewed slice as
   `build: bump amaru to upstream main` with trailer
   `Tasks: T001, T002, T003, T004, T005, T006, T007`
