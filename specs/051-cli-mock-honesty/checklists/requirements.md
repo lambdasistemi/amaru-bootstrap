@@ -1,7 +1,7 @@
 # Specification Quality Checklist: CLI Mock Honesty
 
-**Purpose**: Validate specification completeness before planning  
-**Created**: 2026-07-28  
+**Purpose**: Validate specification completeness before planning
+**Created**: 2026-07-28
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality

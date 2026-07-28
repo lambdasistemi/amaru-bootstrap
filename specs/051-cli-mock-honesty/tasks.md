@@ -1,7 +1,7 @@
 # Tasks: CLI Mock Honesty
 
 **Input**: Design documents from
-`/specs/051-cli-mock-honesty/`  
+`/specs/051-cli-mock-honesty/`
 **Prerequisites**: [spec.md](spec.md), [plan.md](plan.md),
 [research.md](research.md)
 
@@ -38,11 +38,11 @@ suites pass.
 **Goal**: Make the audit and proof legible to a reviewer, close task
 accounting, and satisfy the final ticket gate.
 
-- [ ] T007 [US1] Update pull request #56 with every test-double audit
+- [X] T007 [US1] Update pull request #56 with every test-double audit
   finding, the hidden-command nuance, and the landed behavior by slice
-- [ ] T008 [US1] Check the parent inbox, inspect the complete branch diff,
+- [X] T008 [US1] Check the parent inbox, inspect the complete branch diff,
   run `./gate.sh`, and run the finalization audit
-- [ ] T009 [US1] Mark this orchestrator-owned slice complete in
+- [X] T009 [US1] Mark this orchestrator-owned slice complete in
   `specs/051-cli-mock-honesty/tasks.md` and commit it with subject
   `docs: finalize CLI mock audit evidence`
 

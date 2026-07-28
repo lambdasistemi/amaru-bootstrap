@@ -1,7 +1,7 @@
 # Implementation Plan: CLI Mock Honesty
 
 **Branch**: `test/51-cli-mock-honesty` | **Date**: 2026-07-28 |
-**Spec**: [spec.md](spec.md)  
+**Spec**: [spec.md](spec.md)
 **Input**: Feature specification from
 `/specs/051-cli-mock-honesty/spec.md`
 
@@ -16,18 +16,18 @@ The detailed command audit and nonstandard help behavior are recorded in
 
 ## Technical Context
 
-**Language/Version**: Bash 5 and Bats  
+**Language/Version**: Bash 5 and Bats
 **Primary Dependencies**: Existing flake-built `amaru` and
-`header-extractor`; Nix `runCommand`  
-**Storage**: None  
+`header-extractor`; Nix `runCommand`
+**Storage**: None
 **Testing**: Bats regression assertions, a shell command-surface checker,
-and `nix flake check`  
-**Target Platform**: x86_64 Linux under the repository's Nix flake  
-**Project Type**: Test harness and build check  
+and `nix flake check`
+**Target Platform**: x86_64 Linux under the repository's Nix flake
+**Project Type**: Test harness and build check
 **Performance Goals**: Preserve fast hermetic bats suites; the honesty
-check performs help-only binary probes  
+check performs help-only binary probes
 **Constraints**: `tests/` plus minimal localized `nix/checks.nix` wiring;
-no production or dependency changes  
+no production or dependency changes
 **Scale/Scope**: The current in-repo executable test doubles
 
 ## Constitution Check
