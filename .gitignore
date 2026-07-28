@@ -6,3 +6,4 @@ tmp/
 *.log
 WIP.md
 .llm/
+site/
