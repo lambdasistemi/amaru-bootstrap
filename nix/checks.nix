@@ -388,6 +388,7 @@ in
 
       bats --tap \
         tests/test-amaru-relay-bootstrap.bats \
+        tests/test-bootstrap-helpers.bats \
         tests/test-bootstrap-producer-canonical-cli.bats \
         tests/test-bootstrap-producer-sparse-boundaries.bats \
         tests/test-bootstrap-producer-config.bats \
