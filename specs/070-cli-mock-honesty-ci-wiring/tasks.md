@@ -28,8 +28,8 @@ the full live gate, and the complete owned-file diff pass review.
 - [ ] T004 [US1] Freeze sequential RED evidence in `/tmp/epic-55/amaru-bootstrap-70/wire-cli-honesty-driver/handoffs/red.diff`, pass the handoff-completeness gate, and obtain literal navigator `REVIEW-APPROVED red`
 - [ ] T005 [US1] Add exactly one `.#checks.x86_64-linux.cli-mock-honesty` request to `.github/workflows/ci.yml` and exactly one matching request to `justfile`, changing no other behavior
 - [ ] T006 [US1] Run the same runtime assertion to GREEN, prove the evaluated CLI mock honesty output is in the final exact requested closure, and capture sequential hashes and the complete owned-file diff
-- [ ] T007 [US1] Require the restored standalone check, `just build-gate`, and `./gate.sh` to exit zero, retaining raw outputs including the live producer observation under `/tmp/epic-55/amaru-bootstrap-70/logs/`
-- [ ] T008 [US1] Pass the GREEN handoff-completeness and navigator barriers, then commit exactly `.github/workflows/ci.yml` and `justfile` as `fix(ci): execute CLI mock honesty in Build Gate` with trailer `Tasks: T001, T002, T003, T004, T005, T006, T007, T008`
+- [ ] T007 [US1] Pass the GREEN handoff-completeness gate and obtain literal navigator `REVIEW-APPROVED green` for the frozen complete owned-file diff
+- [ ] T008 [US1] After GREEN approval, require the restored standalone check, `just build-gate`, and `./gate.sh` to exit zero with raw live evidence, then commit exactly `.github/workflows/ci.yml` and `justfile` as `fix(ci): execute CLI mock honesty in Build Gate` with trailer `Tasks: T001, T002, T003, T004, T005, T006, T007, T008`
 
 ## Slice 2 - Publish review evidence (orchestrator-owned)
 
@@ -51,9 +51,10 @@ merging.
   before literal navigator RED approval.
 - T005 is the complete implementation and changes only the two owned files.
 - T006 reruns the identical assertion and exact closure identity after T005.
-- T007 runs only after the last implementation write and exact test-surface
-  restoration.
-- T008 requires literal navigator GREEN approval before commit.
+- T007 is the literal navigator GREEN barrier over the sequentially frozen
+  final diff.
+- T008 runs focused, local, and full live gates only after that approval, then
+  commits the reviewed bytes.
 - T009 starts after the orchestrator independently accepts and pushes T008.
 - T010 blocks T011 because final review metadata cannot claim hosted execution
   before the checks and logs exist.
