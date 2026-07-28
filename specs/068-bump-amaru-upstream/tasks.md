@@ -9,12 +9,16 @@
 **Tests**: RED-GREEN is mandatory. The dependency RED is the old pin
 failing the freshly frozen exact-target assertion. The CLI instrument is
 also seeded with a rejected accepted command and must demonstrably fail
-before the selected real binary is accepted.
+before the selected real binary is accepted. The existing
+`cli-green.raw.log` with `CLI_GREEN_EXIT=1` is the accepted RED for the
+selected revision's offline peer-snapshot build boundary; it is not rerun
+solely to manufacture another failure.
 
 ## Slice 1 - Repin Amaru and prove the real surface
 
 **Goal**: Select the execution-time stock upstream commit without moving
-another dependency, and prove the declared CLI plus live producer/consumer
+another dependency, adapt its documented offline snapshot input in the
+consumer derivation, and prove the declared CLI plus live producer/consumer
 boundary remain honest.
 
 **Independent Test**: Both dependency records equal the frozen upstream
@@ -32,18 +36,18 @@ exit zero.
 - [ ] T003 [US1] Restore only the temporary CLI seed, update the Amaru SHA
   in `flake.nix`, refresh only `.nodes.amaru` in `flake.lock`, and prove
   structurally that every unrelated lock node is unchanged
-- [ ] T004 [US1] Run the real-binary CLI honesty check and, only if its raw
-  output proves upstream command drift, reconcile the declared surface in
-  `tests/lib/cli-mock-surface.bash`, `tests/check-cli-mock-honesty.sh`,
-  `tests/test-bootstrap-producer-canonical-cli.bats`,
-  `tests/test-bootstrap-producer-history.bats`,
-  `tests/test-bootstrap-producer-sparse-boundaries.bats`,
-  `tests/test-amaru-relay-bootstrap.bats`, and
-  `tests/test-relay-entrypoint.bats` without weakening fail-closed behavior
-- [ ] T005 [US1] Require the exact-pin assertion and
+- [ ] T004 [US1] Preserve the existing raw `cli-mock-honesty` build result,
+  including its peer-snapshot failure and real nonzero exit, as the amended
+  RED and obtain navigator approval before editing the consumer recipe
+- [ ] T005 [US1] In `nix/amaru.nix` only, stage the minimal valid
+  upstream-documented placeholders for mainnet, preprod, and preview, set
+  `AMARU_SKIP_PEER_SNAPSHOT_FETCH=1`, stamp
+  `workaround-for=https://github.com/pragma-org/amaru/issues/1102`, then
+  require the exact-pin assertion and
   `nix build .#checks.x86_64-linux.cli-mock-honesty` to exit zero, then
-  freeze post-edit hashes and a complete GREEN diff under the driver
-  runtime `handoffs/`
+  reconcile the fenced CLI declaration/test surface only if that successful
+  build proves command drift, and freeze post-edit hashes plus a complete
+  GREEN diff under the driver runtime `handoffs/`
 - [ ] T006 [US1] Capture raw zero-exit `just build-gate` and `./gate.sh`
   runs, including the live producer/consumer observation, after the final
   edit
@@ -78,9 +82,11 @@ without merging.
   before it succeeds.
 - T002 proves both the ticket RED and the CLI instrument's negative control.
 - T003 depends on navigator approval of the frozen RED.
-- T004 is evidence-conditional and may complete with zero test-file edits
+- T004 is the already-captured amended build RED and navigator review gate.
+- T005 contains the authorized consumer-side adaptation and remains one
+  bisect-safe unit with the pin; it may complete with zero test-file edits
   when the real binary accepts the existing declared surface.
-- T005 and T006 run only after the final edit.
+- T006 runs only after the final edit.
 - T007 is a synchronization barrier: the driver must read literal
   navigator approvals before gate and commit.
 - T008 starts after the accepted implementation commit is pushed.
@@ -94,10 +100,12 @@ without merging.
 1. Freeze the upstream fact and stop if the issue premise changed.
 2. Prove the old pin is wrong and the CLI invariant can fail.
 3. Repin one input and prove all other lock nodes stayed still.
-4. Let the real binary—not a guessed compatibility story—decide whether
-   any declared test surface must move.
-5. Freeze post-edit evidence sequentially, pass the full live gate, and
+4. Treat the existing offline snapshot failure as RED, stage the documented
+   deterministic placeholders in `nix/amaru.nix`, and keep upstream bare.
+5. Let the real binary—not a guessed compatibility story—decide whether any
+   declared test surface must move.
+6. Freeze post-edit evidence sequentially, pass the full live gate, and
    land one reviewed bisect-safe commit.
-6. The ticket orchestrator stamps T001-T007 into that same commit, refreshes
+7. The ticket orchestrator stamps T001-T007 into that same commit, refreshes
    PR #69, waits for both hosted checks, lands the evidence task update,
    finalizes, and hands the ready PR to the operator without merging.

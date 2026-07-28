@@ -38,7 +38,11 @@ gate, and live producer/consumer verifier all exit zero.
 3. **Given** the new revision and any evidence-required surface
    reconciliation, **when** the full repository and live-boundary gates run,
    **then** every check succeeds without weakening an assertion.
-4. **Given** the upstream consensus repair is not in the selected revision,
+4. **Given** an offline Nix source build has no Git checkout and no network,
+   **when** Amaru's build script prepares embedded peer snapshots, **then**
+   the consumer stages upstream-documented deterministic placeholders for
+   every required network and explicitly skips the date-based fetch.
+5. **Given** the upstream consensus repair is not in the selected revision,
    **when** this supplier bump is reported, **then** no result claims that
    the downstream fatal-consensus property is fixed or expected green.
 
@@ -59,6 +63,9 @@ gate, and live producer/consumer verifier all exit zero.
 - A command-surface failure is positive evidence that the check works.
   Reconciliation must follow the real binary and must not add a permissive
   mock, compatibility fork, or assertion skip.
+- The selected Amaru revision requires embedded peer snapshots at build
+  time. In an offline source archive, the documented placeholder path must
+  remain deterministic and must not require real network data.
 - A local gate can pass while the hosted runner or Docker seam fails.
   Both named pull-request checks remain required before final review.
 
@@ -96,6 +103,14 @@ gate, and live producer/consumer verifier all exit zero.
 - **FR-011**: Acceptance evidence MUST preserve raw combined output, real
   command exit codes, and hashes captured only after the final relevant
   edit in a separate sequential step.
+- **FR-012**: The consumer build definition MUST stage the
+  upstream-documented minimal valid peer-snapshot placeholders for
+  `mainnet`, `preprod`, and `preview`, and MUST set
+  `AMARU_SKIP_PEER_SNAPSHOT_FETCH=1` so a clean offline source archive does
+  not depend on Git metadata or network access.
+- **FR-013**: The peer-snapshot workaround MUST be confined to
+  `nix/amaru.nix`, MUST leave upstream source unpatched, and MUST carry
+  `workaround-for=https://github.com/pragma-org/amaru/issues/1102`.
 
 ## Success Criteria
 
@@ -111,12 +126,16 @@ gate, and live producer/consumer verifier all exit zero.
   and the live producer/consumer observation passing.
 - **SC-004**: Both required pull-request checks conclude success on the
   final reviewed commit.
-- **SC-005**: The implementation diff contains zero changes outside the
-  two dependency records unless a real-binary failure justifies changes
-  within the explicitly allowed CLI declaration and test surface.
+- **SC-005**: The implementation diff contains zero changes outside
+  `flake.nix`, `flake.lock`, and `nix/amaru.nix` unless a real-binary
+  command failure justifies changes within the explicitly allowed CLI
+  declaration and test surface.
 - **SC-006**: The pull request makes zero claims that the open upstream
   consensus repair has landed or that the expected downstream red result
   is green.
+- **SC-007**: The final Amaru build log shows the documented offline
+  peer-snapshot path succeeds without a Git-date fetch or network access,
+  and the full local and hosted gates remain green.
 
 ## Assumptions
 
