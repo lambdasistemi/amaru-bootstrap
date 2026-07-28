@@ -10,8 +10,8 @@ Replace the producer's custom chain-database queries with two pinned
 block trace that writes the three target records Amaru needs. Prove all six
 points against the real synthesized database, then remove the redundant
 Haskell executable and align current documentation. The work lands in three
-bisect-safe commits: behavior and proof, build/image deletion, and
-documentation.
+bisect-safe implementation commits—behavior and proof, build/image deletion,
+and documentation—followed by one orchestrator-owned evidence commit.
 
 ## Technical Context
 
@@ -42,7 +42,7 @@ points, origin fails closed, deterministic bundle equivalence
 
 **Scale/Scope**: one producer script, one package/application/check/image
 surface, three test-double owners, one real point check, six current
-documentation surfaces, three reviewed commits
+documentation surfaces, four reviewed commits
 
 ## Constitution Check
 
@@ -273,14 +273,42 @@ tip-info, list-blocks, and get-header references.
 
 **Trailer**: `Tasks: T014, T015, T016`
 
+## Slice 4 - Publish review evidence (orchestrator-owned)
+
+**Risk tier**: mechanical PR metadata and task accounting. Orchestrator effort:
+current ticket-owner tier; no worker panes.
+
+**Owned files**:
+
+- `specs/052-retarget-db-analyser/tasks.md`
+- pull request #63 body through GitHub metadata
+- ticket runtime evidence under `/tmp/epic-55/amaru-bootstrap-52/handoffs/`
+
+**Forbidden scope**: every production, test, build, configuration, dependency,
+and current-documentation file from Slices 1-3.
+
+**GREEN**:
+
+- the PR body explains each landed slice in plain language and links its
+  technical contract, exact-point evidence, deterministic bundle proof, image
+  absence, decision log, and live boundary result;
+- the parent inbox is empty or every note is resolved;
+- the ticket owner independently reviews the entire branch, reruns the full
+  gate, and checks every commit/task mapping;
+- this slice's tasks are checked in one documentation commit.
+
+**Commit**: `docs: finalize db-analyser retarget evidence`
+
+**Trailer**: `Tasks: T017, T018, T019`
+
 ## Acceptance and Finalization
 
-After each pair-approved commit, the ticket orchestrator independently reviews
+After each pair-approved implementation commit, the ticket orchestrator independently reviews
 the owned-file diff, checks the raw handoff evidence, reruns the focused proof
 and `./gate.sh`, stamps the matching task boxes into the same commit, pushes,
 and refreshes the human-facing PR body.
 
-After Slice 3:
+After Slice 4:
 
 1. Re-run the exact six-point check and its negative control.
 2. Re-run the deterministic 49-path/31-hash bundle comparison.
