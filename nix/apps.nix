@@ -1,7 +1,6 @@
 { pkgs
 , amaruPkg
 , iogTools
-, headerExtractorPkgs
 }:
 
 # Runnable wrappers exposed via `nix run .#<name>`.
@@ -21,7 +20,6 @@ let
       pkgs.jq
       amaruPkg
       iogTools.db-analyser
-      headerExtractorPkgs.header-extractor
     ];
     text = ''
       exec ${pkgs.bash}/bin/bash ${../scripts/bootstrap-producer.sh} "$@"
@@ -39,5 +37,4 @@ in
   db-synthesizer = mkApp iogTools.db-synthesizer "db-synthesizer";
   db-analyser = mkApp iogTools.db-analyser "db-analyser";
   snapshot-converter = mkApp iogTools.snapshot-converter "snapshot-converter";
-  header-extractor = mkApp headerExtractorPkgs.header-extractor "header-extractor";
 }

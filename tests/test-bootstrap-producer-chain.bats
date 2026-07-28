@@ -60,7 +60,7 @@ teardown() {
   [ -n "$tip_slot" ]
   [ "$tip_slot" -gt 0 ]
   # The readiness diagnostic carries the real db-analyser only-validation
-  # markers (stderr, per the measured stream split), proving db-analyser -
-  # not the retired header-extractor - served the poll.
+  # markers (stderr, per the measured stream split), proving db-analyser
+  # served the poll.
   grep -q 'Started OnlyValidation' "$TMP_DIR/bundle/.logs/tip-info.stderr"
 }

@@ -1,7 +1,6 @@
 { pkgs
 , amaruPkg
 , iogTools
-, headerExtractor
 }:
 
 # Layered docker image carrying the bootstrap-producer.
@@ -12,7 +11,7 @@
 # breaks bashisms; we use /bin/bash via the script's executable bit).
 #
 # Layered for cache-friendliness: heavy binary layers
-# (amaru, header-extractor) persist across
+# (amaru, db-analyser) persist across
 # builds; only the orchestrator script's layer rebuilds when the
 # orchestrator changes (it changes most often).
 #
@@ -28,7 +27,6 @@ let
     pkgs.gawk
     pkgs.gnused
     pkgs.jq
-    headerExtractor
     iogTools.db-analyser
     amaruPkg
   ];
@@ -67,7 +65,6 @@ pkgs.dockerTools.buildLayeredImage {
     pkgs.gnused
     pkgs.jq
     pkgs.cacert
-    headerExtractor
     iogTools.db-analyser
     amaruPkg
     bootstrapProducer

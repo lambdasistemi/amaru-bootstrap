@@ -93,16 +93,14 @@
         project = import ./nix/project.nix { inherit pkgs CHaP; };
         amaruPkg = import ./nix/amaru.nix { inherit pkgs crane amaru; };
         iogTools = import ./nix/iog-tools.nix { inherit project; };
-        headerExtractorPkgs = import ./nix/header-extractor.nix { inherit project; };
         bootstrapProducerImage = import ./nix/bootstrap-producer-image.nix {
           inherit pkgs amaruPkg iogTools;
-          headerExtractor = headerExtractorPkgs.header-extractor;
         };
         checks = import ./nix/checks.nix {
-          inherit pkgs amaruPkg iogTools headerExtractorPkgs bootstrapProducerImage;
+          inherit pkgs amaruPkg iogTools bootstrapProducerImage;
         };
         apps = import ./nix/apps.nix {
-          inherit pkgs amaruPkg iogTools headerExtractorPkgs;
+          inherit pkgs amaruPkg iogTools;
         };
         shell = import ./nix/shell.nix {
           inherit pkgs project amaruPkg iogTools;
@@ -114,7 +112,6 @@
           db-synthesizer = iogTools.db-synthesizer;
           db-analyser = iogTools.db-analyser;
           snapshot-converter = iogTools.snapshot-converter;
-          header-extractor = headerExtractorPkgs.header-extractor;
           bootstrap-producer-image = bootstrapProducerImage;
           default = amaruPkg;
         };

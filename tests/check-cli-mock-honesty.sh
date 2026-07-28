@@ -21,20 +21,6 @@ for cmd_path in "${CLI_MOCK_ACCEPTED_AMARU[@]}"; do
   fi
 done
 
-# --- header-extractor: exit 7 for both valid help and parse errors ---
-# Accepted iff output contains the command-specific Usage: line (naming
-# the probed subcommand) and no invalid-argument diagnostic.
-for cmd_path in "${CLI_MOCK_ACCEPTED_HEADER_EXTRACTOR[@]}"; do
-  output="$(header-extractor "$cmd_path" --help 2>&1 || true)"
-  if printf '%s\n' "$output" | grep -q "Usage:.*${cmd_path}" \
-    && ! printf '%s\n' "$output" | grep -qiE 'invalid|unrecognized|error'; then
-    printf 'OK: header-extractor %s accepted by real binary\n' "$cmd_path"
-  else
-    printf 'FAIL: header-extractor %s not accepted by real binary\n' "$cmd_path" >&2
-    fail=1
-  fi
-done
-
 # --- Known invalid paths must be rejected ---
 # shellcheck disable=SC2086
 if amaru convert-ledger-state --help >/dev/null 2>&1; then
@@ -42,15 +28,6 @@ if amaru convert-ledger-state --help >/dev/null 2>&1; then
   fail=1
 else
   printf 'OK: amaru convert-ledger-state rejected\n'
-fi
-
-output="$(header-extractor prev-epoch-tail --help 2>&1 || true)"
-if printf '%s\n' "$output" | grep -q 'Usage:.*prev-epoch-tail' \
-  && ! printf '%s\n' "$output" | grep -qiE 'invalid|unrecognized|error'; then
-  printf 'FAIL: header-extractor prev-epoch-tail accepted (expected rejection)\n' >&2
-  fail=1
-else
-  printf 'OK: header-extractor prev-epoch-tail rejected\n'
 fi
 
 # --- Guard coverage: every audited success-capable mock owner ---
