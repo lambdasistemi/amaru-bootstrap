@@ -22,14 +22,14 @@ directions acceptance depends on.
 passes afterward; seeded CLI drift fails; restoration, the local Build Gate,
 the full live gate, and the complete owned-file diff pass review.
 
-- [ ] T001 [US1] Write the runtime-only structural and exact-closure assertion under `/tmp/epic-55/amaru-bootstrap-70/wire-cli-honesty-driver/handoffs/`, then capture its nonzero baseline result against `.github/workflows/ci.yml` and `justfile`
-- [ ] T002 [US1] Capture a positive control where `nix path-info -r` finds the directly requested `cli-mock-honesty` output and a negative baseline where the exact explicit Build Gate closure omits it under `/tmp/epic-55/amaru-bootstrap-70/wire-cli-honesty-driver/handoffs/`
-- [ ] T003 [US1] Temporarily add the known rejected `convert-ledger-state` command to `CLI_MOCK_ACCEPTED_AMARU` in `tests/lib/cli-mock-surface.bash`, require the standalone check to fail and name it, then inverse-patch and hash-prove exact restoration before any implementation edit
-- [ ] T004 [US1] Freeze sequential RED evidence in `/tmp/epic-55/amaru-bootstrap-70/wire-cli-honesty-driver/handoffs/red.diff`, pass the handoff-completeness gate, and obtain literal navigator `REVIEW-APPROVED red`
-- [ ] T005 [US1] Add exactly one `.#checks.x86_64-linux.cli-mock-honesty` request to `.github/workflows/ci.yml` and exactly one matching request to `justfile`, changing no other behavior
-- [ ] T006 [US1] Run the same runtime assertion to GREEN, prove the evaluated CLI mock honesty output is in the final exact requested closure, and capture sequential hashes and the complete owned-file diff
-- [ ] T007 [US1] Pass the GREEN handoff-completeness gate and obtain literal navigator `REVIEW-APPROVED green` for the frozen complete owned-file diff
-- [ ] T008 [US1] After GREEN approval, require the restored standalone check, `just build-gate`, and `./gate.sh` to exit zero with raw live evidence, then commit exactly `.github/workflows/ci.yml` and `justfile` as `fix(ci): execute CLI mock honesty in Build Gate` with trailer `Tasks: T001, T002, T003, T004, T005, T006, T007, T008`
+- [X] T001 [US1] Write the runtime-only structural and exact-closure assertion under `/tmp/epic-55/amaru-bootstrap-70/wire-cli-honesty-driver/handoffs/`, then capture its nonzero baseline result against `.github/workflows/ci.yml` and `justfile`
+- [X] T002 [US1] Capture a positive control where `nix path-info -r` finds the directly requested `cli-mock-honesty` output and a negative baseline where the exact explicit Build Gate closure omits it under `/tmp/epic-55/amaru-bootstrap-70/wire-cli-honesty-driver/handoffs/`
+- [X] T003 [US1] Temporarily add the known rejected `convert-ledger-state` command to `CLI_MOCK_ACCEPTED_AMARU` in `tests/lib/cli-mock-surface.bash`, require the standalone check to fail and name it, then inverse-patch and hash-prove exact restoration before any implementation edit
+- [X] T004 [US1] Freeze sequential RED evidence in `/tmp/epic-55/amaru-bootstrap-70/wire-cli-honesty-driver/handoffs/red.diff`, pass the handoff-completeness gate, and obtain literal navigator `REVIEW-APPROVED red`
+- [X] T005 [US1] Add exactly one `.#checks.x86_64-linux.cli-mock-honesty` request to `.github/workflows/ci.yml` and exactly one matching request to `justfile`, changing no other behavior
+- [X] T006 [US1] Run the same runtime assertion to GREEN, prove the evaluated CLI mock honesty output is in the final exact requested closure, and capture sequential hashes and the complete owned-file diff
+- [X] T007 [US1] Pass the GREEN handoff-completeness gate and obtain literal navigator `REVIEW-APPROVED green` for the frozen complete owned-file diff
+- [X] T008 [US1] After GREEN approval, require the restored standalone check, `just build-gate`, and `./gate.sh` to exit zero with raw live evidence, then commit exactly `.github/workflows/ci.yml` and `justfile` as `fix(ci): execute CLI mock honesty in Build Gate` with trailer `Tasks: T001, T002, T003, T004, T005, T006, T007, T008`
 
 ## Slice 2 - Publish review evidence (orchestrator-owned)
 
