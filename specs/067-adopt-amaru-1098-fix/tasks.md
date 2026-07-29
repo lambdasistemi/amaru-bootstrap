@@ -24,11 +24,11 @@
 
 ## Slice 2 - Publish and request authorization
 
-- [ ] T007 [US1] Push the reviewed implementation commit and require hosted
+- [X] T007 [US1] Push the reviewed implementation commit and require hosted
   `Build Gate` and `Live Bootstrap Producer` success on that exact SHA
-- [ ] T008 [US1] Inspect the commit-qualified PR #74 image, record its
+- [X] T008 [US1] Inspect the commit-qualified PR #74 image, record its
   registry digest in the PR, and retain raw registry evidence
-- [ ] T009 [US1] Independently rerun the full gate and finalization audit,
+- [X] T009 [US1] Independently rerun the full gate and finalization audit,
   update PR evidence, and post a merge-authorization Q-file to the
   milestone desk without merging or closing issue #67
 
