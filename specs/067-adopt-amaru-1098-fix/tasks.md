@@ -5,20 +5,20 @@
 
 ## Slice 1 - Pin and prove
 
-- [ ] T001 [US1] Capture raw execution-time upstream main, require one full
+- [X] T001 [US1] Capture raw execution-time upstream main, require one full
   SHA, and prove it contains #1098 squash commit `437ff6c4`
-- [ ] T002 [US1] Prove both old pin records fail equality with the target,
+- [X] T002 [US1] Prove both old pin records fail equality with the target,
   seed a rejected accepted command, capture nonzero CLI honesty, freeze the
   complete RED diff, and obtain navigator approval
-- [ ] T003 [US1] Explicitly restore the seed, update `flake.nix` and only
+- [X] T003 [US1] Explicitly restore the seed, update `flake.nix` and only
   `.nodes.amaru` in `flake.lock`, and prove exact identity, no moving ref,
   and zero unrelated lock movement
-- [ ] T004 [US1] Prove `nix/amaru.nix` and the CLI declaration have no
+- [X] T004 [US1] Prove `nix/amaru.nix` and the CLI declaration have no
   final diff and pass selected-source `cli-mock-honesty`
-- [ ] T005 [US1] Capture zero-exit `just build-gate` and `./gate.sh`,
+- [X] T005 [US1] Capture zero-exit `just build-gate` and `./gate.sh`,
   including the at-least-60-second live consumer observation, after the
   final edit
-- [ ] T006 [US1] Freeze final hashes and GREEN diff, obtain navigator
+- [X] T006 [US1] Freeze final hashes and GREEN diff, obtain navigator
   approval, and create one commit `build: adopt amaru consensus fix` with
   trailer `Tasks: T001, T002, T003, T004, T005, T006`
 
