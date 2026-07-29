@@ -62,15 +62,15 @@ exit zero.
 result, and verification legible to a reviewer, then close task accounting
 without merging.
 
-- [ ] T008 [US1] Refresh pull request #69 from
+- [X] T008 [US1] Refresh pull request #69 from
   `/tmp/ms-1/amaru-bootstrap-68/pr-body.md` with a plain-language landed
   chapter and technical evidence for the selected upstream SHA, unchanged
   lock nodes, CLI honesty result, live boundary, and expected downstream red
-- [ ] T009 [US1] Verify hosted checks named `Build Gate` and
+- [X] T009 [US1] Verify hosted checks named `Build Gate` and
   `Live Bootstrap Producer` both conclude success on the reviewed
   implementation commit and retain the mechanically queried result under
   `/tmp/ms-1/amaru-bootstrap-68/logs/`
-- [ ] T010 [US1] Independently rerun `./gate.sh`, audit every branch commit
+- [X] T010 [US1] Independently rerun `./gate.sh`, audit every branch commit
   and task mapping, mark the orchestrator-owned tasks complete in
   `specs/068-bump-amaru-upstream/tasks.md`, and commit
   `docs: finalize upstream amaru bump evidence` with trailer
