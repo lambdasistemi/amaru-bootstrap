@@ -60,7 +60,7 @@
       # BARE pragma-org/amaru origin/main — no fork, no branch, no patches.
       # Native snapshot create + node bootstrap + node run with
       # AMARU_GLOBAL_* overrides and --era-history (all upstreamed).
-      url = "github:pragma-org/amaru/e706976205ff4600cb74fcb616a7f632de39c8a9";
+      url = "github:pragma-org/amaru/437ff6c4fb506e1347eee9e619271a5ccb55a401";
       flake = false;
     };
   };
