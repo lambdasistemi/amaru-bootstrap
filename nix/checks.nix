@@ -2,6 +2,7 @@
 , amaruPkg
 , iogTools
 , bootstrapProducerImage
+, peerSnapshotNegativePackages
 }:
 
 # Flake checks: a derivation per artefact. Each test check builds a
@@ -237,6 +238,28 @@ in
   db-analyser = iogTools.db-analyser;
   snapshot-converter = iogTools.snapshot-converter;
   bootstrap-producer-image = bootstrapProducerImage;
+  peer-snapshot-negative-control = pkgs.linkFarm
+    "peer-snapshot-negative-control"
+    (pkgs.lib.mapAttrsToList (fault: package: {
+      name = fault;
+      path = pkgs.testers.testBuildFailure' {
+        drv = package;
+        expectedBuilderLogEntries = {
+          missing-mainnet = [
+            "peer-snapshot validation failed: mainnet: missing staged file"
+          ];
+          invalid-schema-preprod = [
+            "peer-snapshot validation failed: preprod: schema violation"
+          ];
+          wrong-magic-preview = [
+            "peer-snapshot validation failed: preview: expected NetworkMagic 2"
+          ];
+          empty-pools-mainnet = [
+            "peer-snapshot validation failed: mainnet: bigLedgerPools is empty"
+          ];
+        }.${fault};
+      };
+    }) peerSnapshotNegativePackages);
   antithesis-short-epoch-samples =
     pkgs.runCommand "antithesis-short-epoch-samples"
       {

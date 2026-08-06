@@ -1,6 +1,11 @@
 { pkgs
 , crane
 , amaru
+, cardano-configurations
+, cardanoConfigurationsRev
+, peerSnapshots ? "pinned"
+, peerSnapshotFault ? null
+, cargoArtifacts ? null
 }:
 
 # crane-built amaru binary, wrapping the pragma-org/amaru flake input.
@@ -15,15 +20,23 @@ let
     "${amaru}/rust-toolchain.toml";
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-  # Offline peer-snapshot placeholders.
+  supportedPeerSnapshots = [ "pinned" "placeholder-dev" ];
+  supportedPeerSnapshotFaults = [
+    null
+    "missing-mainnet"
+    "invalid-schema-preprod"
+    "wrong-magic-preview"
+    "empty-pools-mainnet"
+  ];
+
+  # Explicit development-only peer-snapshot placeholders.
   # workaround-for=https://github.com/pragma-org/amaru/issues/1102
   # amaru-node's build.rs embeds a peer snapshot for mainnet, preprod and
   # preview and hard-fails when none is staged; its fetch path also shells
   # out to `git show`, which fails in a clean source archive. Upstream only
-  # fs::copy's the staged file into OUT_DIR (it is never parsed at build
-  # time), so a minimal schema-conformant document is enough to let the
-  # offline build proceed. Additive staging only — no upstream source is
-  # patched, forked or vendored (constitution Principle I).
+  # fs::copy's the staged file into OUT_DIR. This fallback is exposed only
+  # as packages.<system>.amaru-placeholder-dev; production consumers use
+  # the pinned upstream files below. Staging is additive only.
   peerSnapshot = networkMagic: pkgs.writeText "peer-snapshot.json"
     (builtins.toJSON {
       NetworkMagic = networkMagic;
@@ -36,8 +49,13 @@ let
       bigLedgerPools = [ ];
     });
 in
-craneLib.buildPackage {
-  pname = "amaru";
+assert builtins.elem peerSnapshots supportedPeerSnapshots;
+assert builtins.elem peerSnapshotFault supportedPeerSnapshotFaults;
+assert peerSnapshots == "pinned" || peerSnapshotFault == null;
+craneLib.buildPackage ({
+  pname = "amaru" + pkgs.lib.optionalString (peerSnapshots == "placeholder-dev")
+    "-placeholder-dev" + pkgs.lib.optionalString (peerSnapshotFault != null)
+    "-${peerSnapshotFault}";
   version = "0.1.2";
 
   src = craneLib.cleanCargoSource amaru;
@@ -60,6 +78,8 @@ craneLib.buildPackage {
     automake
     libtool
     cmake
+    check-jsonschema
+    jq
   ];
 
   buildInputs = with pkgs; [
@@ -70,20 +90,85 @@ craneLib.buildPackage {
 
   # workaround-for=https://github.com/pragma-org/amaru/issues/1102
   # Skip the build-time peer-snapshot network/Git-date fetch; the staged
-  # placeholders below satisfy the unconditional presence check. env_flag
+  # snapshots below satisfy the unconditional presence check. env_flag
   # accepts only 1/true/TRUE/yes/YES — use exactly "1".
   AMARU_SKIP_PEER_SNAPSHOT_FETCH = "1";
 
-  # Stage the offline placeholders where amaru-node's build.rs looks for
-  # them (additive; the clean source archive ships none). cleanCargoSource
-  # would drop merely-added files, so they are generated above and copied
-  # in once the real crate tree is present.
+  # Stage peer snapshots where amaru-node's build.rs looks for them.
+  # cleanCargoSource drops these non-Cargo files, so staging and validation
+  # happen after the clean source has been unpacked. The schema deliberately
+  # comes from the raw pinned amaru input, not the cleaned source.
   preBuild = ''
-    install -D -m 0644 ${peerSnapshot 764824073} \
-      crates/amaru-node/config/peer-snapshots/mainnet/peer-snapshot.json
-    install -D -m 0644 ${peerSnapshot 1} \
-      crates/amaru-node/config/peer-snapshots/preprod/peer-snapshot.json
-    install -D -m 0644 ${peerSnapshot 2} \
-      crates/amaru-node/config/peer-snapshots/preview/peer-snapshot.json
+    snapshot_dir=crates/amaru-node/config/peer-snapshots
+    ${if peerSnapshots == "pinned" then ''
+      for network in mainnet preprod preview; do
+        install -D -m 0644 \
+          ${cardano-configurations}/network/$network/cardano-node/peer-snapshot.json \
+          "$snapshot_dir/$network/peer-snapshot.json"
+      done
+      printf 'sha: %s\n' '${cardanoConfigurationsRev}' \
+        >"$snapshot_dir/CONFIGS_COMMIT_CACHE"
+    '' else ''
+      install -D -m 0644 ${peerSnapshot 764824073} \
+        "$snapshot_dir/mainnet/peer-snapshot.json"
+      install -D -m 0644 ${peerSnapshot 1} \
+        "$snapshot_dir/preprod/peer-snapshot.json"
+      install -D -m 0644 ${peerSnapshot 2} \
+        "$snapshot_dir/preview/peer-snapshot.json"
+    ''}
+
+    ${pkgs.lib.optionalString (peerSnapshotFault == "missing-mainnet") ''
+      rm "$snapshot_dir/mainnet/peer-snapshot.json"
+    ''}
+    ${pkgs.lib.optionalString (peerSnapshotFault == "invalid-schema-preprod") ''
+      printf '{}\n' >"$snapshot_dir/preprod/peer-snapshot.json"
+    ''}
+    ${pkgs.lib.optionalString (peerSnapshotFault == "wrong-magic-preview") ''
+      jq '.NetworkMagic = 1' "$snapshot_dir/preview/peer-snapshot.json" \
+        >"$snapshot_dir/preview/peer-snapshot.json.tmp"
+      mv "$snapshot_dir/preview/peer-snapshot.json.tmp" \
+        "$snapshot_dir/preview/peer-snapshot.json"
+    ''}
+    ${pkgs.lib.optionalString (peerSnapshotFault == "empty-pools-mainnet") ''
+      jq '.bigLedgerPools = []' "$snapshot_dir/mainnet/peer-snapshot.json" \
+        >"$snapshot_dir/mainnet/peer-snapshot.json.tmp"
+      mv "$snapshot_dir/mainnet/peer-snapshot.json.tmp" \
+        "$snapshot_dir/mainnet/peer-snapshot.json"
+    ''}
+
+    ${pkgs.lib.optionalString (peerSnapshots == "pinned") ''
+      schema=${amaru}/crates/amaru-node/config/peer-snapshots/peer-snapshot.schema.json
+      validate_snapshot() {
+        local network=$1
+        local expected_magic=$2
+        local snapshot="$snapshot_dir/$network/peer-snapshot.json"
+
+        if [ ! -f "$snapshot" ]; then
+          echo "peer-snapshot validation failed: $network: missing staged file" >&2
+          return 1
+        fi
+        if ! check-jsonschema --schemafile "$schema" "$snapshot"; then
+          echo "peer-snapshot validation failed: $network: schema violation" >&2
+          return 1
+        fi
+        if ! jq -e --argjson expected "$expected_magic" \
+          '.NetworkMagic == $expected' "$snapshot" >/dev/null; then
+          echo "peer-snapshot validation failed: $network: expected NetworkMagic $expected_magic" >&2
+          return 1
+        fi
+        if ! jq -e '.bigLedgerPools | type == "array" and length > 0' \
+          "$snapshot" >/dev/null; then
+          echo "peer-snapshot validation failed: $network: bigLedgerPools is empty" >&2
+          return 1
+        fi
+        echo "peer-snapshot validation passed: $network"
+      }
+
+      validate_snapshot mainnet 764824073
+      validate_snapshot preprod 1
+      validate_snapshot preview 2
+    ''}
   '';
-}
+} // pkgs.lib.optionalAttrs (cargoArtifacts != null) {
+  inherit cargoArtifacts;
+})

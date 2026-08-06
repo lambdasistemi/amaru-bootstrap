@@ -63,6 +63,14 @@
       url = "github:pragma-org/amaru/437ff6c4fb506e1347eee9e619271a5ccb55a401";
       flake = false;
     };
+
+    # Peer snapshots selected by amaru's upstream commit-date rule. Keep
+    # this non-flake source at the exact resolved commit so builds remain
+    # offline and reproducible.
+    cardano-configurations = {
+      url = "github:cardano-foundation/cardano-configurations/4a9b69103507b124679fcb185eeabd4dc15e9c75";
+      flake = false;
+    };
   };
 
   outputs =
@@ -75,6 +83,7 @@
     , crane
     , rust-overlay
     , amaru
+    , cardano-configurations
     , ...
     }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
@@ -91,13 +100,39 @@
         };
 
         project = import ./nix/project.nix { inherit pkgs CHaP; };
-        amaruPkg = import ./nix/amaru.nix { inherit pkgs crane amaru; };
+        amaruArgs = {
+          inherit pkgs crane amaru cardano-configurations;
+          cardanoConfigurationsRev = cardano-configurations.rev;
+        };
+        amaruPkg = import ./nix/amaru.nix amaruArgs;
+        amaruPlaceholderDevPkg = import ./nix/amaru.nix (amaruArgs // {
+          peerSnapshots = "placeholder-dev";
+        });
+        peerSnapshotNegativePackages = builtins.listToAttrs (map
+          (peerSnapshotFault: {
+            name = peerSnapshotFault;
+            value = import ./nix/amaru.nix (amaruArgs // {
+              inherit peerSnapshotFault;
+              cargoArtifacts = amaruPkg.cargoArtifacts;
+            });
+          }) [
+            "missing-mainnet"
+            "invalid-schema-preprod"
+            "wrong-magic-preview"
+            "empty-pools-mainnet"
+          ]);
         iogTools = import ./nix/iog-tools.nix { inherit project; };
         bootstrapProducerImage = import ./nix/bootstrap-producer-image.nix {
           inherit pkgs amaruPkg iogTools;
         };
         checks = import ./nix/checks.nix {
-          inherit pkgs amaruPkg iogTools bootstrapProducerImage;
+          inherit
+            pkgs
+            amaruPkg
+            iogTools
+            bootstrapProducerImage
+            peerSnapshotNegativePackages
+            ;
         };
         apps = import ./nix/apps.nix {
           inherit pkgs amaruPkg iogTools;
@@ -109,6 +144,7 @@
       {
         packages = {
           amaru = amaruPkg;
+          amaru-placeholder-dev = amaruPlaceholderDevPkg;
           db-synthesizer = iogTools.db-synthesizer;
           db-analyser = iogTools.db-analyser;
           snapshot-converter = iogTools.snapshot-converter;
