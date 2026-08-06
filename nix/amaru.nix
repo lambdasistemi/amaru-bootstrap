@@ -1,6 +1,7 @@
 { pkgs
 , crane
 , amaru
+, amaruRev
 , cardano-configurations
 , cardanoConfigurationsRev
 , peerSnapshots ? "pinned"
@@ -21,13 +22,10 @@ let
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
   supportedPeerSnapshots = [ "pinned" "placeholder-dev" ];
-  supportedPeerSnapshotFaults = [
-    null
-    "missing-mainnet"
-    "invalid-schema-preprod"
-    "wrong-magic-preview"
-    "empty-pools-mainnet"
-  ];
+  supportedPeerSnapshotFaults = [ null ] ++ import ./peer-snapshot-faults.nix;
+
+  peerSnapshotResolution =
+    builtins.fromJSON (builtins.readFile ./peer-snapshots/resolution.json);
 
   # Explicit development-only peer-snapshot placeholders.
   # workaround-for=https://github.com/pragma-org/amaru/issues/1102
@@ -135,12 +133,25 @@ craneLib.buildPackage ({
       mv "$snapshot_dir/mainnet/peer-snapshot.json.tmp" \
         "$snapshot_dir/mainnet/peer-snapshot.json"
     ''}
+    ${pkgs.lib.optionalString (peerSnapshotFault == "tampered-staged-mainnet") ''
+      printf '\n' >>"$snapshot_dir/mainnet/peer-snapshot.json"
+    ''}
 
     ${pkgs.lib.optionalString (peerSnapshots == "pinned") ''
+      if [ '${peerSnapshotResolution.amaru_rev}' != '${amaruRev}' ]; then
+        echo "peer-snapshot anchor failed: amaru rev ${amaruRev} does not match record ${peerSnapshotResolution.amaru_rev}" >&2
+        exit 1
+      fi
+      if [ '${peerSnapshotResolution.configs_rev}' != '${cardanoConfigurationsRev}' ]; then
+        echo "peer-snapshot anchor failed: configs rev ${cardanoConfigurationsRev} does not match record ${peerSnapshotResolution.configs_rev}" >&2
+        exit 1
+      fi
+
       schema=${amaru}/crates/amaru-node/config/peer-snapshots/peer-snapshot.schema.json
       validate_snapshot() {
         local network=$1
         local expected_magic=$2
+        local expected_sha256=$3
         local snapshot="$snapshot_dir/$network/peer-snapshot.json"
 
         if [ ! -f "$snapshot" ]; then
@@ -161,12 +172,23 @@ craneLib.buildPackage ({
           echo "peer-snapshot validation failed: $network: bigLedgerPools is empty" >&2
           return 1
         fi
+        local actual_sha256
+        actual_sha256=$(sha256sum "$snapshot" | cut -d' ' -f1)
+        if [ "$actual_sha256" != "$expected_sha256" ]; then
+          echo "peer-snapshot validation failed: $network: sha256 does not match anchored record" >&2
+          echo "  staged:   $actual_sha256" >&2
+          echo "  anchored: $expected_sha256" >&2
+          return 1
+        fi
         echo "peer-snapshot validation passed: $network"
       }
 
-      validate_snapshot mainnet 764824073
-      validate_snapshot preprod 1
-      validate_snapshot preview 2
+      validate_snapshot mainnet 764824073 \
+        '${peerSnapshotResolution.snapshots.mainnet.sha256}'
+      validate_snapshot preprod 1 \
+        '${peerSnapshotResolution.snapshots.preprod.sha256}'
+      validate_snapshot preview 2 \
+        '${peerSnapshotResolution.snapshots.preview.sha256}'
     ''}
   '';
 } // pkgs.lib.optionalAttrs (cargoArtifacts != null) {

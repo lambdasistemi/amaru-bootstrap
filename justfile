@@ -14,6 +14,8 @@ build-gate:
     nix build --quiet \
         .#checks.x86_64-linux.amaru \
         .#checks.x86_64-linux.peer-snapshot-negative-control \
+        .#checks.x86_64-linux.peer-snapshot-anchor \
+        .#checks.x86_64-linux.peer-snapshot-anchor-negative-control \
         .#checks.x86_64-linux.db-synthesizer \
         .#checks.x86_64-linux.db-analyser \
         .#checks.x86_64-linux.shellcheck \
@@ -53,6 +55,15 @@ live-bootstrap-producer:
 # Lint production shell scripts.
 shellcheck:
     nix build --quiet .#checks.x86_64-linux.shellcheck
+
+# Re-resolve peer snapshots online at Amaru bump time. Never called by CI.
+resolve-peer-snapshots *args:
+    nix --quiet shell \
+        nixpkgs#curl \
+        nixpkgs#jq \
+        nixpkgs#coreutils \
+        nixpkgs#diffutils \
+        -c scripts/resolve-peer-snapshots {{args}}
 
 # Mirror the GitHub CI workflow: build gate then the live verifier.
 ci:

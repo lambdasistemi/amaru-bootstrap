@@ -18,17 +18,17 @@
 
 ## S2 (v3) — feat(ci): anchor peer-snapshot resolution evidence
 
-- [ ] T5 `nix/peer-snapshots/resolution.json` (D4) + anchor assertions in
+- [x] T5 `nix/peer-snapshots/resolution.json` (D4) + anchor assertions in
   the in-sandbox validation (revs + per-network sha256 vs record) + a
   tampered-file fault in `peer-snapshot-negative-control` (I3 negative
   control).
-- [ ] T6 `checks.<sys>.peer-snapshot-anchor` (F5, offline) in
+- [x] T6 `checks.<sys>.peer-snapshot-anchor` (F5, offline) in
   `just build-gate` and the ci.yml Build Gate list; no live-API CI step.
-- [ ] T7 `docs/peer-snapshots.md` + mkdocs nav: derived rule, current
+- [x] T7 `docs/peer-snapshots.md` + mkdocs nav: derived rule, current
   resolution, anchored-enforcement rationale (future-dated pin /
   backdated commit edges), #205 bump procedure (R5).
-- [ ] T8 `scripts/resolve-peer-snapshots` (F1, bump-time, check/write
+- [x] T8 `scripts/resolve-peer-snapshots` (F1, bump-time, check/write
   modes) + just recipe `resolve-peer-snapshots` (F4) (I3b).
-- [ ] T9 R7 parity/lint: `peer-snapshot-negative-control` added to the
+- [x] T9 R7 parity/lint: `peer-snapshot-negative-control` added to the
   ci.yml Build Gate list; shellcheck check enumerates
   `scripts/resolve-peer-snapshots`.

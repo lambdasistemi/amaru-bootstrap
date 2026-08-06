@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+record=nix/peer-snapshots/resolution.json
+flake_lock=${FLAKE_LOCK:-./flake.lock}
+write=false
+
+fail() {
+  echo "peer-snapshot resolution failed: $*" >&2
+  exit 1
+}
+
+case "${1:-}" in
+  "") ;;
+  --write) write=true ;;
+  *) fail "usage: $0 [--write]" ;;
+esac
+[[ $# -le 1 ]] || fail "usage: $0 [--write]"
+[[ -f "$flake_lock" ]] || fail "flake lock not found: $flake_lock"
+
+amaru_rev=$(jq -er '.nodes.amaru.locked.rev' "$flake_lock") \
+  || fail "amaru locked rev is missing"
+amaru_last_modified=$(
+  jq -er '.nodes.amaru.locked.lastModified | select(type == "number")' \
+    "$flake_lock"
+) || fail "amaru locked lastModified is missing or invalid"
+pinned_configs_rev=$(
+  jq -er '.nodes."cardano-configurations".locked.rev' "$flake_lock"
+) || fail "cardano-configurations locked rev is missing"
+
+[[ "$amaru_rev" =~ ^[0-9a-f]{40}$ ]] \
+  || fail "amaru locked rev is not a 40-character SHA: $amaru_rev"
+[[ "$pinned_configs_rev" =~ ^[0-9a-f]{40}$ ]] \
+  || fail "configs locked rev is not a 40-character SHA: $pinned_configs_rev"
+
+amaru_date=$(date --utc --date="@$amaru_last_modified" \
+  '+%Y-%m-%dT%H:%M:%SZ') \
+  || fail "cannot convert amaru lastModified: $amaru_last_modified"
+encoded_date=$(jq -rn --arg date "$amaru_date" '$date | @uri')
+commits_url="https://api.github.com/repos/cardano-foundation/cardano-configurations/commits"
+query_url="$commits_url?until=$encoded_date&per_page=1"
+
+tmp_dir=$(mktemp -d)
+trap 'rm -rf -- "$tmp_dir"' EXIT
+
+curl_args=(
+  --fail
+  --location
+  --silent
+  --show-error
+  --header "User-Agent: amaru-bootstrap-peer-snapshot-resolver"
+)
+api_curl_args=(
+  "${curl_args[@]}"
+  --header "Accept: application/vnd.github+json"
+  --header "X-GitHub-Api-Version: 2022-11-28"
+)
+github_token=${GITHUB_TOKEN:-${GH_TOKEN:-}}
+if [[ -n "$github_token" ]]; then
+  api_curl_args+=(--header "Authorization: Bearer $github_token")
+fi
+
+curl "${api_curl_args[@]}" "$query_url" \
+  --output "$tmp_dir/commits.json"
+resolved_configs_rev=$(
+  jq -er \
+    'if type == "array" and length == 1 then .[0].sha
+     else error("expected exactly one commit") end' \
+    "$tmp_dir/commits.json"
+) || fail "GitHub response did not contain one resolved revision"
+[[ "$resolved_configs_rev" =~ ^[0-9a-f]{40}$ ]] \
+  || fail "resolved configs rev is not a 40-character SHA: $resolved_configs_rev"
+
+input_path=$(
+  nix eval --impure --raw \
+    --expr \
+    '(builtins.getFlake (toString ./.)).inputs.cardano-configurations.outPath'
+) || fail "cannot evaluate the cardano-configurations input path"
+
+status=0
+declare -A hashes
+for network in mainnet preprod preview; do
+  input_file="$input_path/network/$network/cardano-node/peer-snapshot.json"
+  fetched_file="$tmp_dir/$network-peer-snapshot.json"
+  raw_url="https://raw.githubusercontent.com/cardano-foundation/cardano-configurations/$resolved_configs_rev/network/$network/cardano-node/peer-snapshot.json"
+  curl "${curl_args[@]}" "$raw_url" --output "$fetched_file"
+  hashes[$network]=$(sha256sum "$fetched_file" | cut -d' ' -f1)
+
+  if [[ ! -f "$input_file" ]]; then
+    echo "$network sha256: input=MISSING resolved=${hashes[$network]} MISMATCH" >&2
+    status=1
+  elif cmp --silent "$input_file" "$fetched_file"; then
+    echo "$network sha256: input=${hashes[$network]} resolved=${hashes[$network]} match"
+  else
+    input_hash=$(sha256sum "$input_file" | cut -d' ' -f1)
+    echo "$network sha256: input=$input_hash resolved=${hashes[$network]} MISMATCH" >&2
+    status=1
+  fi
+done
+
+if [[ "$pinned_configs_rev" != "$resolved_configs_rev" ]]; then
+  echo "configs revision: pinned=$pinned_configs_rev resolved=$resolved_configs_rev MISMATCH" >&2
+  status=1
+else
+  echo "configs revision: pinned=$pinned_configs_rev resolved=$resolved_configs_rev match"
+fi
+
+resolved_at=$(date --utc '+%Y-%m-%dT%H:%M:%SZ')
+if ! $write && [[ -f "$record" ]]; then
+  prior_amaru=$(jq -r '.amaru_rev // empty' "$record")
+  prior_configs=$(jq -r '.configs_rev // empty' "$record")
+  if [[ "$prior_amaru" == "$amaru_rev" \
+    && "$prior_configs" == "$resolved_configs_rev" ]]; then
+    resolved_at=$(jq -er '.resolved_at_utc' "$record") \
+      || fail "committed record has no resolution timestamp"
+  fi
+fi
+
+proposed="$tmp_dir/resolution.json"
+jq -n \
+  --arg amaru_rev "$amaru_rev" \
+  --arg amaru_date "$amaru_date" \
+  --arg configs_rev "$resolved_configs_rev" \
+  --arg resolved_at "$resolved_at" \
+  --arg query_url "$query_url" \
+  --arg mainnet "${hashes[mainnet]}" \
+  --arg preprod "${hashes[preprod]}" \
+  --arg preview "${hashes[preview]}" \
+  '{
+    amaru_rev: $amaru_rev,
+    amaru_committer_date_utc: $amaru_date,
+    configs_rev: $configs_rev,
+    resolved_at_utc: $resolved_at,
+    query_url: $query_url,
+    snapshots: {
+      mainnet: {sha256: $mainnet},
+      preprod: {sha256: $preprod},
+      preview: {sha256: $preview}
+    }
+  }' >"$proposed"
+
+echo "proposed resolution record:"
+jq . "$proposed"
+if $write; then
+  mkdir -p "$(dirname "$record")"
+  cp "$proposed" "$record"
+  echo "wrote $record"
+elif [[ ! -f "$record" ]]; then
+  echo "committed record missing: $record" >&2
+  status=1
+elif ! diff -u "$record" "$proposed"; then
+  status=1
+fi
+
+if ((status != 0)); then
+  fail "pinned resolution, input bytes, or committed record differ"
+fi
+echo "peer-snapshot resolution verified for 3 networks"

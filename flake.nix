@@ -102,6 +102,7 @@
         project = import ./nix/project.nix { inherit pkgs CHaP; };
         amaruArgs = {
           inherit pkgs crane amaru cardano-configurations;
+          amaruRev = amaru.rev;
           cardanoConfigurationsRev = cardano-configurations.rev;
         };
         amaruPkg = import ./nix/amaru.nix amaruArgs;
@@ -115,12 +116,7 @@
               inherit peerSnapshotFault;
               cargoArtifacts = amaruPkg.cargoArtifacts;
             });
-          }) [
-            "missing-mainnet"
-            "invalid-schema-preprod"
-            "wrong-magic-preview"
-            "empty-pools-mainnet"
-          ]);
+          }) (import ./nix/peer-snapshot-faults.nix));
         iogTools = import ./nix/iog-tools.nix { inherit project; };
         bootstrapProducerImage = import ./nix/bootstrap-producer-image.nix {
           inherit pkgs amaruPkg iogTools;
@@ -132,7 +128,10 @@
             iogTools
             bootstrapProducerImage
             peerSnapshotNegativePackages
+            cardano-configurations
             ;
+          amaruRev = amaru.rev;
+          cardanoConfigurationsRev = cardano-configurations.rev;
         };
         apps = import ./nix/apps.nix {
           inherit pkgs amaruPkg iogTools;
