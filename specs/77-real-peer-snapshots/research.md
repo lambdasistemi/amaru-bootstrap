@@ -73,3 +73,21 @@ use `flake.lock` `lastModified` (UTC) directly.
 
 `peer-snapshot.schema.json` is draft 2020-12. nixpkgs `check-jsonschema`
 supports it and runs fully offline inside the build sandbox.
+
+## R-EDGE — resolution-time edge cases (operator note 2026-08-06, mandate v3)
+
+1. **Future-dated amaru pin**: if the pinned amaru commit's committer date
+   is in the future, the live rule's `until=` filter excludes nothing, so
+   it resolves to the configurations HEAD *at query time* — nondeterministic
+   until wall-clock passes the date. This can bite only at the resolution
+   event (the pin bump); the bump record therefore logs the resolved rev
+   and query evidence.
+2. **Backdated configurations commit**: a commit pushed later with an older
+   committer date retroactively changes what the live rule selects for an
+   old amaru date. A live re-derivation in CI would flip red (or silently
+   select different bytes at the next unpinned fetch) without any local
+   change.
+3. **Consequence**: CI enforcement is anchored to the committed resolution
+   record (D4) and is fully offline; the live rule runs only inside
+   `scripts/resolve-peer-snapshots` at deliberate pin bumps, where any
+   drift surfaces as a reviewable `resolution.json` diff.

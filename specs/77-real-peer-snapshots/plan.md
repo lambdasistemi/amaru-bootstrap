@@ -47,21 +47,40 @@ add an online equivalence check that re-derives the rule end-to-end.
      defaults) (R4);
    - keep `AMARU_SKIP_PEER_SNAPSHOT_FETCH = "1"` (build must not attempt
      network).
-3. `scripts/verify-peer-snapshot-resolution` (bash, shellcheck-clean):
-   reads `flake.lock` (amaru rev + lastModified, configs rev), re-derives
-   the rule online (commits API `until=`, raw file fetch), byte-compares
-   fetched files against the flake-input store path, exits non-zero
-   printing pinned-vs-resolved on any mismatch (I3). Accepts optional
-   `GITHUB_TOKEN`. Nix-provided runtime deps (curl, jq) via `nix shell`
-   in the just recipe.
-4. `justfile`: recipe `verify-peer-snapshots` wrapping the script;
-   CI workflow gets a networked step invoking it (after Build Gate).
-5. `docs/peer-snapshots.md` (+ mkdocs nav): the derived rule (R-RULE),
-   current resolution (R-RESOLVED), and the amaru-bump re-resolution
-   procedure for epic #205: on each amaru pin bump — take new
-   `lastModified` → query commits API `until=` → update the
-   `cardano-configurations` input rev → run `just verify-peer-snapshots`
-   → build.
+3. (v3) `nix/peer-snapshots/resolution.json` — the R6 anchored record:
+   `{amaru_rev, amaru_committer_date_utc, configs_rev, resolved_at_utc,
+   query_url, snapshots.{mainnet,preprod,preview}.sha256}`. Committed;
+   changes only at deliberate pin bumps.
+4. (v3) Anchored enforcement, fully offline (I3):
+   - flake.nix threads `inputs.amaru.rev` and the configs rev into
+     `nix/amaru.nix`; the in-sandbox validation additionally asserts each
+     staged file's sha256 equals the record's value and both revs match
+     the record (loud per-network RED; a tampered-file fault joins the
+     `peer-snapshot-negative-control` fault set);
+   - a fast dedicated offline flake check `peer-snapshot-anchor`
+     re-asserts record⇔flake.lock rev agreement and record⇔input byte
+     hashes for clear failure attribution without building amaru; added
+     to `just build-gate` AND the ci.yml Build Gate list. There is NO
+     live-API CI step.
+5. (v3) `scripts/resolve-peer-snapshots` (bash, shellcheck-clean): the
+   BUMP-TIME tool (I3b), never run in CI. Re-derives the rule online
+   (commits API `until=`, raw fetch), byte-compares against the flake
+   input, and writes/refreshes `resolution.json` (check-only mode prints
+   the proposed record and diffs; write mode updates it), logging the
+   resolved rev and query evidence. Optional `GITHUB_TOKEN`, `FLAKE_LOCK`
+   override. `justfile` recipe `resolve-peer-snapshots` wraps it with
+   nix-provisioned curl/jq/coreutils/diffutils.
+5b. (v3, R7) CI parity + lint: `peer-snapshot-negative-control` and
+   `peer-snapshot-anchor` join the ci.yml Build Gate list; the repo
+   shellcheck check (`nix/checks.nix`) enumerates
+   `scripts/resolve-peer-snapshots`.
+5c. (v3) `docs/peer-snapshots.md` (+ mkdocs nav): rule (R-RULE), current
+   resolution (R-RESOLVED), anchored-enforcement rationale with the
+   future-dated-pin and backdated-commit edges (both bite only at the
+   resolution event; the bump record logs the resolved rev + query
+   evidence), and the #205 procedure: bump amaru pin → run
+   `just resolve-peer-snapshots` (write mode) → update configs input rev →
+   review the `resolution.json` diff → CI anchored checks enforce.
 6. Negative controls: I1/I2 ship as a permanent flake check
    `peer-snapshot-negative-control` (e.g. `testers.testBuildFailure` over
    an amaru variant with a deliberately broken staged file) added to
@@ -75,8 +94,11 @@ add an online equivalence check that re-derives the rule end-to-end.
 - S1 `feat(nix): embed real pinned peer snapshots` — flake input, staging,
   provenance cache, in-sandbox validation, placeholder-dev split.
   Invariants I1, I2, I4. Tasks T1–T4.
-- S2 `feat(ci): peer-snapshot equivalence check + docs` — script, just
-  recipe, CI step, docs page. Invariants I3. Tasks T5–T7.
+- S2 (v3) `feat(ci): anchor peer-snapshot resolution evidence` — anchored
+  record + offline anchor checks + bump-time tool + CI parity/lint + docs.
+  Invariants I3, I3b. Tasks T5–T9. (The v2 live-in-CI slice was retired by
+  the 2026-08-06 operator ruling before acceptance; its candidate is
+  preserved at `refs/backup/77-s2-candidate` as an optional seed.)
 
 ## Status
 

@@ -36,7 +36,16 @@ embeds no real big-ledger peers.
   fallback (a distinct nix attribute/argument named in plan.md); the default
   `amaru` package never silently falls back to placeholders.
 - R5. The derived resolution rule is documented in the repo (docs page), with
-  the re-resolution procedure for each amaru bump (epic #205 consumption).
+  the re-resolution procedure for each amaru bump (epic #205 consumption),
+  including the future-dated-pin and backdated-commit edge cases and why
+  enforcement is anchored (v3).
+- R6. A committed, machine-readable resolution record anchors the pin: amaru
+  rev + committer date, resolved configs rev, resolution timestamp, query
+  provenance, and per-network snapshot sha256. It is updated only at
+  deliberate pin bumps.
+- R7. Enforcement parity (audit advisories A1/A2): the negative-control and
+  anchored checks run in remote CI's Build Gate list, and the repo shellcheck
+  check covers every production script added by this ticket.
 
 ## Invariants (each proven able to fail)
 
@@ -46,11 +55,20 @@ embeds no real big-ledger peers.
   `peer-snapshot.schema.json` (from the pinned amaru source) or carries the
   wrong `NetworkMagic` for its network (mainnet 764824073, preprod 1,
   preview 2), or has empty `bigLedgerPools`. Negative control required.
-- I3 (equivalence): an executable check re-derives the rule online — amaru
-  pin committer date → configs rev via the GitHub commits API → per-network
-  raw bytes — and is RED if the pinned configs rev differs from the resolved
-  rev or any staged byte differs from the fetched byte. Proven RED by running
-  it against a wrong rev/bytes.
+- I3 (anchored equivalence, v3 — operator ruling 2026-08-06): CI and the
+  build compare ONLY against recorded resolution evidence (R6) captured at
+  bump time — never against the live GitHub API. RED if the recorded
+  amaru rev, configs rev, or any per-network snapshot sha256 disagrees with
+  flake.lock / the staged input bytes. Negative control: a tampered staged
+  file (or doctored record) is RED. Rationale: a FUTURE-dated amaru pin
+  makes the live rule resolve nondeterministically until wall-clock passes,
+  and a BACKDATED configurations commit can retroactively change what the
+  live rule selects; both edges can bite only at the resolution event (pin
+  bump), so re-resolution happens solely there.
+- I3b (bump-time re-resolution): an executable tool re-derives the rule
+  online and writes/refreshes the R6 record, logging the resolved rev and
+  query evidence; drift then surfaces as a reviewable diff at the bump.
+  Proven RED against a doctored lock/rev.
 - I4 (no silent placeholder): the default package output embeds non-empty
   `bigLedgerPools` for every network; a build embedding a placeholder is RED.
 
