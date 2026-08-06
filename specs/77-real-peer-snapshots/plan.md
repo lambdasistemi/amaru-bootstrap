@@ -62,10 +62,13 @@ add an online equivalence check that re-derives the rule end-to-end.
    `lastModified` → query commits API `until=` → update the
    `cardano-configurations` input rev → run `just verify-peer-snapshots`
    → build.
-6. Negative controls (evidence, not shipped code): temporarily breaking a
-   staged file (missing / schema-broken / wrong magic / empty pools) makes
-   the build red; pointing the equivalence script at a wrong rev makes it
-   red. Recorded in the ticket runtime root as falsification evidence.
+6. Negative controls: I1/I2 ship as a permanent flake check
+   `peer-snapshot-negative-control` (e.g. `testers.testBuildFailure` over
+   an amaru variant with a deliberately broken staged file) added to
+   `just build-gate`, so the in-sandbox validation is forever proven able
+   to fail. One-off falsification evidence (wrong-rev equivalence run,
+   per-variant break runs) is additionally recorded in the ticket runtime
+   root.
 
 ## Slices (bisect-safe, trunk-landing)
 
