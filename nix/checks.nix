@@ -3,6 +3,9 @@
 , iogTools
 , bootstrapProducerImage
 , peerSnapshotNegativePackages
+, amaruRev
+, cardano-configurations
+, cardanoConfigurationsRev
 }:
 
 # Flake checks: a derivation per artefact. Each test check builds a
@@ -257,9 +260,107 @@ in
           empty-pools-mainnet = [
             "peer-snapshot validation failed: mainnet: bigLedgerPools is empty"
           ];
+          tampered-staged-mainnet = [
+            "peer-snapshot validation failed: mainnet: sha256 does not match anchored record"
+          ];
         }.${fault};
       };
     }) peerSnapshotNegativePackages);
+  peer-snapshot-anchor = pkgs.runCommand "peer-snapshot-anchor"
+    {
+      nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq ];
+    } ''
+    set -euo pipefail
+    bash ${./peer-snapshots/anchor.sh} \
+      ${./peer-snapshots/resolution.json} \
+      ${cardano-configurations} \
+      '${amaruRev}' \
+      '${cardanoConfigurationsRev}'
+    mkdir -p $out
+  '';
+
+  # I3 negative control for the anchor itself. The anchored record is only
+  # evidence if a doctored record is rejected, so every mutation below must
+  # make the SAME assertions (nix/peer-snapshots/anchor.sh) fail. Without
+  # this, a future edit that drops, say, the key-set assertion would keep
+  # peer-snapshot-anchor green and silently stop enforcing D4.
+  peer-snapshot-anchor-negative-control = pkgs.runCommand
+    "peer-snapshot-anchor-negative-control"
+    {
+      nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.jq ];
+    } ''
+    set -euo pipefail
+    anchor=${./peer-snapshots/anchor.sh}
+    record=${./peer-snapshots/resolution.json}
+    amaru_rev='${amaruRev}'
+    configs_rev='${cardanoConfigurationsRev}'
+
+    # A minimal stand-in for the pinned configs input, so the byte side can
+    # be mutated too (the store path itself is read-only).
+    inputs=$TMPDIR/inputs
+    for network in mainnet preprod preview; do
+      install -D -m 0644 \
+        ${cardano-configurations}/network/$network/cardano-node/peer-snapshot.json \
+        "$inputs/network/$network/cardano-node/peer-snapshot.json"
+    done
+
+    run_anchor() { # run_anchor <record> <inputs-root>
+      bash "$anchor" "$1" "$2" "$amaru_rev" "$configs_rev"
+    }
+
+    if ! run_anchor "$record" "$inputs" >/dev/null; then
+      echo "anchor negative control: the unmutated record is already RED" >&2
+      exit 1
+    fi
+    echo "anchor negative control: baseline GREEN"
+
+    mutations=(
+      'mainnet-sha256-flipped:.snapshots.mainnet.sha256 |= (.[0:63] + (if .[63:64] == "a" then "b" else "a" end))'
+      'preprod-sha256-flipped:.snapshots.preprod.sha256 |= (.[0:63] + (if .[63:64] == "a" then "b" else "a" end))'
+      'preview-sha256-flipped:.snapshots.preview.sha256 |= (.[0:63] + (if .[63:64] == "a" then "b" else "a" end))'
+      'amaru-rev-flipped:.amaru_rev |= (.[0:39] + (if .[39:40] == "a" then "b" else "a" end))'
+      'configs-rev-flipped:.configs_rev |= (.[0:39] + (if .[39:40] == "a" then "b" else "a" end))'
+      'query-url-dropped:del(.query_url)'
+      'query-url-emptied:.query_url = ""'
+      'resolved-at-dropped:del(.resolved_at_utc)'
+      'committer-date-malformed:.amaru_committer_date_utc = "2026-07-29 07:56:00"'
+      'preview-network-dropped:del(.snapshots.preview)'
+      'extra-network-added:.snapshots.sanchonet = {sha256: .snapshots.mainnet.sha256}'
+      'sha256-uppercased:.snapshots.mainnet.sha256 |= ascii_upcase'
+      'sha256-truncated:.snapshots.preprod.sha256 |= .[0:63]'
+      'record-emptied:{}'
+    )
+
+    survived=0
+    for entry in "''${mutations[@]}"; do
+      name=''${entry%%:*}
+      program=''${entry#*:}
+      jq "$program" "$record" >"$TMPDIR/$name.json"
+      if run_anchor "$TMPDIR/$name.json" "$inputs" >/dev/null 2>&1; then
+        echo "anchor negative control: mutant SURVIVED: $name" >&2
+        survived=$((survived + 1))
+      else
+        echo "anchor negative control: mutant killed: $name"
+      fi
+    done
+
+    # Byte side: the record is untouched, one staged input byte changes.
+    chmod -R u+w "$inputs"
+    printf '\n' \
+      >>"$inputs/network/mainnet/cardano-node/peer-snapshot.json"
+    if run_anchor "$record" "$inputs" >/dev/null 2>&1; then
+      echo "anchor negative control: mutant SURVIVED: mainnet-input-byte-appended" >&2
+      survived=$((survived + 1))
+    else
+      echo "anchor negative control: mutant killed: mainnet-input-byte-appended"
+    fi
+
+    if [ "$survived" -ne 0 ]; then
+      echo "anchor negative control: $survived mutant(s) survived; the anchor does not distinguish a correct record from a doctored one" >&2
+      exit 1
+    fi
+    mkdir -p $out
+  '';
   antithesis-short-epoch-samples =
     pkgs.runCommand "antithesis-short-epoch-samples"
       {
@@ -285,6 +386,8 @@ in
     } ''
     shellcheck -s bash -e SC1091 ${../scripts/bootstrap-producer.sh}
     shellcheck -s bash -e SC1091 ${../scripts/amaru-relay-bootstrap.sh}
+    shellcheck -s bash ${../scripts/resolve-peer-snapshots}
+    shellcheck -s bash ${./peer-snapshots/anchor.sh}
     mkdir -p $out
   '';
 
