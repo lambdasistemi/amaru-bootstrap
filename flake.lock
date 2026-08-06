@@ -101,6 +101,23 @@
         "type": "github"
       }
     },
+    "cardano-configurations": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1784171452,
+        "narHash": "sha256-9BcdBASOWZki0biggDMJ/R6UiZAkt7W+F6lJpBJxSrI=",
+        "owner": "cardano-foundation",
+        "repo": "cardano-configurations",
+        "rev": "4a9b69103507b124679fcb185eeabd4dc15e9c75",
+        "type": "github"
+      },
+      "original": {
+        "owner": "cardano-foundation",
+        "repo": "cardano-configurations",
+        "rev": "4a9b69103507b124679fcb185eeabd4dc15e9c75",
+        "type": "github"
+      }
+    },
     "cardano-shell": {
       "flake": false,
       "locked": {
@@ -697,6 +714,7 @@
       "inputs": {
         "CHaP": "CHaP",
         "amaru": "amaru",
+        "cardano-configurations": "cardano-configurations",
         "crane": "crane",
         "flake-utils": "flake-utils",
         "haskellNix": "haskellNix",

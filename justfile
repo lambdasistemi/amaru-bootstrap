@@ -13,6 +13,7 @@ build-gate:
     set -euo pipefail
     nix build --quiet \
         .#checks.x86_64-linux.amaru \
+        .#checks.x86_64-linux.peer-snapshot-negative-control \
         .#checks.x86_64-linux.db-synthesizer \
         .#checks.x86_64-linux.db-analyser \
         .#checks.x86_64-linux.shellcheck \
