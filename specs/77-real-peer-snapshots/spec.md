@@ -82,7 +82,8 @@ embeds no real big-ledger peers.
 ## Observable success
 
 - `nix build .#checks.x86_64-linux.amaru` green with real contents embedded.
-- I3 check green against the live GitHub API for the current pins.
+- I3 anchored checks green offline for the current pins; I3b bump tool
+  green in check-only mode against the current record.
 - Negative controls demonstrably red (evidence recorded in ticket runtime
   root).
 - Docs page published describing rule + bump procedure.
