@@ -10,7 +10,9 @@
   `AMARU_SKIP_PEER_SNAPSHOT_FETCH=1`.
 - [ ] T3 In-sandbox validation before cargo: presence, schema
   (check-jsonschema vs pinned amaru schema), per-network NetworkMagic,
-  non-empty bigLedgerPools; loud per-network failure (I1/I2/I4).
+  non-empty bigLedgerPools; loud per-network failure (I1/I2/I4). Ships a
+  permanent `peer-snapshot-negative-control` flake check (build with a
+  broken staged file must fail) wired into `just build-gate`.
 - [ ] T4 Split placeholder path into explicit `amaru-placeholder-dev`
   attr; default `amaru` never uses placeholders (R4).
 
