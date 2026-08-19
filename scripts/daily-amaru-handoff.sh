@@ -791,6 +791,7 @@ production_propose_pin() {
   local head_sha
   branch_ref=$(select_proposal_branch_ref "$observed_sha" \
     "$requested_branch_ref")
+  unset requested_branch_ref
   cp "$repo_root/flake.lock" "$before"
   replace_flake_revision amaru "$observed_sha"
   replace_flake_revision cardano-configurations "$configurations_sha"
@@ -827,6 +828,7 @@ production_propose_pin() {
     || die integration "proposal branch already exists or push failed"
   if [[ -n "$ownership_file" ]]; then
     head_sha=$(git -C "$repo_root" rev-parse HEAD)
+    require_sha propose_pin "$head_sha"
     jq -S -n --arg branch "$branch_ref" --arg head_sha "$head_sha" '
       {branch: $branch, created: true, head_sha: $head_sha}
     ' >"$ownership_file.tmp"

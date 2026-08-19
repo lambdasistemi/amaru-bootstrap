@@ -107,7 +107,8 @@ assert_probe_cleanup_contract() {
     <<<"$(sed -n '/cleanup_pr=/,/cleanup-verification.json/p' <<<"$probe")" \
     || return 1
   grep -Fq 'ownership_receipt' <<<"$probe" || return 1
-  grep -Fq 'owned_branch=true' <<<"$probe" || return 1
+  [ "$(grep -Ec '^[[:space:]]+owned_branch=true$' \
+    <<<"$probe")" -eq 2 ] || return 1
   [ "$(grep -Fc \
     'scripts/daily-amaru-handoff.sh verify-branch-ownership \' \
     <<<"$probe")" -eq 2 ] || return 1
@@ -272,9 +273,16 @@ if [[ "${1:-}" == ls-remote ]]; then
 fi
 [[ "${1:-}" == -C ]]
 case "${3:-}" in
-  switch | add | commit | push) exit 0 ;;
+  switch | add | commit) exit 0 ;;
+  push)
+    if [[ "${PROCESS_SHIM_PUSH_RESULT:-success}" == reject ]]; then
+      printf '! [rejected] HEAD -> %s (stale info)\n' "${*: -1}" >&2
+      exit 1
+    fi
+    ;;
   rev-parse)
-    printf '4444444444444444444444444444444444444444\n'
+    printf '%s\n' \
+      "${PROCESS_SHIM_HEAD_SHA:-4444444444444444444444444444444444444444}"
     ;;
   *) exit 92 ;;
 esac
@@ -694,10 +702,12 @@ EOF
 @test "production propose carries branch lease and ownership through process boundaries" {
   local root="$BATS_TEST_TMPDIR/production-probe"
   local branch=probe/daily-handoff-123-1
+  local head=7777777777777777777777777777777777777777
   make_propose_process_harness "$root"
 
   GH_TOKEN=fixture-app-token \
     PROCESS_SHIM_LOG="$root/process.log" \
+    PROCESS_SHIM_HEAD_SHA="$head" \
     AMARU_BRANCH_OWNERSHIP_FILE="$root/ownership.json" \
     PATH="$root/bin:$PATH" \
     run "$root/scripts/daily-amaru-handoff.sh" propose \
@@ -708,11 +718,11 @@ EOF
   grep -Fq -- \
     "--force-with-lease=refs/heads/$branch: origin HEAD:refs/heads/$branch" \
     "$root/process.log"
-  grep -Fq -- "--head $branch" "$root/process.log"
-  jq -e --arg branch "$branch" '
+  grep -Fq -- "--base main --head $branch" "$root/process.log"
+  jq -e --arg branch "$branch" --arg head "$head" '
     .created == true
     and .branch == $branch
-    and .head_sha == "4444444444444444444444444444444444444444"
+    and .head_sha == $head
   ' "$root/ownership.json"
 
   run "$root/scripts/daily-amaru-handoff.sh" verify-branch-ownership \
@@ -736,6 +746,76 @@ EOF
   grep -Fq -- \
     '--force-with-lease=refs/heads/automation/amaru-1111111111111111111111111111111111111111:' \
     "$root/process.log"
+}
+
+@test "rejected leased push aborts before ownership receipt or pull request" {
+  local root="$BATS_TEST_TMPDIR/rejected-lease"
+  local branch=probe/daily-handoff-123-1
+  make_propose_process_harness "$root"
+
+  GH_TOKEN=fixture-app-token \
+    PROCESS_SHIM_LOG="$root/process.log" \
+    PROCESS_SHIM_PUSH_RESULT=reject \
+    AMARU_BRANCH_OWNERSHIP_FILE="$root/ownership.json" \
+    PATH="$root/bin:$PATH" \
+    run "$root/scripts/daily-amaru-handoff.sh" propose \
+      --branch-ref "$branch" --transport production
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"proposal branch already exists or push failed"* ]]
+  grep -Fq -- \
+    "--force-with-lease=refs/heads/$branch: origin HEAD:refs/heads/$branch" \
+    "$root/process.log"
+  ! find "$root" -maxdepth 1 -name 'ownership.json*' -print -quit \
+    | grep -q .
+  ! grep -Fq 'gh pr create' "$root/process.log"
+}
+
+@test "ownership verifier rejects each invalid receipt field independently" {
+  local root="$BATS_TEST_TMPDIR/ownership-fields"
+  local branch=probe/daily-handoff-123-1
+  mkdir -p "$root"
+  jq -S -n --arg branch "$branch" '
+    {branch: $branch, created: true,
+      head_sha: "7777777777777777777777777777777777777777"}
+  ' >"$root/ownership.json"
+
+  run "$SCRIPT" verify-branch-ownership \
+    --file "$root/ownership.json" --branch "$branch"
+  [ "$status" -eq 0 ]
+
+  mutate_json "$root/ownership.json" '.created = false'
+  run "$SCRIPT" verify-branch-ownership \
+    --file "$root/ownership.json" --branch "$branch"
+  [ "$status" -ne 0 ]
+
+  mutate_json "$root/ownership.json" \
+    '.created = true | .head_sha = "not-a-sha"'
+  run "$SCRIPT" verify-branch-ownership \
+    --file "$root/ownership.json" --branch "$branch"
+  [ "$status" -ne 0 ]
+}
+
+@test "ownership receipt cannot read the raw requested branch" {
+  local root="$BATS_TEST_TMPDIR/raw-requested-branch"
+  local branch=probe/daily-handoff-123-1
+  make_propose_process_harness "$root"
+  sed -i \
+    '/--arg branch "$branch_ref" --arg head_sha/s/--arg branch "$branch_ref"/--arg branch "$requested_branch_ref"/' \
+    "$root/scripts/daily-amaru-handoff.sh"
+  grep -Fq -- '--arg branch "$requested_branch_ref"' \
+    "$root/scripts/daily-amaru-handoff.sh"
+
+  GH_TOKEN=fixture-app-token \
+    PROCESS_SHIM_LOG="$root/process.log" \
+    AMARU_BRANCH_OWNERSHIP_FILE="$root/ownership.json" \
+    PATH="$root/bin:$PATH" \
+    run "$root/scripts/daily-amaru-handoff.sh" propose \
+      --branch-ref "$branch" --transport production
+
+  [ "$status" -ne 0 ]
+  [ ! -e "$root/ownership.json" ]
+  ! grep -Fq 'gh pr create' "$root/process.log"
 }
 
 @test "lock isolation rejects drift outside amaru and configurations nodes" {
