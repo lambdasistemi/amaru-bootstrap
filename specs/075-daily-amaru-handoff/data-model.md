@@ -26,6 +26,13 @@ any handoff conflict                   → FAILED
 The observed SHA is resolved once. All later transitions carry that value;
 they do not re-resolve a moving upstream ref.
 
+The bootstrap identity has two sources and they are not interchangeable. On the
+unchanged and current-pin-resume paths there is no pull request, so the tuple
+key uses `read_bootstrap_sha` — the exact current bootstrap commit. On the
+changed path the published identity is `integrated_sha` after protected
+integration, because a pre-integration pull-request head SHA names a revision
+whose CI and image evidence belong to something else.
+
 ## Exact pin proposal
 
 The proposal binds one automation branch and pull request to the observation.

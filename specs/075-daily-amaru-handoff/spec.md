@@ -194,6 +194,10 @@ is red before any handoff publication operation is reached.
   `justfile` `build-gate` list, AND the `.github/workflows/ci.yml` Build Gate
   list, and MUST be shown able to fail from the hosted path. The hosted list is
   duplicated rather than derived, so a check absent from it never runs.
+- **FR-026**: The published bootstrap identity MUST be the current bootstrap
+  commit on the unchanged and current-pin-resume paths, and the integrated
+  revision on the changed path. A pre-integration pull-request head SHA MUST
+  NOT appear in any published receipt.
 
 ### Key Entities
 

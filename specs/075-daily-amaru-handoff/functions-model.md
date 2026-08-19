@@ -65,6 +65,7 @@ implementation makes the fixture proof non-transferable.
 |---|---|---|
 | `resolve_upstream_head` | `upstream_repository`, `upstream_ref` | `Sha40` |
 | `read_pinned_sha` | — | `Sha40` |
+| `read_bootstrap_sha` | — | `Sha40` |
 | `find_handoff` | `upstream_sha`, `bootstrap_sha` | `Absent \| Canonical` |
 | `find_daily_result` | `observation_day` | `Absent \| Canonical` |
 | `publish_immutable` | `key`, `bytes` | `created \| identical \| conflict` |
@@ -88,7 +89,21 @@ Signature-level constraints:
 - `publish_immutable` returns three values, not a boolean. `identical` is
   idempotent success and `conflict` is terminal failure; collapsing them makes
   FR-013 unprovable;
-- no operation accepts, returns, or logs a credential.
+- no operation accepts, returns, or logs a credential;
+- `read_bootstrap_sha` returns the exact current bootstrap repository commit —
+  the production implementation validates it and the fixture implementation
+  returns the injected exact SHA. It exists because the tuple key
+  `(upstream_sha, bootstrap_sha)` must be constructible on the unchanged and
+  current-pin-resume paths, where there is no pull request and therefore no
+  `pr_number` to pass to `integrated_sha`. Without it M-001 would have to read
+  `git rev-parse HEAD` or `GITHUB_SHA` directly, which is a hidden input
+  outside the transport boundary;
+- `read_bootstrap_sha` and `integrated_sha` are never interchangeable. On the
+  changed path the published bootstrap identity is the value returned by
+  `integrated_sha` after protected integration; `read_bootstrap_sha` describes
+  the pre-integration checkout and must never reach a published receipt on that
+  path. Conflating them publishes an identity whose CI and image evidence do
+  not belong to it (INV-75-BOOTSTRAP-IDENTITY).
 
 ## M-003 — pin updater (slice 2)
 
