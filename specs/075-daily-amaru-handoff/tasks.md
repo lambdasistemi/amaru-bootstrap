@@ -186,3 +186,36 @@ passing ticket. Each is named and owned; none is silence.
 - **Landing PR #76** activates the `17 4 * * *` schedule and therefore
   unattended main-integrating automation. Owner: epic owner, precondition: an
   explicit desk ruling. No seat in this lane lands it.
+
+## Slice 3 — `propose` entrypoint (campaign 2 inside #79)
+
+Ruled by A-006 option B after desk ruling A-EPIC-001 required the hosted probe
+to execute the same entrypoint as the daily bump path. Slice 1's audit closed at
+set-point **before** that requirement existed, so this is a new requirement, not
+a finding slice 1 missed.
+
+The straight-line coupling makes the requirement unsatisfiable today:
+`reconcile`'s changed path runs `open_pull_request` and then `integrated_sha` —
+the landing step — back to back, so any probe sharing that entrypoint would land
+on `main`, which A-004 forbids.
+
+**Independent Test**: the probe job invokes `scripts/daily-amaru-handoff.sh`,
+its PR carries the real bump commit rather than an empty one, and no path from
+`propose` reaches the landing step.
+
+- [ ] T025 Write failing tests for a `propose` entrypoint that runs resolve → propose_pin → open_pull_request and halts, and for the absence of any landing call on that path
+- [ ] T026 Implement `propose` and recompose `reconcile`'s changed path as `propose` plus the landing step
+- [ ] T027 Prove the recomposed `reconcile` is behaviourally identical to the previous straight-line version on the same inputs, through the injected transport
+- [ ] T028 Rewrite the App-event probe to call `propose`, carrying A-004's cleanup contract verbatim: receipts frozen before deletion, PR closed unlanded, close-by-design wording
+- [ ] T029 Ship the observation property the shipped probe lacked — an observation step must give the observed system a chance to report and must distinguish *not-yet-reported* from *absent* — with a negative control exercising the not-yet-reported case
+
+**Why T029 exists**: the shipped probe fired accidentally on 2026-08-19 and
+concluded `failure` because it polled for checks ~4 s after creating the PR and
+got `no checks reported`. `Build Gate` then passed on that PR after the probe had
+closed it. Its ruleset assertion sits after the failing line and never executed,
+so the probe proves protection only when it does not race. Evidence, with its
+limits stated, is frozen at the ticket-owner runtime root under
+`evidence/t014-probe/receipt.md`.
+
+**Out of scope**: handoff v1, receipt semantics, any #77-owned surface, every
+pin, and the live bump itself — which resumes on a fresh seat once this lands.
