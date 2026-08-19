@@ -70,7 +70,7 @@ implementation makes the fixture proof non-transferable.
 | `find_daily_result` | `observation_day` | `Absent \| Canonical` |
 | `publish_immutable` | `key`, `bytes` | `created \| identical \| conflict` |
 | `open_pull_request` | `branch_ref` | `pr_number` |
-| `required_check_conclusion` | `sha` | `success \| pending \| failure \| absent` |
+| `required_ci_evidence` | `sha` | `absent \| pending \| failure \| Canonical` |
 | `integrated_sha` | `pr_number` | `Absent \| Sha40` |
 | `image_publication_receipt` | `bootstrap_sha` | `Absent \| Canonical` |
 | `resolve_registry_digest` | `image_tag` | `Absent \| Digest` |
@@ -83,13 +83,29 @@ Signature-level constraints:
 - every `Sha40` and `Digest` result is validated at the boundary, so a
   malformed upstream answer fails at the transport rather than surfacing as a
   wrong-looking receipt field;
-- `required_check_conclusion` distinguishes `pending` from `absent`: treating a
-  check that has not started as a check that failed, or vice versa, turns a
-  retryable state into a terminal one and hides a wiring defect;
+- `required_ci_evidence` returns one typed value covering both the gating
+  decision and the evidence. Its four variants stay distinct: `pending` and
+  `absent` are not interchangeable, because treating a check that has not
+  started as one that failed turns a retryable state into a terminal one and
+  hides a wiring defect. On success the `Canonical` value **is** the strict
+  handoff `ci` block.
+
+  It replaced a scalar `required_check_conclusion` plus a separate evidence
+  read for a reason worth keeping: two queries can observe two different runs.
+  A conclusion read that says `success` for run N followed by an evidence read
+  that returns run N+1 publishes, under an immutable key, a CI identity that
+  did not produce the state the handoff claims. One query cannot disagree with
+  itself;
 - `publish_immutable` returns three values, not a boolean. `identical` is
   idempotent success and `conflict` is terminal failure; collapsing them makes
   FR-013 unprovable;
 - no operation accepts, returns, or logs a credential;
+- `resolve_registry_digest` is a **verification** operation, not a source of
+  published identity. The `image` block is built from
+  `image_publication_receipt`; the independently resolved digest exists to be
+  compared against it, and a mismatch is terminal (INV-75-DIGEST). Using the
+  re-resolved value to populate the block instead of to check it would delete
+  the only cross-check that the receipt describes what the registry holds;
 - `read_bootstrap_sha` returns the exact current bootstrap repository commit —
   the production implementation validates it and the fixture implementation
   returns the injected exact SHA. It exists because the tuple key
