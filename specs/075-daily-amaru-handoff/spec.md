@@ -198,6 +198,13 @@ is red before any handoff publication operation is reached.
   commit on the unchanged and current-pin-resume paths, and the integrated
   revision on the changed path. A pre-integration pull-request head SHA MUST
   NOT appear in any published receipt.
+- **FR-027**: Peer-snapshot resolution MUST follow the documented #77 bump
+  procedure with the resolver unmodified: a discovery call against a proposed
+  lock, then a verification call after both pins move. The discovery call's exit
+  status MUST NOT be read as success or as failure, because the resolver
+  conflates expected pin drift with a genuine fetch failure. Success requires
+  the verification call to exit 0 AND the offline `peer-snapshot-anchor` to pass
+  on the proposed commit.
 
 ### Key Entities
 

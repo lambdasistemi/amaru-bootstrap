@@ -175,6 +175,24 @@ Three operations return a **whole published block**, not a scalar, and their
 from several independent reads can assemble fields that describe different runs,
 and under an immutable key that is unretractable.
 
+`resolve_peer_snapshots` is implemented as two calls to the unmodified
+#77 resolver, not one, because the resolver cannot be asked "what would the rule
+select for this Amaru SHA" without also comparing against the currently pinned
+configurations input. The discovery call supplies `FLAKE_LOCK` pointing at a
+proposed lock carrying the new Amaru revision; the verification call runs on the
+real tree after both pins have moved. This is exactly the procedure
+`docs/peer-snapshots.md` documents for a human bump, including its statement
+that the first call is expected to mismatch.
+
+The signature-level effect that matters: **the discovery call's exit status is
+not a result.** The resolver sets the same nonzero status for expected pin drift
+and for a genuine fetch failure, so reading success from it is impossible and
+reading failure from it is wrong. The transport validates the written record
+instead — `amaru_rev` equals the observed SHA, the shape is complete, three
+snapshot hashes are present — and takes `configs_rev` from that. Success is the
+verification call exiting 0, plus the offline anchor passing on the proposed
+commit. Two independent boundaries, neither of which is the discovery exit code.
+
 `read_peer_snapshot_record` reads the committed
 `nix/peer-snapshots/resolution.json` of the bootstrap checkout. It is the
 non-bump counterpart to `resolve_peer_snapshots` and performs **no network

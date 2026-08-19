@@ -50,8 +50,19 @@ through the required `peer-snapshot-anchor` check, so "only the Amaru node
 moves" is not achievable. Under A-001 option C this component:
 
 - moves the Amaru pin to exactly the observed bare-upstream SHA;
-- invokes the **unmodified** `scripts/resolve-peer-snapshots --write` once, in
-  the bump job only, and commits its regenerated record;
+- invokes the **unmodified** `scripts/resolve-peer-snapshots --write` in the
+  bump job only, following the documented #77 procedure exactly: a **discovery**
+  call against a proposed lock carrying the new Amaru revision, then a
+  **verification** call on the real tree after both pins have moved. The
+  documented procedure expects the first call to mismatch, because the
+  configurations input still points at the previous resolution;
+- treats the discovery call's exit status as **carrying no success meaning at
+  all**. It is expected to be nonzero on a coupled bump, and the resolver
+  conflates that expected drift with a genuine fetch failure, so the transport
+  instead validates the written record structurally and takes `configs_rev`
+  from it. The only success signals are the verification call exiting 0 and the
+  offline `peer-snapshot-anchor` passing on the proposed commit
+  (INV-75-RESOLVE-FAIL-CLOSED);
 - moves the `cardano-configurations` pin only to the revision that record
   names — never a hand-chosen or latest-by-default revision;
 - proves `del(.nodes.amaru, .nodes."cardano-configurations")` is byte-identical
