@@ -77,6 +77,7 @@ implementation makes the fixture proof non-transferable.
 | `cli_honesty_evidence` | `bootstrap_sha` | `Absent \| Canonical` |
 | `propose_pin` | `observed_sha`, `configurations_sha` | `branch_ref` |
 | `resolve_peer_snapshots` | `amaru_sha` | `configurations_sha` + `resolution_sha256` |
+| `read_peer_snapshot_record` | — | `configurations_sha` + `resolution_sha256` |
 
 Signature-level constraints:
 
@@ -144,3 +145,40 @@ No new function. The workflow gains steps that emit an
 `image-publication-v1` receipt whose fields are fixed by
 `contracts/image-publication-v1.schema.json`. The digest it records is resolved
 from the registry after the push, never inferred from the tag it just wrote.
+
+## Which operation supplies which published block
+
+Every required field of every published receipt must come from a declared
+operation. This table exists because two contract challenges in a row were the
+same defect — a required field with no declared source — and the cheapest way to
+stop finding them one at a time is to state the mapping once and check it.
+
+| Published block | Source |
+|---|---|
+| `handoff.schema`, `.upstream.repository`, `.upstream.ref`, `.peer_snapshots.configurations_repository`, `.bootstrap.repository`, `.image.repository`, `.ci.workflow`/`.event`/`.required_check`/`.conclusion`, `.cli_honesty.flake_check`/`.workflow_path`/`.job`/`.step`, `.publication.workflow`/`.conclusion` | schema constants; never computed |
+| `handoff.observation_day` | the `reconcile --observation-day` argument |
+| `handoff.upstream.sha` | `resolve_upstream_head` |
+| `handoff.peer_snapshots.configurations_sha`, `.resolution_sha256` | `resolve_peer_snapshots` on the changed path; `read_peer_snapshot_record` on the unchanged and current-pin-resume paths |
+| `handoff.bootstrap.sha`, `handoff.image.tag` | `read_bootstrap_sha`, or `integrated_sha` on the changed path (INV-75-BOOTSTRAP-IDENTITY) |
+| `handoff.image.digest`, `.reference`, all of `handoff.publication` | `image_publication_receipt` |
+| all of `handoff.ci` | `required_ci_evidence` |
+| `handoff.cli_honesty.workflow_blob_sha`, `.job_id`, `.invocation_sha256` | `cli_honesty_evidence` |
+| `daily_result.observed_sha`, `.pinned_sha` | `resolve_upstream_head`, `read_pinned_sha` |
+| `daily_result.handoff.release_tag`, `.asset_url` | derived from the source tuple |
+| `daily_result.handoff.asset_sha256` | computed from the canonical bytes after they exist |
+
+Three operations return a **whole published block**, not a scalar, and their
+`Canonical` results are exactly the corresponding handoff blocks:
+`required_ci_evidence` → `ci`, `cli_honesty_evidence` → `cli_honesty`, and
+`image_publication_receipt` → the image-publication receipt from which the
+`image` and `publication` blocks are read. This is deliberate: a block assembled
+from several independent reads can assemble fields that describe different runs,
+and under an immutable key that is unretractable.
+
+`read_peer_snapshot_record` reads the committed
+`nix/peer-snapshots/resolution.json` of the bootstrap checkout. It is the
+non-bump counterpart to `resolve_peer_snapshots` and performs **no network
+access at all** — the unchanged and resume paths have no bump to resolve, and
+FR-021 confines the live query to the bump job. The two are never
+interchangeable, for the same reason `read_bootstrap_sha` and `integrated_sha`
+are not.
