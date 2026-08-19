@@ -159,10 +159,30 @@ not merely present:
 
 **Commit**: `feat(ci): publish daily validated amaru handoff`
 
-## Slice 2 — real pin mutation through the accepted machinery
+## Slice 2 — real pin mutation through the accepted machinery (re-cut as #79)
 
-**Topology**: `OWNER`, same seat allocation, dispatched only after slice 1 is
-accepted and pushed.
+**Topology**: `OWNER`, seats re-derived at dispatch. Slice 1 is accepted and
+pushed at `03aa184`; its machinery is frozen and out of scope here.
+
+**Integration boundary (A-004, option B).** The shipped production transport
+lands its automation PR on `main` once required checks pass. This slice runs the
+real changed path up to that point and **stops**: the automation may open its
+real PR against `main` through the scoped App token and let required checks run,
+but the PR is then closed unlanded and its branch deleted, with the PR number,
+head SHA, check conclusions and close timestamp frozen as evidence **before**
+deletion. The close reason states plainly that it is a proof run closed by
+design — never that the bump was rejected on content. Publication evidence comes
+from PR #76's own head, which publishes a SHA-tagged image because
+`publish-bootstrap-image.yml` fires on same-repo pull requests.
+
+Residual `CNA205-AB79-INTEGRATION-CALL-FIXTURE-ONLY`: the final integration call
+never executes against a real PR in this campaign and stays proven by the
+injected-transport controls plus the T014 probe. Registered at epic altitude
+with a watch duty on the first real production changed-day.
+
+**Landing PR #76 is not ours.** It activates the `17 4 * * *` schedule and
+therefore unattended main-integrating automation. Owner: epic owner, under an
+explicit desk ruling. No seat in this lane lands it.
 
 A-001 decision 3 requires the proof bump to be **produced by the automation path
 itself**, never by hand-editing: run the accepted updater against a freshly

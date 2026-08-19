@@ -77,7 +77,12 @@ handoff; no local test performs a live query.
 **Slice 1 commit**: `feat(ci): publish daily validated amaru handoff`
 **Trailer**: `Tasks: T001, T002, T003, T004, T005, T006, T007, T008, T009, T010, T011, T017, T018, T019`
 
-## Slice 2 — real pin mutation through the accepted machinery
+## Slice 2 — real pin mutation through the accepted machinery (re-cut as #79)
+
+Re-cut of #75's second slice with a fresh mandate, campaign ledger, and evidence
+budget after #75 exhausted its contracted two-raise ceiling. Same branch, same
+PR #76, one bisect-safe history. Integration boundary and residual per A-004
+option B; see [plan.md](plan.md).
 
 **Goal**: execute the real procedure once, produced by the automation path
 itself and never by hand-editing (A-001 decision 3).
@@ -90,6 +95,8 @@ tuple is `UNCHANGED`.
 - [ ] T012 Run the accepted updater against a freshly resolved bare upstream observation and record the observation identity
 - [ ] T020 Commit the regenerated `nix/peer-snapshots/resolution.json` and the rule-selected `cardano-configurations` pin, and prove every other lock node is byte-identical
 - [ ] T021 Prove `peer-snapshot-anchor` is red before regeneration and green offline after (SC-008), then pass full CI including reachable `cli-mock-honesty` on the new tuple
+- [ ] T023 Let the automation open its real PR against `main` through the scoped App token, let required checks run, freeze PR number, head SHA, check conclusions and close timestamp, then close it unlanded and delete its branch, stating plainly that it is a proof run closed by design
+- [ ] T024 After the bump, run a fresh real reconciliation and show it emits `UNCHANGED` with no pin or image mutation
 - [ ] T022 Amend the one `docs/peer-snapshots.md` sentence so it states honestly that the resolver is absent from every build/verify workflow and that automation-PR review is post-hoc audit, not a pre-merge gate
 
 **Slice 2 commit**: `build(ci): bump amaru pin through the daily updater`
@@ -165,3 +172,17 @@ passing ticket. Each is named and owned; none is silence.
   green candidate. Environment gap in `flake.nix`, outside this slice's fence.
 - **auditor-s1-D-2** — `find_daily_result` is implemented in both transports
   and satisfies the operation-set check, but has no call site.
+
+## Residual carried to epic altitude
+
+- **CNA205-AB79-INTEGRATION-CALL-FIXTURE-ONLY** — the final integration call in
+  `production_integrated_sha` never executes against a real PR in this campaign.
+  It stays proven by injected-transport controls plus the T014 probe. Owner:
+  epic owner `e-auto`, with a watch duty on the first real production
+  changed-day after activation, whose same-day verification must confirm the
+  integration step and not only the launch. Honest limit: everything up to and
+  including required checks on a real scoped-App PR is proven live; the act of
+  landing it is not.
+- **Landing PR #76** activates the `17 4 * * *` schedule and therefore
+  unattended main-integrating automation. Owner: epic owner, precondition: an
+  explicit desk ruling. No seat in this lane lands it.
