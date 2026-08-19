@@ -138,7 +138,10 @@ is red before any handoff publication operation is reached.
 - **FR-005**: Every UTC day MUST produce one durable immutable daily result
   or one loud failed run; silence is never success.
 - **FR-006**: A changed observation MUST update only to the observed SHA and
-  MUST preserve all non-Amaru lock entries.
+  MUST change only the Amaru lock node plus the `cardano-configurations` lock
+  node selected by the recorded peer-snapshot resolution rule; every other lock
+  node MUST be byte-identical and the gate MUST prove it. (Amended by A-001
+  after `origin/main` anchored peer snapshots to the Amaru revision.)
 - **FR-007**: Changed-source integration MUST use a short-lived token scoped
   to this repository, create a pull request, require the current `Build Gate`,
   and leave the active main ruleset in force.
@@ -173,9 +176,24 @@ is red before any handoff publication operation is reached.
   a pull request whose fixture and App-event probe paths have passed.
 - **FR-019**: No token or secret value may be printed, committed, stored in a
   receipt, or persisted after its workflow job.
-- **FR-020**: Cardano pins, producer/runtime behavior, bootstrap bundle
-  semantics, downstream repositories, and Antithesis execution MUST remain
-  unchanged.
+- **FR-020**: Cardano pins other than the `cardano-configurations` pin governed
+  by FR-022, producer/runtime behavior, bootstrap bundle semantics, downstream
+  repositories, and Antithesis execution MUST remain unchanged.
+- **FR-021**: The live peer-snapshot resolution query MUST run only in the
+  daily reconciliation/bump job, never in any build or verify workflow.
+  `peer-snapshot-anchor` MUST stay in the required Build Gate, offline and
+  unmodified, and MUST be re-enforced against the proposed commit.
+- **FR-022**: The `cardano-configurations` pin MUST move only to the revision
+  the recorded, independently re-runnable resolution rule selects. A
+  hand-chosen, latest-by-default, or rule-changing move is rejected.
+- **FR-023**: `scripts/resolve-peer-snapshots` MUST be consumed unmodified;
+  the resolution rule itself is owned by issue #77 and is out of scope.
+- **FR-024**: Resolution or offline-anchor failure on a changed day MUST fail
+  closed as `BLOCKED-PEER-SNAPSHOT-RESOLUTION` with no handoff and no retry.
+- **FR-025**: A focused check MUST be registered in `nix/checks.nix`, the
+  `justfile` `build-gate` list, AND the `.github/workflows/ci.yml` Build Gate
+  list, and MUST be shown able to fail from the hosted path. The hosted list is
+  duplicated rather than derived, so a check absent from it never runs.
 
 ### Key Entities
 
@@ -207,8 +225,12 @@ is red before any handoff publication operation is reached.
 - **SC-006**: The final branch passes `just build-gate`, `just ci`, focused
   local workflow fixtures, and current-head hosted checks.
 - **SC-007**: The committed diff contains zero producer/runtime changes, zero
-  new long-lived credentials, zero moving image tags, and zero downstream
-  repository edits.
+  new long-lived credentials, zero moving image tags, zero downstream
+  repository edits, and zero dependency-pin changes other than the Amaru pin
+  and the rule-selected `cardano-configurations` pin.
+- **SC-008**: Bumping the Amaru pin without regenerating
+  `nix/peer-snapshots/resolution.json` makes `peer-snapshot-anchor` red, and
+  the regenerated record makes it green offline — both shown, not assumed.
 
 ## Assumptions
 
@@ -220,5 +242,10 @@ is red before any handoff publication operation is reached.
 - `lambdasistemi-ci` remains installed org-wide with scoped contents,
   pull-request, and administration permissions; no new App permission is
   expected.
-- The exact generic Claude release-hold file remains absent, so all
-  implementation workers for this ticket are Qwen/Codex, never Claude.
+- Seat topology follows NOTE-025 minimize-Codex and is derived mechanically,
+  not copied: ticket owner Claude, commit owner Grok `grok-4.6`, and a fresh
+  Claude auditor per submission. Qwen is draft-only; `agy` is revoked; a Codex
+  seat requires both Claude and Grok to be unavailable, disclosed first.
+- The live resolution query is never run unauthenticated on the development
+  host: local proofs use injected transports and fixtures, and only hosted CI
+  and the production bump job perform the real query (NOTE-018 API budget).

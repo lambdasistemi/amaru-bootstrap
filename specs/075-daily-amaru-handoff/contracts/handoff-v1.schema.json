@@ -8,6 +8,7 @@
     "schema",
     "observation_day",
     "upstream",
+    "peer_snapshots",
     "bootstrap",
     "image",
     "ci",
@@ -23,6 +24,9 @@
     },
     "upstream": {
       "$ref": "#/$defs/upstream"
+    },
+    "peer_snapshots": {
+      "$ref": "#/$defs/peerSnapshots"
     },
     "bootstrap": {
       "$ref": "#/$defs/bootstrap"
@@ -70,6 +74,22 @@
         },
         "sha": {
           "$ref": "#/$defs/gitSha"
+        }
+      }
+    },
+    "peerSnapshots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configurations_repository", "configurations_sha", "resolution_sha256"],
+      "properties": {
+        "configurations_repository": {
+          "const": "https://github.com/cardano-foundation/cardano-configurations"
+        },
+        "configurations_sha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "resolution_sha256": {
+          "$ref": "#/$defs/sha256"
         }
       }
     },

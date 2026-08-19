@@ -1,230 +1,200 @@
 # Implementation Plan: Daily Validated Amaru Image Handoff
 
-**Branch**: `ci/75-daily-amaru-handoff` | **Date**: 2026-07-31 |
-**Spec**: [spec.md](spec.md)
-**Input**: Feature specification from
-`/specs/075-daily-amaru-handoff/spec.md`
+**Branch**: `ci/75-daily-amaru-handoff` | **Spec**: [spec.md](spec.md)
+**Created**: 2026-07-31 | **Refreshed**: 2026-08-19 | **Base**: `origin/main`
+`889e5cb035490b76409f22fc558c89456c822c46`
 
 ## Summary
 
 Add one fail-closed daily reconciliation state machine with an injected test
 transport and a production GitHub transport. It observes bare upstream main,
-updates only the exact Amaru SHA through a protected pull request when needed,
-waits for final-main CI and SHA-tagged image publication, and emits strict
-public release receipts. The same implementation drives schedule and manual
-triggers; pull requests run deterministic fixtures and an explicitly enabled
-scoped-App event probe before production schedule activation.
+updates only the exact Amaru pin (and the rule-selected configurations pin)
+through a protected pull request when needed, waits for final-main CI and
+SHA-tagged image publication, and emits strict public receipts. Schedule and
+manual triggers drive the same implementation; pull requests run deterministic
+fixtures and an explicit scoped-App event probe before schedule activation.
+
+Placement is in [modules-model.md](modules-model.md), signatures in
+[functions-model.md](functions-model.md), fields in [data-model.md](data-model.md),
+decisions in [research.md](research.md); this file owns strategy and slice order.
 
 ## Technical Context
 
-**Language/Version**: Bash 5 with `set -euo pipefail`; GitHub Actions YAML;
-JSON Schema draft 2020-12
-
-**Primary Dependencies**: Nix, `git`, `gh`, `jq`, Docker/registry inspection,
-`actions/create-github-app-token`, existing CI and image publication workflows
-
-**Storage**: Canonical public JSON assets on uniquely tagged GitHub Releases;
-ephemeral workflow artifacts for image-publication transport evidence
-
-**Testing**: Bats with injected transport, JSON/schema and cross-field
-validation, shellcheck, actionlint, exact Build Gate reachability,
-`just build-gate`, `just ci`, same-repository hosted PR fixtures and App probe
-
-**Target Platform**: x86_64 Linux on self-hosted NixOS runners; public GitHub
-and GHCR boundaries
-
-**Project Type**: Nix-first supplier image and CI automation repository
-
-**Performance Goals**: one UTC reconciliation per day; bounded API polling;
-identical retries publish zero replacement bytes
-
-**Constraints**: exact upstream SHA; no fork/tag/patch; no direct protected-main
-push; no long-lived credential; no moving image tag; no partial handoff; no
-producer/runtime or downstream changes
-
-**Scale/Scope**: one upstream input, one protected automation PR at a time,
-one handoff per source tuple, one daily result per UTC day
+| | |
+|---|---|
+| Language | Bash 5 `set -euo pipefail`; Actions YAML; JSON Schema 2020-12 |
+| Dependencies | Nix, `git`, `gh`, `jq`, registry inspection, `actions/create-github-app-token`, existing CI and publication workflows |
+| Storage | Canonical public JSON assets on uniquely tagged GitHub Releases |
+| Testing | Bats through the injected transport, strict schema and cross-field validation, shellcheck, actionlint, exact Build Gate reachability, `just build-gate`, `just ci`, hosted PR fixtures and App probe |
+| Platform | x86_64 Linux, self-hosted NixOS runners; public GitHub and GHCR |
+| Constraints | exact upstream SHA; no fork/tag/patch; no direct protected-main push; no long-lived credential; no moving image tag; no partial handoff; no producer/runtime or downstream change |
 
 ## Constitution Check
 
 | Principle | Status | Evidence |
 |---|---|---|
 | I. No forks | PASS | Resolver and pin gate accept only bare `pragma-org/amaru` main and one full SHA |
-| II. Stock tools, custom orchestration | PASS | Stock Git/GitHub/Nix/registry tools are orchestrated; no upstream code is patched |
+| II. Stock tools, custom orchestration | PASS | Stock Git/GitHub/Nix/registry tools orchestrated; no upstream code patched |
 | III. Reproducibility by SHA | PASS | Source, bootstrap, image tag, digest, and evidence blobs are immutable identities |
-| IV. Nix-first | PASS | Focused tests/lint are flake checks and the exact existing Build Gate remains authoritative |
+| IV. Nix-first | PASS | Focused tests and lint are flake checks; the existing Build Gate stays authoritative |
 | V. Smallest provable step | PASS | One vertical reconcile-to-receipt slice with every failure seam injected before production activation |
 
-Post-design check: PASS. The design adds orchestration and strict receipts,
-not a fork, upstream patch, producer behavior, moving tag, or long-lived key.
+Post-design: PASS — orchestration and receipts only; no fork, patch, producer change, moving tag, or long-lived key.
+
+## What the rebase changed
+
+`origin/main` merged issue #77 while this ticket was parked, anchoring the
+peer-snapshot resolution to the Amaru revision through the required
+`peer-snapshot-anchor` check. Every Amaru bump now also moves the
+`cardano-configurations` pin and regenerates
+`nix/peer-snapshots/resolution.json`, so FR-006 as written was unsatisfiable.
+
+Ruled by **A-001, option C**: confine the live resolution query to the daily
+bump job; keep every build and verify path offline and anchored. Full decision
+record, rejected options, fences, and honest costs are in
+[research.md](research.md) R-007. FR-006 is amended in [spec.md](spec.md) and
+FR-021..FR-024 carry the fences. Owned surface gains exactly
+`nix/peer-snapshots/resolution.json`, the `cardano-configurations` flake input,
+and one sentence of `docs/peer-snapshots.md`; the gate.s lock-invariance
+assertion narrows to `del(.nodes.amaru, .nodes."cardano-configurations")` and
+still rejects every other lock drift.
 
 ## Boundary Review
 
-The changed system has five seams that must agree:
-
-```text
-bare upstream → exact pin PR → final-main CI → SHA image publication
-              → public handoff → day result
-```
+Five seams must agree — `bare upstream → exact pin PR → final-main CI → SHA
+image publication → public handoff → day result`.
 
 Unit success on any one side is insufficient. The focused suite injects the
-transport and drives the complete state machine. Hosted PR evidence crosses
-the App-event/rules seam. The existing Build Gate and Docker live verifier
-cross the real binary and producer/runtime seams. The production handoff is
-created only after final-main CI and registry digest evidence agree.
+transport and drives the whole state machine; hosted PR evidence crosses the
+App-event and rules seam; the Build Gate and Docker live verifier cross the
+real-binary and producer/runtime seams. The handoff is created only after
+final-main CI and registry digest evidence agree.
 
-## Project Structure
+A sixth seam is new and easy to miss: `.github/workflows/ci.yml` duplicates the
+Build Gate list instead of calling `just build-gate`, so a check registered only
+in `nix/checks.nix` and `justfile` is green whatever it asserts. FR-025 and
+M-007 own that wiring.
 
-### Documentation for this ticket
+## Implementation surface
 
-```text
-specs/075-daily-amaru-handoff/
-├── checklists/requirements.md
-├── contracts/
-│   ├── daily-result-v1.schema.json
-│   ├── handoff-v1.schema.json
-│   └── image-publication-v1.schema.json
-├── data-model.md
-├── plan.md
-├── quickstart.md
-├── research.md
-├── spec.md
-└── tasks.md
-```
-
-### Implementation surface
-
-```text
-.github/workflows/
-├── daily-amaru-handoff.yml
-└── publish-bootstrap-image.yml
-docs/
-└── daily-amaru-handoff.md
-scripts/
-└── daily-amaru-handoff.sh
-tests/
-├── fixtures/daily-amaru-handoff/**
-└── test-daily-amaru-handoff.bats
-flake.nix
-flake.lock
-justfile
-mkdocs.yml
-nix/checks.nix
-```
+Every path, its owning component, and its dependency direction are in
+[modules-model.md](modules-model.md) M-001..M-009. Slice 1 owns all of them
+except the pin-mutation rows (`flake.nix`, `flake.lock`,
+`nix/peer-snapshots/resolution.json`, `docs/peer-snapshots.md`), which are
+slice 2.
 
 `tests/lib/cli-mock-surface.bash` is evidence-only temporary mutation for the
-negative control and must be byte-restored before the implementation diff is
-frozen. `.github/workflows/ci.yml` is read-only evidence proving the existing
-Build Gate invocation.
+negative control and must be byte-restored before any GREEN diff is frozen.
 
-**Structure Decision**: Keep orchestration in one testable Bash executable,
-wire it through focused GitHub Actions, register its deterministic checks in
-the existing Nix check set, and document only the public/operator contract.
+**Structure Decision**: keep orchestration in one testable Bash executable, wire
+it through focused GitHub Actions, register its deterministic checks in the Nix
+check set and both Build Gate lists, and document only the public contract.
 
-## Slice 1 - Reconcile, validate, publish receipts, and wire automation
+## Slice 1 — reconcile, validate, publish receipts, wire automation
 
-**Risk tier**: PAIR. This slice owns authentication, immutable publication,
-protected integration, and a cross-repository contract; semantic review is
-mandatory even where individual edits are mechanical.
+**Topology**: `OWNER`. The slice owns authentication, immutable publication,
+protected integration, and a cross-organization contract, so a gate cannot
+supply acceptance and LIGHT is unavailable.
 
-**Provider allocation**:
+**Seat allocation** (NOTE-025 minimize-Codex; derived by
+`alternate-authoritative-cli`, not copied): ticket owner Claude
+`claude-opus-5[1m]` high; commit owner Grok `grok --always-approve -m grok-4.6`
+in its own pane; a fresh Claude `claude-opus-5[1m]` high auditor per submission
+in a new pane and root. Draft is `qwen` or `NONE`, never authoritative. `agy`
+is revoked. A Codex seat needs both Claude and Grok unavailable, disclosed in
+STATUS first.
 
-- driver: Qwen CLI `qwen3.8-max-preview`, pinned explicitly;
-- navigator: `codex-raw` model `gpt-5.6-sol`, reasoning effort `xhigh`;
-- Claude-backed workers: forbidden while the exact generic release-hold file
-  is absent;
-- retired `agy`: forbidden;
-- nested driver tools: forbidden because no approved external sandbox and
-  attestation launcher is named; `workhorse-usage=NORMAL`, eligible=0.
+**Secrets bar**: the slice writes workflow YAML that *names* hosted secrets and
+mints a short-lived App token at runtime; it handles no credential material in
+the repository, which was ruled clear for a Grok seat. Real credential material
+inside the fence escalates by Q-file rather than improvising.
 
-**Owned files**:
+**Owned files**: the Implementation surface rows above, minus the pin-mutation
+rows (`flake.nix`, `flake.lock`, `nix/peer-snapshots/resolution.json`), which
+belong to slice 2.
 
-- `.github/workflows/daily-amaru-handoff.yml` (new)
-- `.github/workflows/publish-bootstrap-image.yml` (minimum publication receipt
-  and digest evidence only)
-- `scripts/daily-amaru-handoff.sh` (new)
-- `tests/test-daily-amaru-handoff.bats` (new)
-- `tests/fixtures/daily-amaru-handoff/**` (new)
-- `nix/checks.nix`
-- `justfile`
-- `docs/daily-amaru-handoff.md` (new)
-- `mkdocs.yml` (one navigation entry only)
-- `flake.nix` and `flake.lock` only by running the new exact-SHA updater
-  against the freshly observed bare upstream SHA and proving all non-Amaru
-  lock nodes unchanged
-
-**Evidence-only temporary file**:
-
-- `tests/lib/cli-mock-surface.bash`: one mock-only rejected command during the
-  CLI reachability negative control; restore by inverse patch and hash proof
-  before freezing any GREEN diff.
-
-**Forbidden scope**: producer/relay scripts, accepted CLI mocks/tests,
-`nix/amaru.nix`, Cardano dependencies, Haskell, image contents, bootstrap
-bundle semantics, any downstream repository, Antithesis, spec artifacts,
-`gate.sh`, Git configuration, secrets, branch rules, and every other worktree.
-If the newly selected upstream requires a producer/build compatibility change
-outside this fence, stop with a Q-file; do not widen or work around it.
+**Forbidden scope**: producer and relay scripts, accepted CLI mocks,
+`nix/amaru.nix`, Cardano dependency pins other than the rule-selected
+`cardano-configurations` pin in slice 2, `scripts/resolve-peer-snapshots` and
+the resolution rule itself, Haskell, image contents, bootstrap bundle
+semantics, any downstream repository, Antithesis, spec artifacts, `gate.sh`,
+Git configuration, secrets, branch rules, and every other worktree.
 
 ### RED and pre-falsification
 
-The ticket-owner gate is frozen before dispatch and fails on the accepted base
-because the strict state machine and focused flake check do not exist. The
-PAIR must then prove:
+The ticket gate is frozen before dispatch and fails on the accepted base because
+the state machine and focused flake check do not exist. Before production code
+the commit owner must prove, each shown able to fail on the unmodified base and
+not merely present:
 
-1. an injected changed input reaches the exact observed-SHA proposal and no
-   success receipt before complete evidence;
-2. an injected real-equal tuple with a valid handoff reaches `UNCHANGED` and
-   performs zero pin/image mutation;
-3. wrong owner/repository/ref fails before mutation;
+1. an injected changed input reaches the exact observed-SHA proposal and emits
+   no success receipt before complete evidence;
+2. an injected equal tuple with a valid handoff reaches `UNCHANGED` with zero
+   pin or image mutation;
+3. wrong owner, repository, or ref fails before mutation;
 4. absent CI, publication receipt, or digest each fail before handoff;
 5. an existing same-key different receipt fails without replacement;
 6. a temporary mock-only CLI command makes the exact `just build-gate` path
    fail, followed by byte-exact restoration.
 
-The driver writes tests first, observes their expected failures, freezes RED,
-and receives literal navigator RED approval before production implementation.
-
 ### GREEN
 
-- The exact same focused tests pass through the injected transport.
-- All three strict schemas reject unknown/missing/wrong-identity fields; the
-  runtime validator proves cross-field equality and canonical bytes.
-- `scripts/daily-amaru-handoff.sh` is the only state machine used by schedule,
-  manual, and PR fixture paths.
-- The production transport mints only a repository-scoped App token, never
-  prints it, uses a PR and required check, and binds final evidence to the
-  integrated bootstrap SHA.
-- Release publication is create-or-compare and never replace/delete.
-- Image publication exposes a strict digest receipt for the exact source SHA.
-- The hosted App probe is same-repository, explicit-label gated, disposable,
-  exact-target cleaned, and verifies the live rules endpoint plus observed
-  `Build Gate` event.
-- The updater is run against a fresh bare upstream observation in this branch;
-  the final pin equals that observation and every non-Amaru lock node is
-  unchanged.
-- The restored CLI surface, focused flake check, exact Build Gate, and full
-  Docker CI are green after the final edit.
+- the same focused tests pass through the injected transport;
+- all three strict schemas reject unknown, missing, and wrong-identity fields;
+  the runtime validator proves cross-field equality and canonical bytes;
+- `scripts/daily-amaru-handoff.sh` is the only state machine reached by the
+  schedule, manual, and PR fixture paths;
+- the production transport mints only a repository-scoped App token, never
+  prints it, uses a pull request and required check, and binds final evidence to
+  the integrated bootstrap SHA; publication is create-or-compare and never
+  replaces or deletes; image publication exposes a strict digest receipt for the
+  exact source SHA;
+- the hosted App probe is same-repository, label-gated, disposable, exact-target
+  cleaned, and verifies the live rules endpoint plus the observed `Build Gate`
+  event;
+- the new focused check appears in `nix/checks.nix`, `justfile`, and the hosted
+  `ci.yml` Build Gate list, and has been shown red from the hosted path;
+- the restored CLI surface, focused check, exact Build Gate, and full Docker CI
+  are green after the final edit.
 
 **Commit**: `feat(ci): publish daily validated amaru handoff`
 
-**Trailer**:
-`Tasks: T001, T002, T003, T004, T005, T006, T007, T008, T009, T010, T011, T012`
+## Slice 2 — real pin mutation through the accepted machinery
 
-## Finalization - Hosted and ticket acceptance (orchestrator-owned)
+**Topology**: `OWNER`, same seat allocation, dispatched only after slice 1 is
+accepted and pushed.
 
-After the driver commit and navigator verification agree, the ticket owner
-inspects the complete diff, reruns the immutable slice gate and ticket gate,
-stamps T001-T012 into the local commit, pushes, and refreshes the draft PR.
-The owner then enables the explicit App-probe PR path, verifies its exact
-hosted evidence and cleanup, verifies current-head CI and PR image publication
-receipt, runs final local gates/audits, stamps finalization tasks in a forward
-docs commit if necessary, marks the PR ready, and hands it to the epic owner.
-The ticket owner does not merge or activate production through an out-of-band
-operation.
+A-001 decision 3 requires the proof bump to be **produced by the automation path
+itself**, never by hand-editing: run the accepted updater against a freshly
+resolved bare upstream observation, commit the regenerated resolution evidence,
+move both pins by the rule, prove `peer-snapshot-anchor` green offline, and pass
+full CI including reachable `cli-mock-honesty` on the new tuple. That lands the
+breakage risk of a stale pin inside this reviewed PR rather than inside the
+first production fire, and makes the first real reconciliation after merge
+genuinely `UNCHANGED` — or a genuinely new upstream commit, equally the system
+working.
+
+It is a separate slice because it is the one part that can go red for a reason
+that is not a defect in this ticket. If it does, that red is evidence: freeze
+it, report it, keep slice 1.s fixture-proven machinery, leave the pin where it
+is, and escalate to the epic owner as a LOCAL operator-ready packet. Nothing is
+ever filed on `pragma-org/amaru`. Injected fixtures still carry the synthetic
+controls; the real bump adds evidence, it never substitutes for them.
+
+## Finalization — hosted and ticket acceptance (ticket-owner-owned)
+
+After each `PROOF-COMPLETE` the ticket owner parks the commit owner, spawns a
+fresh alternate-provider auditor on the exact candidate SHA, and decides from
+the hash-bound report. On acceptance it stamps tasks, has the commit owner
+produce the final squash, mechanically proves the final tree, pushes, and
+refreshes the PR. It then enables the App-probe path, verifies its hosted
+evidence and cleanup, verifies current-head CI and the PR image publication
+receipt, runs final gates and the finalization audit, marks the PR ready, and
+hands off. It does not merge and does not activate the production schedule out
+of band.
 
 ## Complexity Tracking
 
-No constitutional violation or exception is required. Three receipt types are
-separate because they have different producers, required fields, and immutable
-keys; combining them would make partial-state validation weaker.
+No constitutional violation or exception is required. The three receipt types
+stay separate because they have different producers, required fields, and
+immutable keys; combining them would weaken partial-state validation.
