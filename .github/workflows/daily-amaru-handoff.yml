@@ -87,42 +87,82 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.head.sha }}
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
-      - name: Create event, observe Build Gate, and clean exact targets
+      - name: Propose bump, observe Build Gate, and freeze cleanup receipts
         env:
           ACTIONS_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          branch="probe/daily-handoff-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          receipt_dir="${RUNNER_TEMP}/daily-amaru-app-probe"
+          mkdir -p "$receipt_dir"
           pr_number=
-          cleanup() {
-            if [[ -n "$pr_number" ]]; then
-              gh pr close "$pr_number" --repo "$GITHUB_REPOSITORY" \
-                --delete-branch || true
-            else
-              git push origin --delete "$branch" || true
+          branch="probe/daily-handoff-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ownership_receipt="$receipt_dir/branch-ownership.json"
+          owned_branch=false
+          cleanup_complete=false
+          cleanup_on_failure() {
+            status=$?
+            trap - EXIT
+            if [[ "$cleanup_complete" != true ]]; then
+              set +e
+              if scripts/daily-amaru-handoff.sh verify-branch-ownership \
+                --file "$ownership_receipt" --branch "$branch"; then
+                owned_branch=true
+              fi
+              if [[ -z "$pr_number" && "$owned_branch" == true ]]; then
+                pr_number=$(gh pr list --repo "$GITHUB_REPOSITORY" \
+                  --head "$branch" --state open --json number \
+                  --jq 'if length == 1 then .[0].number else empty end')
+              fi
+              if [[ -n "$pr_number" && "$owned_branch" == true ]]; then
+                gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" \
+                  --body 'This proof run is closed by design after an interrupted probe.'
+                gh pr close "$pr_number" --repo "$GITHUB_REPOSITORY"
+              fi
+              if [[ "$owned_branch" == true ]]; then
+                git push origin --delete "$branch"
+              fi
             fi
+            exit "$status"
           }
-          trap cleanup EXIT
+          trap cleanup_on_failure EXIT
 
           git config user.name lambdasistemi-ci[bot]
           git config user.email 4036299+lambdasistemi-ci[bot]@users.noreply.github.com
-          git switch -c "$branch"
-          git commit --allow-empty -m 'ci: probe scoped App pull request event'
-          git push origin "HEAD:refs/heads/$branch"
-          pr_url=$(gh pr create --repo "$GITHUB_REPOSITORY" \
-            --base main --head "$branch" \
-            --title 'ci: disposable daily handoff App probe' \
-            --body 'Disposable event-path probe; closed and deleted by its creator.')
-          pr_number=$(gh pr view "$pr_url" --repo "$GITHUB_REPOSITORY" \
-            --json number --jq .number)
-          GH_TOKEN="$ACTIONS_TOKEN" gh pr checks "$pr_number" \
-            --repo "$GITHUB_REPOSITORY" \
-            --required --watch
+          proposal=$(AMARU_BRANCH_OWNERSHIP_FILE="$ownership_receipt" \
+            nix --quiet shell \
+            nixpkgs#bash \
+            nixpkgs#check-jsonschema \
+            nixpkgs#coreutils \
+            nixpkgs#git \
+            nixpkgs#gh \
+            nixpkgs#gnugrep \
+            nixpkgs#jq \
+            nixpkgs#skopeo \
+            -c scripts/daily-amaru-handoff.sh propose \
+              --branch-ref "$branch" --transport production)
+          proposal_line=$(tail -n 1 <<<"$proposal")
+          branch=$(sed -nE 's/.* branch=([^ ]+) pr=.*/\1/p' <<<"$proposal_line")
+          pr_number=$(sed -nE 's/.* pr=([1-9][0-9]*)$/\1/p' <<<"$proposal_line")
+          [[ "$branch" =~ ^probe/daily-handoff-[1-9][0-9]*-[1-9][0-9]*$ \
+            && "$pr_number" =~ ^[1-9][0-9]*$ ]]
+          scripts/daily-amaru-handoff.sh verify-branch-ownership \
+            --file "$ownership_receipt" --branch "$branch"
+          owned_branch=true
+
+          nix --quiet shell \
+            nixpkgs#bash \
+            nixpkgs#coreutils \
+            nixpkgs#gh \
+            nixpkgs#gnugrep \
+            nixpkgs#jq \
+            -c scripts/daily-amaru-handoff.sh observe-pr-checks \
+              --pr-number "$pr_number" --transport production \
+            >"$receipt_dir/checks.json"
 
           ruleset_id=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets" \
             --jq '[.[] | select(.name == "main" and .enforcement == "active")][0].id // empty')
@@ -141,3 +181,62 @@ jobs:
               and any(.parameters.required_status_checks[];
                 .context == "Build Gate"))
           ' <<<"$rules" >/dev/null
+
+          gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" \
+            --body 'This proof run is closed by design after exercising the real proposal entrypoint; it was not rejected on content.'
+          gh pr close "$pr_number" --repo "$GITHUB_REPOSITORY"
+          pr_receipt=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" \
+            --json closedAt,headRefName,headRefOid,mergedAt,number,state,url)
+          jq -e --arg branch "$branch" '
+            .state == "CLOSED"
+            and .mergedAt == null
+            and .headRefName == $branch
+            and (.closedAt | type == "string" and length > 0)
+          ' <<<"$pr_receipt" >/dev/null
+          jq -S -n --argjson pull_request "$pr_receipt" \
+            --slurpfile checks "$receipt_dir/checks.json" \
+            --argjson ruleset "$rules" '
+            {
+              checks: $checks[0],
+              close_reason: "proof run closed by design; not rejected on content",
+              pull_request: $pull_request,
+              ruleset: $ruleset
+            }
+          ' >"$receipt_dir/probe-receipt-before-deletion.json"
+          sha256sum "$receipt_dir/probe-receipt-before-deletion.json" \
+            >"$receipt_dir/probe-receipt-before-deletion.sha256"
+
+          [[ "$owned_branch" == true ]]
+          git push origin --delete "$branch"
+          set +e
+          git ls-remote --exit-code --heads origin "refs/heads/$branch" \
+            >"$receipt_dir/branch-query.txt"
+          branch_query_status=$?
+          set -e
+          [[ "$branch_query_status" -eq 2 ]]
+          cleanup_pr=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" \
+            --json headRefName,mergedAt,number,state)
+          jq -e --arg branch "$branch" '
+            .state == "CLOSED"
+            and .mergedAt == null
+            and .headRefName == $branch
+          ' <<<"$cleanup_pr" >/dev/null
+          jq -S -n --arg branch "$branch" \
+            --argjson branch_query_status "$branch_query_status" \
+            --argjson pull_request "$cleanup_pr" '
+            {
+              branch: $branch,
+              branch_absent: ($branch_query_status == 2),
+              pull_request: $pull_request,
+              verified: true
+            }
+          ' >"$receipt_dir/cleanup-verification.json"
+          cleanup_complete=true
+          trap - EXIT
+
+      - name: Upload probe receipts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-amaru-app-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/daily-amaru-app-probe
+          if-no-files-found: error

@@ -22,6 +22,21 @@ reconcile() {
     --fixture-root "$TEST_ROOT"
 }
 
+propose() {
+  run "$SCRIPT" propose \
+    --transport fixture \
+    --fixture-root "$TEST_ROOT"
+}
+
+observe_pr_checks() {
+  AMARU_OBSERVATION_ATTEMPTS=3 \
+    AMARU_OBSERVATION_INTERVAL_SECONDS=0 \
+    run "$SCRIPT" observe-pr-checks \
+      --pr-number 75 \
+      --transport fixture \
+      --fixture-root "$TEST_ROOT"
+}
+
 mutate_json() {
   local file="$1"
   local program="$2"
@@ -58,6 +73,270 @@ assert_no_mutation_operations() {
     ! grep -Eq '^(resolve_peer_snapshots|propose_pin|open_pull_request) ' \
       "$TEST_ROOT/operations.log"
   fi
+}
+
+probe_job() {
+  sed -n '/^  app-event-probe:/,$p' "$1"
+}
+
+assert_probe_execution_identity() {
+  local probe
+  probe=$(probe_job "$1")
+  [ "$(grep -Fc \
+    '          branch="probe/daily-handoff-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"' \
+    <<<"$probe")" -eq 1 ] || return 1
+  [ "$(grep -Fc '          ref: ${{ github.event.pull_request.head.sha }}' \
+    <<<"$probe")" -eq 1 ] || return 1
+  [ "$(grep -Fc 'uses: actions/checkout@v4' \
+    <<<"$probe")" -eq 1 ] || return 1
+  [ "$(grep -Fc \
+    '            -c scripts/daily-amaru-handoff.sh propose \' \
+    <<<"$probe")" -eq 1 ] || return 1
+  [ "$(grep -Fc '              --branch-ref "$branch" --transport production)' \
+    <<<"$probe")" -eq 1 ] || return 1
+  ! grep -Fq -- '--transport fixture' <<<"$probe" || return 1
+}
+
+assert_probe_cleanup_contract() {
+  local probe close_line receipt_line ownership_line delete_line verify_line
+  probe=$(probe_job "$1")
+  grep -Fq 'sha256sum "$receipt_dir/probe-receipt-before-deletion.json"' \
+    <<<"$probe" || return 1
+  grep -Fq '[[ "$branch_query_status" -eq 2 ]]' <<<"$probe" || return 1
+  grep -Fq 'and .mergedAt == null' \
+    <<<"$(sed -n '/cleanup_pr=/,/cleanup-verification.json/p' <<<"$probe")" \
+    || return 1
+  grep -Fq 'ownership_receipt' <<<"$probe" || return 1
+  grep -Fq 'owned_branch=true' <<<"$probe" || return 1
+  [ "$(grep -Fc \
+    'scripts/daily-amaru-handoff.sh verify-branch-ownership \' \
+    <<<"$probe")" -eq 2 ] || return 1
+  grep -Fq \
+    'if [[ -n "$pr_number" && "$owned_branch" == true ]]; then' \
+    <<<"$probe" || return 1
+  grep -Fqx '          [[ "$owned_branch" == true ]]' \
+    <<<"$probe" || return 1
+
+  close_line=$(grep -n 'gh pr close ' <<<"$probe" | tail -n 1 | cut -d: -f1)
+  receipt_line=$(grep -n 'probe-receipt-before-deletion.json' <<<"$probe" \
+    | tail -n 1 | cut -d: -f1)
+  ownership_line=$(grep -nF '          [[ "$owned_branch" == true ]]' \
+    <<<"$probe" | cut -d: -f1)
+  delete_line=$(grep -n 'git push origin --delete ' <<<"$probe" \
+    | tail -n 1 | cut -d: -f1)
+  verify_line=$(grep -n 'cleanup-verification.json' <<<"$probe" \
+    | tail -n 1 | cut -d: -f1)
+  [ "$close_line" -lt "$receipt_line" ] || return 1
+  [ "$receipt_line" -lt "$delete_line" ] || return 1
+  [ "$ownership_line" -lt "$delete_line" ] || return 1
+  [ "$delete_line" -lt "$verify_line" ] || return 1
+}
+
+install_gh_checks_shim() {
+  GH_SHIM_BIN="$BATS_TEST_TMPDIR/gh-checks-bin"
+  mkdir -p "$GH_SHIM_BIN"
+  cat >"$GH_SHIM_BIN/gh" <<'EOF'
+set -euo pipefail
+printf '%s\n' "$*" >>"$GH_SHIM_LOG"
+[[ "${1:-}" == pr && "${2:-}" == checks ]] || exit 90
+attempt=0
+if [[ -f "$GH_SHIM_ATTEMPT_FILE" ]]; then
+  read -r attempt <"$GH_SHIM_ATTEMPT_FILE"
+fi
+attempt=$((attempt + 1))
+printf '%s\n' "$attempt" >"$GH_SHIM_ATTEMPT_FILE"
+outcome=$(sed -n "${attempt}p" "$GH_SHIM_SEQUENCE_FILE")
+case "$outcome" in
+  empty)
+    printf '[]\n'
+    ;;
+  pending)
+    printf '[{"bucket":"pending","name":"Build Gate","state":"IN_PROGRESS","workflow":"CI"}]\n'
+    ;;
+  failure)
+    printf '[{"bucket":"fail","name":"Build Gate","state":"FAILURE","workflow":"CI"}]\n'
+    exit 1
+    ;;
+  malformed)
+    printf '<html>upstream 502</html>\n'
+    ;;
+  nonzero-valid)
+    printf '[{"bucket":"pass","name":"Build Gate","state":"SUCCESS","workflow":"CI"}]\n'
+    exit 1
+    ;;
+  success)
+    printf '[{"bucket":"pass","name":"Build Gate","state":"SUCCESS","workflow":"CI"}]\n'
+    ;;
+  *) exit 91 ;;
+esac
+EOF
+  chmod +x "$GH_SHIM_BIN/gh"
+  cat >"$GH_SHIM_BIN/sleep" <<'EOF'
+set -euo pipefail
+printf '%s\n' "$*" >>"$SLEEP_SHIM_LOG"
+EOF
+  chmod +x "$GH_SHIM_BIN/sleep"
+}
+
+make_propose_process_harness() {
+  local root="$1"
+  local pinned=2222222222222222222222222222222222222222
+  local configurations=5555555555555555555555555555555555555555
+  mkdir -p "$root/scripts" "$root/nix/peer-snapshots" "$root/bin"
+  cp "$SCRIPT" "$root/scripts/daily-amaru-handoff.sh"
+  cat >"$root/flake.nix" <<EOF
+{
+  inputs = {
+    amaru = {
+      url = "github:pragma-org/amaru/$pinned";
+    };
+    cardano-configurations = {
+      url = "github:cardano-foundation/cardano-configurations/$configurations";
+    };
+  };
+}
+EOF
+  cat >"$root/flake.lock" <<EOF
+{
+  "nodes": {
+    "amaru": {"locked": {"rev": "$pinned"}},
+    "cardano-configurations": {"locked": {"rev": "$configurations"}},
+    "root": {"inputs": {"amaru": "amaru", "cardano-configurations": "cardano-configurations"}}
+  },
+  "root": "root",
+  "version": 7
+}
+EOF
+  cat >"$root/nix/peer-snapshots/resolution.json" <<EOF
+{
+  "amaru_committer_date_utc": "2026-08-19T00:00:00Z",
+  "amaru_rev": "1111111111111111111111111111111111111111",
+  "configs_rev": "$configurations",
+  "query_url": "https://example.invalid/query",
+  "resolved_at_utc": "2026-08-19T00:00:00Z",
+  "snapshots": {
+    "mainnet": {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    "preprod": {"sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    "preview": {"sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+  }
+}
+EOF
+  cat >"$root/scripts/resolve-peer-snapshots" <<'EOF'
+set -euo pipefail
+[[ "${1:-}" == --write ]]
+EOF
+  chmod +x "$root/scripts/resolve-peer-snapshots"
+  cat >"$root/bin/nix" <<'EOF'
+set -euo pipefail
+printf 'nix' >>"$PROCESS_SHIM_LOG"
+printf ' %q' "$@" >>"$PROCESS_SHIM_LOG"
+printf '\n' >>"$PROCESS_SHIM_LOG"
+if [[ "${1:-}" == build ]]; then
+  exit 0
+fi
+[[ "${1:-}" == flake && "${2:-}" == lock ]]
+repo=$3
+shift 3
+target="$repo/flake.lock"
+amaru=
+configurations=
+while (($#)); do
+  case "$1" in
+    --output-lock-file) target=$2; shift 2 ;;
+    git+https://github.com/pragma-org/amaru\?rev=*) amaru=${1##*=}; shift ;;
+    git+https://github.com/cardano-foundation/cardano-configurations\?rev=*)
+      configurations=${1##*=}; shift ;;
+    *) shift ;;
+  esac
+done
+if [[ -n "$amaru" ]]; then
+  jq --arg rev "$amaru" '.nodes.amaru.locked.rev = $rev' \
+    "$target" >"$target.tmp"
+  mv "$target.tmp" "$target"
+fi
+if [[ -n "$configurations" ]]; then
+  jq --arg rev "$configurations" \
+    '.nodes."cardano-configurations".locked.rev = $rev' \
+    "$target" >"$target.tmp"
+  mv "$target.tmp" "$target"
+fi
+EOF
+  cat >"$root/bin/git" <<'EOF'
+set -euo pipefail
+printf 'git' >>"$PROCESS_SHIM_LOG"
+printf ' %q' "$@" >>"$PROCESS_SHIM_LOG"
+printf '\n' >>"$PROCESS_SHIM_LOG"
+if [[ "${1:-}" == ls-remote ]]; then
+  printf '1111111111111111111111111111111111111111\trefs/heads/main\n'
+  exit 0
+fi
+[[ "${1:-}" == -C ]]
+case "${3:-}" in
+  switch | add | commit | push) exit 0 ;;
+  rev-parse)
+    printf '4444444444444444444444444444444444444444\n'
+    ;;
+  *) exit 92 ;;
+esac
+EOF
+  cat >"$root/bin/gh" <<'EOF'
+set -euo pipefail
+printf 'gh' >>"$PROCESS_SHIM_LOG"
+printf ' %q' "$@" >>"$PROCESS_SHIM_LOG"
+printf '\n' >>"$PROCESS_SHIM_LOG"
+if [[ "${1:-}" == pr && "${2:-}" == create ]]; then
+  printf 'https://example.invalid/pull/75\n'
+elif [[ "${1:-}" == pr && "${2:-}" == view ]]; then
+  printf '75\n'
+else
+  exit 93
+fi
+EOF
+  chmod +x "$root/bin/nix" "$root/bin/git" "$root/bin/gh"
+}
+
+run_proposal_case() {
+  local implementation="$1"
+  local variant="$2"
+  local root="$3"
+  (
+    # shellcheck source=/dev/null
+    source "$SCRIPT"
+    transport=fixture
+    fixture_root="$root"
+    work_dir="$root/work"
+    mkdir -p "$work_dir"
+    if [[ "$variant" == invalid-pr ]]; then
+      fixture_open_pull_request() {
+        log_fixture_operation "open_pull_request $1 0"
+        printf '0\n'
+      }
+    fi
+    if [[ "$implementation" == reference ]]; then
+      proposal_resolution=$(transport_call resolve_peer_snapshots \
+        1111111111111111111111111111111111111111)
+      proposal_branch_ref=$(transport_call propose_pin \
+        1111111111111111111111111111111111111111 \
+        "$(jq -r .configurations_sha <<<"$proposal_resolution")" '')
+      proposal_pr_number=$(transport_call open_pull_request \
+        "$proposal_branch_ref")
+      [[ "$proposal_pr_number" =~ ^[1-9][0-9]*$ ]] \
+        || die integration "invalid proposal PR number"
+      proposal_observed_sha=1111111111111111111111111111111111111111
+      proposal_pinned_sha=2222222222222222222222222222222222222222
+    else
+      propose \
+        1111111111111111111111111111111111111111 \
+        2222222222222222222222222222222222222222 ''
+    fi
+    jq -cn --argjson resolution "$proposal_resolution" \
+      --arg branch "$proposal_branch_ref" \
+      --arg pr "$proposal_pr_number" \
+      --arg observed "$proposal_observed_sha" \
+      --arg pinned "$proposal_pinned_sha" \
+      '{branch: $branch, observed: $observed, pinned: $pinned,
+        pr: $pr, resolution: $resolution}'
+  ) >"$root/result" 2>"$root/error"
 }
 
 @test "unchanged tuple publishes one canonical immutable daily result" {
@@ -172,6 +451,291 @@ assert_no_mutation_operations() {
     '^propose_pin 1111111111111111111111111111111111111111 5555555555555555555555555555555555555555 ' \
     "$TEST_ROOT/operations.log"
   [ "$(grep -c '^resolve_upstream_head ' "$TEST_ROOT/operations.log")" -eq 1 ]
+}
+
+@test "propose opens the real bump PR and halts before landing" {
+  use_fixture changed-success
+
+  propose
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PROPOSED upstream=1111111111111111111111111111111111111111"* ]]
+  [[ "$output" == *"branch=automation/amaru-1111111111111111111111111111111111111111"* ]]
+  [[ "$output" == *"pr=75"* ]]
+  [ "$(grep -Ec '^(resolve_peer_snapshots|propose_pin|open_pull_request) ' \
+    "$TEST_ROOT/operations.log")" -eq 3 ]
+  ! grep -Eq '^(integrated_sha|publish_immutable) ' \
+    "$TEST_ROOT/operations.log"
+}
+
+@test "proposal boundary matches the straight-line reference across results" {
+  local variant actual reference actual_status reference_status
+  for variant in success alternate-pr invalid-pr; do
+    actual="$BATS_TEST_TMPDIR/proposal-$variant-actual"
+    reference="$BATS_TEST_TMPDIR/proposal-$variant-reference"
+    cp -R "$FIXTURES/changed-success" "$actual"
+    cp -R "$FIXTURES/changed-success" "$reference"
+    if [[ "$variant" == alternate-pr ]]; then
+      mutate_json "$actual/scenario.json" '.pr_number = 91'
+      mutate_json "$reference/scenario.json" '.pr_number = 91'
+    fi
+    run run_proposal_case candidate "$variant" "$actual"
+    actual_status=$status
+    run run_proposal_case reference "$variant" "$reference"
+    reference_status=$status
+
+    [ "$actual_status" -eq "$reference_status" ]
+    cmp -s "$actual/result" "$reference/result"
+    cmp -s "$actual/error" "$reference/error"
+    cmp -s "$actual/operations.log" "$reference/operations.log"
+  done
+}
+
+@test "changed reconcile reaches proposal boundary and lands its returned PR" {
+  use_fixture changed-success
+  mutate_json "$TEST_ROOT/scenario.json" '.pr_number = 91'
+
+  run bash -c '
+    source "$1"
+    transport=fixture
+    fixture_root="$2"
+    work_dir="$2/work"
+    mkdir -p "$work_dir"
+    eval "$(declare -f propose | sed "1s/^propose/original_propose/")"
+    propose() {
+      printf "called\n" >"$fixture_root/propose-called"
+      original_propose "$@"
+    }
+    reconcile 2026-08-19
+  ' _ "$SCRIPT" "$TEST_ROOT"
+
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_ROOT/propose-called" ]
+  grep -q '^integrated_sha 91 4444444444444444444444444444444444444444$' \
+    "$TEST_ROOT/operations.log"
+}
+
+@test "observer retries not-yet-reported checks before accepting evidence" {
+  use_fixture changed-success
+  printf '%s\n' not-yet-reported pending success \
+    >"$TEST_ROOT/pr-check-observations.txt"
+  cat >"$TEST_ROOT/pr-checks.json" <<'EOF'
+[{"bucket":"pass","name":"Build Gate","state":"SUCCESS","workflow":"CI"}]
+EOF
+
+  observe_pr_checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"name": "Build Gate"'* ]]
+  grep -q '^required_pr_checks 75 not-yet-reported$' \
+    "$TEST_ROOT/operations.log"
+  grep -q '^required_pr_checks 75 pending$' "$TEST_ROOT/operations.log"
+  grep -q '^required_pr_checks 75 success$' "$TEST_ROOT/operations.log"
+}
+
+@test "observer reports absence only after the observation window" {
+  use_fixture changed-success
+  printf '%s\n' not-yet-reported not-yet-reported not-yet-reported \
+    >"$TEST_ROOT/pr-check-observations.txt"
+
+  observe_pr_checks
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"state=not-yet-reported attempt=1/3"* ]]
+  [[ "$output" == *"state=absent-after-observation attempts=3"* ]]
+}
+
+@test "production observation retries every non-verdict without a ceiling" {
+  local root="$BATS_TEST_TMPDIR/production-observation"
+  mkdir -p "$root"
+  install_gh_checks_shim
+  printf '%s\n' empty pending malformed nonzero-valid success \
+    >"$root/sequence"
+
+  ACTIONS_TOKEN=fixture-actions-token \
+    GH_SHIM_SEQUENCE_FILE="$root/sequence" \
+    GH_SHIM_ATTEMPT_FILE="$root/attempt" \
+    GH_SHIM_LOG="$root/gh.log" \
+    SLEEP_SHIM_LOG="$root/sleep.log" \
+    PATH="$GH_SHIM_BIN:$PATH" \
+    AMARU_OBSERVATION_INTERVAL_SECONDS=0 \
+    run "$SCRIPT" observe-pr-checks \
+      --pr-number 75 --transport production
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'state=not-yet-reported attempt=1/unbounded'* ]]
+  [[ "$output" == *'state=pending attempt=2/unbounded'* ]]
+  [[ "$output" == *'state=transport-error attempt=3/unbounded'* ]]
+  [[ "$output" == *'state=transport-error attempt=4/unbounded'* ]]
+  [[ "$output" == *'"bucket": "pass"'* ]]
+  [ "$(wc -l <"$root/gh.log")" -eq 5 ]
+  [ "$(wc -l <"$root/sleep.log")" -eq 4 ]
+  grep -Fq 'pr checks 75 --repo lambdasistemi/amaru-bootstrap --required --json bucket,name,state,workflow' \
+    "$root/gh.log"
+}
+
+@test "only a reported check failure terminates observation" {
+  local root="$BATS_TEST_TMPDIR/reported-failure"
+  mkdir -p "$root"
+  install_gh_checks_shim
+  printf '%s\n' failure success >"$root/sequence"
+
+  ACTIONS_TOKEN=fixture-actions-token \
+    GH_SHIM_SEQUENCE_FILE="$root/sequence" \
+    GH_SHIM_ATTEMPT_FILE="$root/attempt" \
+    GH_SHIM_LOG="$root/gh.log" \
+    PATH="$GH_SHIM_BIN:$PATH" \
+    AMARU_OBSERVATION_INTERVAL_SECONDS=0 \
+    run "$SCRIPT" observe-pr-checks \
+      --pr-number 75 --transport production
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"state=failure attempt=1"* ]]
+  [ "$(wc -l <"$root/gh.log")" -eq 1 ]
+}
+
+@test "production landing reaches the retrying observer before merge" {
+  landing=$(sed -n '/^production_integrated_sha()/,/^}/p' "$SCRIPT")
+
+  [[ "$landing" == *'await_observation required_pr_checks "$pr_number"'* ]]
+  [[ "$landing" != *'gh pr checks'* ]]
+  [[ "$landing" == *'gh pr merge'* ]]
+}
+
+@test "App probe uses propose and freezes verified close-by-design cleanup" {
+  local workflow="$REPO_ROOT/.github/workflows/daily-amaru-handoff.yml"
+  local probe
+  probe=$(sed -n '/^  app-event-probe:/,$p' "$workflow")
+
+  assert_probe_execution_identity "$workflow"
+  assert_probe_cleanup_contract "$workflow"
+  [[ "$probe" == *'scripts/daily-amaru-handoff.sh propose'* ]]
+  [[ "$probe" == *'scripts/daily-amaru-handoff.sh observe-pr-checks'* ]]
+  [[ "$probe" != *'--allow-empty'* ]]
+  [[ "$probe" == *'proof run closed by design'* ]]
+  [[ "$probe" == *'probe-receipt-before-deletion.json'* ]]
+  [[ "$probe" == *'cleanup-verification.json'* ]]
+  [[ "$probe" != *'|| true'* ]]
+
+  cp "$workflow" "$BATS_TEST_TMPDIR/probe-mutant.yml"
+  sed -i 's/ref: \${{ github.event.pull_request.head.sha }}/ref: main/' \
+    "$BATS_TEST_TMPDIR/probe-mutant.yml"
+  run assert_probe_execution_identity "$BATS_TEST_TMPDIR/probe-mutant.yml"
+  [ "$status" -ne 0 ]
+
+  cp "$workflow" "$BATS_TEST_TMPDIR/probe-mutant.yml"
+  sed -i \
+    's|branch="probe/daily-handoff-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"|branch="automation/amaru-${GITHUB_SHA}"|' \
+    "$BATS_TEST_TMPDIR/probe-mutant.yml"
+  run assert_probe_execution_identity "$BATS_TEST_TMPDIR/probe-mutant.yml"
+  [ "$status" -ne 0 ]
+
+  cp "$workflow" "$BATS_TEST_TMPDIR/probe-mutant.yml"
+  sed -i 's/--transport production/--transport fixture/' \
+    "$BATS_TEST_TMPDIR/probe-mutant.yml"
+  run assert_probe_execution_identity "$BATS_TEST_TMPDIR/probe-mutant.yml"
+  [ "$status" -ne 0 ]
+
+  local guard
+  for guard in branch-query pr-state receipt-hash fallback-ownership \
+    ownership ownership-verifier; do
+    cp "$workflow" "$BATS_TEST_TMPDIR/probe-mutant.yml"
+    case "$guard" in
+      branch-query)
+        sed -i '/\[\[ "$branch_query_status" -eq 2 \]\]/d' \
+          "$BATS_TEST_TMPDIR/probe-mutant.yml"
+        ;;
+      pr-state)
+        sed -i '/and \.mergedAt == null/d' \
+          "$BATS_TEST_TMPDIR/probe-mutant.yml"
+        ;;
+      receipt-hash)
+        sed -i '/sha256sum "$receipt_dir\/probe-receipt-before-deletion.json"/,+1d' \
+          "$BATS_TEST_TMPDIR/probe-mutant.yml"
+        ;;
+      fallback-ownership)
+        sed -i \
+          's/if \[\[ -n "$pr_number" && "$owned_branch" == true \]\]; then/if [[ -n "$pr_number" ]]; then/' \
+          "$BATS_TEST_TMPDIR/probe-mutant.yml"
+        ;;
+      ownership)
+        sed -i '/^          \[\[ "$owned_branch" == true \]\]/d' \
+          "$BATS_TEST_TMPDIR/probe-mutant.yml"
+        ;;
+      ownership-verifier)
+        sed -i '/scripts\/daily-amaru-handoff.sh verify-branch-ownership/,+1d' \
+          "$BATS_TEST_TMPDIR/probe-mutant.yml"
+        ;;
+    esac
+    run assert_probe_cleanup_contract "$BATS_TEST_TMPDIR/probe-mutant.yml"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "probe and daily proposal branches are disjoint by construction" {
+  local observed=1111111111111111111111111111111111111111
+
+  run bash -c 'source "$1"; select_proposal_branch_ref "$2"' \
+    _ "$SCRIPT" "$observed"
+  [ "$status" -eq 0 ]
+  [ "$output" = "automation/amaru-$observed" ]
+
+  run bash -c 'source "$1"; select_proposal_branch_ref "$2" "$3"' \
+    _ "$SCRIPT" "$observed" probe/daily-handoff-123-1
+  [ "$status" -eq 0 ]
+  [ "$output" = probe/daily-handoff-123-1 ]
+
+  run bash -c 'source "$1"; select_proposal_branch_ref "$2" "$3"' \
+    _ "$SCRIPT" "$observed" "automation/amaru-$observed"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid probe branch"* ]]
+}
+
+@test "production propose carries branch lease and ownership through process boundaries" {
+  local root="$BATS_TEST_TMPDIR/production-probe"
+  local branch=probe/daily-handoff-123-1
+  make_propose_process_harness "$root"
+
+  GH_TOKEN=fixture-app-token \
+    PROCESS_SHIM_LOG="$root/process.log" \
+    AMARU_BRANCH_OWNERSHIP_FILE="$root/ownership.json" \
+    PATH="$root/bin:$PATH" \
+    run "$root/scripts/daily-amaru-handoff.sh" propose \
+      --branch-ref "$branch" --transport production
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"branch=$branch pr=75"* ]]
+  grep -Fq -- \
+    "--force-with-lease=refs/heads/$branch: origin HEAD:refs/heads/$branch" \
+    "$root/process.log"
+  grep -Fq -- "--head $branch" "$root/process.log"
+  jq -e --arg branch "$branch" '
+    .created == true
+    and .branch == $branch
+    and .head_sha == "4444444444444444444444444444444444444444"
+  ' "$root/ownership.json"
+
+  run "$root/scripts/daily-amaru-handoff.sh" verify-branch-ownership \
+    --file "$root/ownership.json" --branch "$branch"
+  [ "$status" -eq 0 ]
+  run "$root/scripts/daily-amaru-handoff.sh" verify-branch-ownership \
+    --file "$root/ownership.json" --branch probe/daily-handoff-999-1
+  [ "$status" -ne 0 ]
+
+  root="$BATS_TEST_TMPDIR/production-daily"
+  make_propose_process_harness "$root"
+  GH_TOKEN=fixture-app-token \
+    PROCESS_SHIM_LOG="$root/process.log" \
+    AMARU_BRANCH_OWNERSHIP_FILE="$root/ownership.json" \
+    PATH="$root/bin:$PATH" \
+    run "$root/scripts/daily-amaru-handoff.sh" propose \
+      --transport production
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'branch=automation/amaru-1111111111111111111111111111111111111111'* ]]
+  grep -Fq -- \
+    '--force-with-lease=refs/heads/automation/amaru-1111111111111111111111111111111111111111:' \
+    "$root/process.log"
 }
 
 @test "lock isolation rejects drift outside amaru and configurations nodes" {

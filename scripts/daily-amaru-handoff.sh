@@ -6,7 +6,7 @@ readonly UPSTREAM_REF=refs/heads/main
 readonly GH_REPOSITORY=lambdasistemi/amaru-bootstrap
 readonly IMAGE_REPOSITORY=ghcr.io/lambdasistemi/amaru-bootstrap-producer
 
-repo_root=$(cd "$(dirname "$0")/.." && pwd)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 contract_root=$repo_root/specs/075-daily-amaru-handoff/contracts
 transport=
 fixture_root=
@@ -29,6 +29,9 @@ usage() {
   cat >&2 <<'EOF'
 usage:
   daily-amaru-handoff.sh reconcile --observation-day DAY --transport production|fixture [--fixture-root DIR]
+  daily-amaru-handoff.sh propose [--branch-ref REF] --transport production|fixture [--fixture-root DIR]
+  daily-amaru-handoff.sh observe-pr-checks --pr-number NUMBER --transport production|fixture [--fixture-root DIR]
+  daily-amaru-handoff.sh verify-branch-ownership --file FILE --branch REF
   daily-amaru-handoff.sh validate-handoff --file FILE
   daily-amaru-handoff.sh validate-daily-result --file FILE
   daily-amaru-handoff.sh validate-image-receipt --file FILE
@@ -296,6 +299,36 @@ fixture_required_ci_evidence() {
   fi
 }
 
+fixture_required_pr_checks() {
+  local pr_number="$1"
+  local expected state attempt_file=$work_dir/pr-check-attempt
+  local attempts=0
+  expected=$(fixture_scenario .pr_number)
+  [[ "$pr_number" == "$expected" ]] \
+    || die integration "unexpected fixture PR number"
+  if [[ -f "$attempt_file" ]]; then
+    attempts=$(<"$attempt_file")
+  fi
+  attempts=$((attempts + 1))
+  printf '%s\n' "$attempts" >"$attempt_file"
+  if [[ -f "$fixture_root/pr-check-observations.txt" ]]; then
+    state=$(sed -n "${attempts}p" \
+      "$fixture_root/pr-check-observations.txt")
+  else
+    state=
+  fi
+  [[ -n "$state" ]] || state=not-yet-reported
+  log_fixture_operation "required_pr_checks $pr_number $state"
+  case "$state" in
+    not-yet-reported | pending | failure) printf '%s\n' "$state" ;;
+    success)
+      jq -S . "$fixture_root/pr-checks.json" \
+        || die integration "invalid fixture PR check evidence"
+      ;;
+    *) die integration "invalid fixture PR check state: $state" ;;
+  esac
+}
+
 fixture_integrated_sha() {
   local pr_number="$1"
   local expected value
@@ -350,9 +383,34 @@ fixture_cli_honesty_evidence() {
   cat "$file"
 }
 
+select_proposal_branch_ref() {
+  local observed_sha="$1"
+  local requested_branch_ref="${2:-}"
+  require_sha select_proposal_branch_ref "$observed_sha"
+  if [[ -n "$requested_branch_ref" ]]; then
+    [[ "$requested_branch_ref" =~ ^probe/daily-handoff-[1-9][0-9]*-[1-9][0-9]*$ ]] \
+      || die integration "invalid probe branch"
+    printf '%s\n' "$requested_branch_ref"
+  else
+    printf 'automation/amaru-%s\n' "$observed_sha"
+  fi
+}
+
+verify_branch_ownership() {
+  local file="$1"
+  local branch_ref="$2"
+  [[ -f "$file" ]] || return 1
+  jq -e --arg branch "$branch_ref" '
+    .created == true
+    and .branch == $branch
+    and (.head_sha | test("^[0-9a-f]{40}$"))
+  ' "$file" >/dev/null
+}
+
 fixture_propose_pin() {
   local observed_sha="$1"
   local configurations_sha="$2"
+  local requested_branch_ref="${3:-}"
   local expected_observed expected_configurations branch_ref
   expected_observed=$(fixture_scenario .observed_sha)
   expected_configurations=$(jq -er .configurations_sha \
@@ -366,7 +424,12 @@ fixture_propose_pin() {
     <(jq -S 'del(.nodes.amaru, .nodes."cardano-configurations")' \
       "$fixture_root/lock-after.json") \
     || die BLOCKED-PEER-SNAPSHOT-RESOLUTION "unrelated lock node moved"
-  branch_ref=$(fixture_scenario .branch_ref)
+  branch_ref=$(select_proposal_branch_ref "$observed_sha" \
+    "$requested_branch_ref")
+  if [[ -z "$requested_branch_ref" ]]; then
+    [[ "$branch_ref" == "$(fixture_scenario .branch_ref)" ]] \
+      || die integration "unexpected fixture branch"
+  fi
   log_fixture_operation "propose_pin $observed_sha $configurations_sha $branch_ref"
   printf '%s\n' "$branch_ref"
 }
@@ -589,10 +652,42 @@ production_required_ci_evidence() {
       run_id: $run_id, workflow: "CI"}'
 }
 
+production_required_pr_checks() {
+  local pr_number="$1"
+  local output=$work_dir/pr-checks.json
+  local error=$work_dir/pr-checks.error
+  local rc
+  set +e
+  actions_gh pr checks "$pr_number" --repo "$GH_REPOSITORY" --required \
+    --json bucket,name,state,workflow >"$output" 2>"$error"
+  rc=$?
+  set -e
+  if grep -q "no checks reported" "$error"; then
+    printf 'not-yet-reported\n'
+    return
+  fi
+  if ! jq -e 'type == "array"' "$output" >/dev/null 2>&1; then
+    printf 'transport-error\n'
+    return
+  fi
+  if jq -e 'length == 0' "$output" >/dev/null; then
+    printf 'not-yet-reported\n'
+  elif jq -e 'any(.[]; .bucket == "fail" or .bucket == "cancel")' \
+    "$output" >/dev/null; then
+    printf 'failure\n'
+  elif jq -e 'any(.[]; .bucket == "pending")' "$output" >/dev/null; then
+    printf 'pending\n'
+  elif [[ "$rc" -ne 0 ]]; then
+    printf 'transport-error\n'
+  else
+    jq -S . "$output"
+  fi
+}
+
 production_integrated_sha() {
   local pr_number="$1"
   local value
-  actions_gh pr checks "$pr_number" --repo "$GH_REPOSITORY" --required --watch
+  await_observation required_pr_checks "$pr_number" >/dev/null
   gh pr merge "$pr_number" --repo "$GH_REPOSITORY" --rebase --delete-branch
   value=$(gh pr view "$pr_number" --repo "$GH_REPOSITORY" \
     --json mergeCommit --jq '.mergeCommit.oid')
@@ -661,9 +756,11 @@ production_resolve_peer_snapshots() {
   require_sha resolve_peer_snapshots "$amaru_sha"
   cp "$repo_root/flake.lock" "$proposed_lock"
   nix flake lock "$repo_root" --output-lock-file "$proposed_lock" \
-    --override-input amaru "git+https://github.com/pragma-org/amaru?rev=$amaru_sha"
+    --override-input amaru \
+      "git+https://github.com/pragma-org/amaru?rev=$amaru_sha" >&2
   set +e
-  FLAKE_LOCK="$proposed_lock" "$repo_root/scripts/resolve-peer-snapshots" --write
+  FLAKE_LOCK="$proposed_lock" \
+    "$repo_root/scripts/resolve-peer-snapshots" --write >&2
   set -e
   jq -e --arg amaru "$amaru_sha" '
     (keys == ["amaru_committer_date_utc", "amaru_rev", "configs_rev",
@@ -687,15 +784,21 @@ production_resolve_peer_snapshots() {
 production_propose_pin() {
   local observed_sha="$1"
   local configurations_sha="$2"
+  local requested_branch_ref="${3:-}"
   local before=$work_dir/lock-before.json
-  local branch_ref=automation/amaru-$observed_sha
+  local branch_ref
+  local ownership_file=${AMARU_BRANCH_OWNERSHIP_FILE:-}
+  local head_sha
+  branch_ref=$(select_proposal_branch_ref "$observed_sha" \
+    "$requested_branch_ref")
   cp "$repo_root/flake.lock" "$before"
   replace_flake_revision amaru "$observed_sha"
   replace_flake_revision cardano-configurations "$configurations_sha"
   nix flake lock "$repo_root" \
     --override-input amaru "git+https://github.com/pragma-org/amaru?rev=$observed_sha" \
     --override-input cardano-configurations \
-      "git+https://github.com/cardano-foundation/cardano-configurations?rev=$configurations_sha"
+      "git+https://github.com/cardano-foundation/cardano-configurations?rev=$configurations_sha" \
+    >&2
   cmp -s \
     <(jq -S 'del(.nodes.amaru, .nodes."cardano-configurations")' "$before") \
     <(jq -S 'del(.nodes.amaru, .nodes."cardano-configurations")' "$repo_root/flake.lock") \
@@ -704,21 +807,31 @@ production_propose_pin() {
     && "$(jq -r '.nodes."cardano-configurations".locked.rev' "$repo_root/flake.lock")" \
       == "$configurations_sha" ]] \
     || die BLOCKED-PEER-SNAPSHOT-RESOLUTION "lock revisions differ from resolution"
-  "$repo_root/scripts/resolve-peer-snapshots" --write \
+  "$repo_root/scripts/resolve-peer-snapshots" --write >&2 \
     || die BLOCKED-PEER-SNAPSHOT-RESOLUTION "verification resolver call failed"
   [[ -f "$work_dir/discovery-resolution.json" ]] \
     || die BLOCKED-PEER-SNAPSHOT-RESOLUTION "discovery record was not retained"
   cp "$work_dir/discovery-resolution.json" \
     "$repo_root/nix/peer-snapshots/resolution.json"
-  nix build --quiet "$repo_root#checks.x86_64-linux.peer-snapshot-anchor" \
+  nix build --quiet "$repo_root#checks.x86_64-linux.peer-snapshot-anchor" >&2 \
     || die BLOCKED-PEER-SNAPSHOT-RESOLUTION "offline anchor failed"
-  git -C "$repo_root" switch -c "$branch_ref"
+  git -C "$repo_root" switch -c "$branch_ref" >&2
   git -C "$repo_root" add flake.nix flake.lock nix/peer-snapshots/resolution.json
-  git -C "$repo_root" commit \
+  git -C "$repo_root" commit --quiet \
     -m 'build(ci): bump amaru through daily updater' \
     -m 'Move the Amaru and rule-selected configurations pins together and retain the resolver evidence verified by the offline anchor.' \
     -m 'Tasks: T012, T020, T021, T022'
-  git -C "$repo_root" push origin "HEAD:refs/heads/$branch_ref"
+  git -C "$repo_root" push --quiet \
+    --force-with-lease="refs/heads/$branch_ref:" origin \
+    "HEAD:refs/heads/$branch_ref" >&2 \
+    || die integration "proposal branch already exists or push failed"
+  if [[ -n "$ownership_file" ]]; then
+    head_sha=$(git -C "$repo_root" rev-parse HEAD)
+    jq -S -n --arg branch "$branch_ref" --arg head_sha "$head_sha" '
+      {branch: $branch, created: true, head_sha: $head_sha}
+    ' >"$ownership_file.tmp"
+    mv "$ownership_file.tmp" "$ownership_file"
+  fi
   printf '%s\n' "$branch_ref"
 }
 
@@ -738,6 +851,70 @@ transport_call() {
   local operation="$1"
   shift
   "${transport}_${operation}" "$@"
+}
+
+await_observation() {
+  local operation="$1"
+  local subject="$2"
+  local attempts=0
+  local interval=${AMARU_OBSERVATION_INTERVAL_SECONDS:-10}
+  local attempt value state
+  if [[ "$transport" != production ]]; then
+    attempts=${AMARU_OBSERVATION_ATTEMPTS:-1}
+  fi
+  [[ "$attempts" =~ ^[0-9]+$ && "$interval" =~ ^[0-9]+$ ]] \
+    || die usage "invalid observation window"
+  for ((attempt = 1; ; attempt++)); do
+    value=$(transport_call "$operation" "$subject")
+    case "$value" in
+      absent | not-yet-reported)
+        state=not-yet-reported
+        ;;
+      pending)
+        state=pending
+        ;;
+      transport-error)
+        state='transport-error'
+        ;;
+      failure)
+        die BLOCKED-REQUIRED-CI \
+          "state=failure attempt=$attempt/$attempts subject=$subject"
+        ;;
+      *)
+        printf '%s\n' "$value"
+        return
+        ;;
+    esac
+    printf 'OBSERVE subject=%s state=%s attempt=%s/%s\n' \
+      "$subject" "$state" "$attempt" \
+      "$([[ "$attempts" -eq 0 ]] && printf unbounded || printf '%s' "$attempts")" \
+      >&2
+    if ((attempts > 0 && attempt >= attempts)); then
+      break
+    fi
+    sleep "$interval"
+  done
+  if [[ "$state" == not-yet-reported ]]; then
+    die BLOCKED-REQUIRED-CI \
+      "state=absent-after-observation attempts=$attempts subject=$subject"
+  fi
+  die BLOCKED-REQUIRED-CI \
+    "state=pending-after-observation attempts=$attempts subject=$subject"
+}
+
+propose() {
+  local observed_sha="$1"
+  local pinned_sha="$2"
+  local requested_branch_ref="${3:-}"
+  proposal_resolution=$(transport_call resolve_peer_snapshots "$observed_sha")
+  proposal_branch_ref=$(transport_call propose_pin "$observed_sha" \
+    "$(jq -r .configurations_sha <<<"$proposal_resolution")" \
+    "$requested_branch_ref")
+  proposal_pr_number=$(transport_call open_pull_request "$proposal_branch_ref")
+  [[ "$proposal_pr_number" =~ ^[1-9][0-9]*$ ]] \
+    || die integration "invalid proposal PR number"
+  proposal_observed_sha=$observed_sha
+  proposal_pinned_sha=$pinned_sha
 }
 
 publish_or_fail() {
@@ -778,12 +955,7 @@ build_and_publish_handoff() {
     write_value_file "$existing" "$handoff_file"
     validate_handoff_file "$handoff_file"
   else
-    ci=$(transport_call required_ci_evidence "$bootstrap_sha")
-    case "$ci" in
-      absent | pending | failure)
-        die BLOCKED-REQUIRED-CI "state=$ci sha=$bootstrap_sha"
-        ;;
-    esac
+    ci=$(await_observation required_ci_evidence "$bootstrap_sha")
     write_value_file "$ci" "$ci_file"
     validate_ci_block "$ci_file"
 
@@ -872,7 +1044,7 @@ reconcile() {
   local observed_sha pinned_sha current_bootstrap handoff peer resolution
   local daily_file=$work_dir/daily-result-v1.json
   local daily_key=amaru-daily-v1-$observation_day
-  local branch_ref pr_number bootstrap_sha
+  local bootstrap_sha
 
   require_day "$observation_day"
   observed_sha=$(transport_call resolve_upstream_head \
@@ -906,11 +1078,9 @@ reconcile() {
     return
   fi
 
-  resolution=$(transport_call resolve_peer_snapshots "$observed_sha")
-  branch_ref=$(transport_call propose_pin "$observed_sha" \
-    "$(jq -r .configurations_sha <<<"$resolution")")
-  pr_number=$(transport_call open_pull_request "$branch_ref")
-  bootstrap_sha=$(transport_call integrated_sha "$pr_number")
+  propose "$observed_sha" "$pinned_sha"
+  resolution=$proposal_resolution
+  bootstrap_sha=$(transport_call integrated_sha "$proposal_pr_number")
   build_and_publish_handoff "$observation_day" "$observed_sha" \
     "$pinned_sha" "$bootstrap_sha" "$resolution"
 }
@@ -919,6 +1089,9 @@ main() {
   local command=${1:-}
   local file=''
   local observation_day=''
+  local pr_number=''
+  local branch_ref=''
+  local observed_sha pinned_sha
   shift || true
   work_dir=$(mktemp -d)
   trap 'rm -rf -- "$work_dir"' EXIT
@@ -951,8 +1124,65 @@ main() {
       fi
       reconcile "$observation_day"
       ;;
+    propose)
+      while (($#)); do
+        case "$1" in
+          --branch-ref) branch_ref=${2:-}; shift 2 ;;
+          --transport) transport=${2:-}; shift 2 ;;
+          --fixture-root) fixture_root=${2:-}; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      [[ "$transport" =~ ^(production|fixture)$ ]] || usage
+      if [[ "$transport" == fixture ]]; then
+        [[ -n "$fixture_root" && -d "$fixture_root" ]] || usage
+      elif [[ -n "$fixture_root" ]]; then
+        usage
+      fi
+      observed_sha=$(transport_call resolve_upstream_head \
+        "$UPSTREAM_REPOSITORY" "$UPSTREAM_REF")
+      pinned_sha=$(transport_call read_pinned_sha)
+      [[ "$observed_sha" != "$pinned_sha" ]] \
+        || die integration "no changed Amaru revision to propose"
+      propose "$observed_sha" "$pinned_sha" "$branch_ref"
+      printf 'PROPOSED upstream=%s pinned=%s branch=%s pr=%s\n' \
+        "$proposal_observed_sha" "$proposal_pinned_sha" \
+        "$proposal_branch_ref" "$proposal_pr_number"
+      ;;
+    observe-pr-checks)
+      while (($#)); do
+        case "$1" in
+          --pr-number) pr_number=${2:-}; shift 2 ;;
+          --transport) transport=${2:-}; shift 2 ;;
+          --fixture-root) fixture_root=${2:-}; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      [[ "$pr_number" =~ ^[1-9][0-9]*$ \
+        && "$transport" =~ ^(production|fixture)$ ]] || usage
+      if [[ "$transport" == fixture ]]; then
+        [[ -n "$fixture_root" && -d "$fixture_root" ]] || usage
+      elif [[ -n "$fixture_root" ]]; then
+        usage
+      fi
+      await_observation required_pr_checks "$pr_number"
+      ;;
+    verify-branch-ownership)
+      local ownership_file=''
+      while (($#)); do
+        case "$1" in
+          --file) ownership_file=${2:-}; shift 2 ;;
+          --branch) branch_ref=${2:-}; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      [[ -n "$ownership_file" && -n "$branch_ref" ]] || usage
+      verify_branch_ownership "$ownership_file" "$branch_ref"
+      ;;
     *) usage ;;
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
