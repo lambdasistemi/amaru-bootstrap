@@ -219,3 +219,44 @@ limits stated, is frozen at the ticket-owner runtime root under
 
 **Out of scope**: handoff v1, receipt semantics, any #77-owned surface, every
 pin, and the live bump itself — which resumes on a fresh seat once this lands.
+
+## Slice 3 re-cut — campaign 3 (`gh`-shim seam)
+
+Campaign 2 closed at its two-submission cap with two BLOCKING rows open. Four of
+six rows were killed and the repair's gains are real; this is a re-cut with the
+test seam moved, not a restart.
+
+**Root cause, one property.** The suite stubbed the production transport
+*functions* and fed `await_observation` literal strings, so every classifier
+inside those functions was unconstrained by construction. Three mutations of the
+classifier survived — including one that reinstated the original defect verbatim
+(a 5xx, rate limit or expired token classified as a reported check failure) and
+one where an empty check list terminated the observation. Five mutations of the
+branch chain survived, including removal of the `--force-with-lease` that the
+receipt described as an atomic lease and that nothing asserted.
+
+**The fix**: move the seam from stubbed production functions to a `gh` shim on
+`PATH` returning representative payloads, so the classifiers and the
+remote-carrying mechanisms actually execute.
+
+- [ ] T030 Replace the production-function stubs with a `PATH` shim for `gh`, exercising representative outcomes: empty array, pending bucket, fail bucket, non-JSON/5xx body, and non-zero exit with a valid body
+- [ ] T031 Prove `INV-79-PROBE-BRANCH-DISJOINT` end to end — the `--branch-ref` value reaches the remote push, the lease is asserted, the ownership receipt is written, and cleanup refuses a ref it did not create
+- [ ] T032 Preserve campaign 2's accepted gains under the new seam: unbounded production observation with only a reported failure terminal, transport errors retried, and the three comparison-based invariants still killed
+
+**Severity correction (epic altitude, A-007)**: `INV-79-OBSERVE-NOT-YET` is
+**ADVISORY**, not BLOCKING. The spec's own definition of BLOCKING is "publishes a
+wrong or unverifiable artifact to an external consumer under an immutable key",
+and this row's failure mode is a fail-closed spurious `BLOCKED-REQUIRED-CI` that
+publishes nothing. It was miscategorised against its own definition at spec time.
+It cannot block the slice; it is still wanted, and the `gh` shim is expected to
+kill it cheaply. If it is still open when the slice closes it ships as residual
+`CNA205-AB79-OBSERVE-CLASSIFIER-01` with a watch duty: any future spurious
+`BLOCKED-REQUIRED-CI` day is triaged against this residual first.
+
+**Terminal guard**: if campaign 3 also closes with `INV-79-PROBE-BRANCH-DISJOINT`
+open, the slice's architecture is wrong. Stop, do not open a fourth campaign, and
+escalate with the auditor's evidence.
+
+**Inheritance**: `refs/evidence/slice03-rejected-submission2` (`19d3d32`) is
+read-only reference. Campaign 3's base is `3e8ebdf` so that everything reused
+from it is re-audited inside the new candidate rather than inherited unaudited.
