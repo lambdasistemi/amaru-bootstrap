@@ -1,0 +1,143 @@
+name: Daily Amaru handoff
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: daily-amaru-handoff-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fixture:
+    name: Daily handoff fixture
+    if: github.event_name == 'pull_request'
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the injected state machine
+        run: nix build --quiet .#checks.x86_64-linux.daily-amaru-handoff
+
+  reconcile:
+    name: Daily handoff production reconciliation
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: nixos
+    steps:
+      - name: Mint repository-scoped App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: lambdasistemi
+          repositories: amaru-bootstrap
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Export token for Git and GitHub operations
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: printf 'GH_TOKEN=%s\n' "$APP_TOKEN" >>"$GITHUB_ENV"
+
+      - name: Reconcile the observed UTC day
+        env:
+          ACTIONS_TOKEN: ${{ github.token }}
+        run: |
+          observation_day=$(date --utc '+%Y-%m-%d')
+          nix --quiet shell \
+            nixpkgs#bash \
+            nixpkgs#check-jsonschema \
+            nixpkgs#coreutils \
+            nixpkgs#curl \
+            nixpkgs#git \
+            nixpkgs#gh \
+            nixpkgs#gnugrep \
+            nixpkgs#jq \
+            nixpkgs#skopeo \
+            -c scripts/daily-amaru-handoff.sh reconcile \
+              --observation-day "$observation_day" \
+              --transport production
+
+  app-event-probe:
+    name: Scoped App event probe
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'daily-amaru-app-probe')
+    runs-on: nixos
+    steps:
+      - name: Mint repository-scoped App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          owner: lambdasistemi
+          repositories: amaru-bootstrap
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Create event, observe Build Gate, and clean exact targets
+        env:
+          ACTIONS_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          branch="probe/daily-handoff-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          pr_number=
+          cleanup() {
+            if [[ -n "$pr_number" ]]; then
+              gh pr close "$pr_number" --repo "$GITHUB_REPOSITORY" \
+                --delete-branch || true
+            else
+              git push origin --delete "$branch" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          git config user.name lambdasistemi-ci[bot]
+          git config user.email 4036299+lambdasistemi-ci[bot]@users.noreply.github.com
+          git switch -c "$branch"
+          git commit --allow-empty -m 'ci: probe scoped App pull request event'
+          git push origin "HEAD:refs/heads/$branch"
+          pr_url=$(gh pr create --repo "$GITHUB_REPOSITORY" \
+            --base main --head "$branch" \
+            --title 'ci: disposable daily handoff App probe' \
+            --body 'Disposable event-path probe; closed and deleted by its creator.')
+          pr_number=$(gh pr view "$pr_url" --repo "$GITHUB_REPOSITORY" \
+            --json number --jq .number)
+          GH_TOKEN="$ACTIONS_TOKEN" gh pr checks "$pr_number" \
+            --repo "$GITHUB_REPOSITORY" \
+            --required --watch
+
+          ruleset_id=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets" \
+            --jq '[.[] | select(.name == "main" and .enforcement == "active")][0].id // empty')
+          if [[ ! "$ruleset_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "active main ruleset not found" >&2
+            exit 1
+          fi
+          rules=$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${ruleset_id}")
+          # shellcheck disable=SC2016
+          nix --quiet shell nixpkgs#jq -c jq -e '
+            .name == "main"
+            and .enforcement == "active"
+            and any(.rules[]; .type == "pull_request")
+            and any(.rules[];
+              .type == "required_status_checks"
+              and any(.parameters.required_status_checks[];
+                .context == "Build Gate"))
+          ' <<<"$rules" >/dev/null

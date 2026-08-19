@@ -1,0 +1,11 @@
+{
+  "conclusion": "success",
+  "event": "push",
+  "head_sha": "3333333333333333333333333333333333333333",
+  "job_id": 7502,
+  "repository": "lambdasistemi/amaru-bootstrap",
+  "required_check": "Build Gate",
+  "run_attempt": 1,
+  "run_id": 7501,
+  "workflow": "CI"
+}

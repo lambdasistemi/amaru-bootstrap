@@ -26,9 +26,9 @@ and never a conflicting replacement.
 canonical `UNCHANGED` result with zero pin or image mutation; an identical
 retry is a no-op and different same-day bytes are rejected.
 
-- [ ] T001 [US1] Write failing unchanged, identical-retry, and conflict tests in `tests/test-daily-amaru-handoff.bats` with deterministic fixtures under `tests/fixtures/daily-amaru-handoff/`
-- [ ] T002 [US1] Implement strict daily observation/classification and canonical daily-result validation in `scripts/daily-amaru-handoff.sh`
-- [ ] T003 [US1] Implement create-or-compare day-keyed result publication through the injected transport in `scripts/daily-amaru-handoff.sh`
+- [x] T001 [US1] Write failing unchanged, identical-retry, and conflict tests in `tests/test-daily-amaru-handoff.bats` with deterministic fixtures under `tests/fixtures/daily-amaru-handoff/`
+- [x] T002 [US1] Implement strict daily observation/classification and canonical daily-result validation in `scripts/daily-amaru-handoff.sh`
+- [x] T003 [US1] Implement create-or-compare day-keyed result publication through the injected transport in `scripts/daily-amaru-handoff.sh`
 
 ### Phase 2: User Story 2 - Changed source to immutable handoff (P1)
 
@@ -39,11 +39,11 @@ final-main CI, immutable image digest, publication identity, and handoff v1.
 change; complete injected CI/publication evidence yields one strict handoff,
 while an equal tuple yields `UNCHANGED` with no mutation.
 
-- [ ] T004 [US2] Write failing changed-source, exact-pin, lock-isolation, strict-receipt, and idempotent-handoff tests in `tests/test-daily-amaru-handoff.bats`
-- [ ] T005 [US2] Implement fixed-origin resolution, the two-revision `propose_pin` contract, lock-isolation rejection, and protected integration transport operations in `scripts/daily-amaru-handoff.sh`
-- [ ] T006 [US2] Implement strict image-publication/handoff schema validation including the additive `peer_snapshots` identity block, relational identity checks, canonical generation, and tuple-keyed create-or-compare publication in `scripts/daily-amaru-handoff.sh`
-- [ ] T007 [US2] Emit exact registry digest and image-publication receipt evidence in `.github/workflows/publish-bootstrap-image.yml`
-- [ ] T008 [US2] Register the focused Bats/shellcheck/schema/workflow-lint check in `nix/checks.nix`, the `justfile` `build-gate` list, and the `.github/workflows/ci.yml` Build Gate list (FR-025)
+- [x] T004 [US2] Write failing changed-source, exact-pin, lock-isolation, strict-receipt, and idempotent-handoff tests in `tests/test-daily-amaru-handoff.bats`
+- [x] T005 [US2] Implement fixed-origin resolution, the two-revision `propose_pin` contract, lock-isolation rejection, and protected integration transport operations in `scripts/daily-amaru-handoff.sh`
+- [x] T006 [US2] Implement strict image-publication/handoff schema validation including the additive `peer_snapshots` identity block, relational identity checks, canonical generation, and tuple-keyed create-or-compare publication in `scripts/daily-amaru-handoff.sh`
+- [x] T007 [US2] Emit exact registry digest and image-publication receipt evidence in `.github/workflows/publish-bootstrap-image.yml`
+- [x] T008 [US2] Register the focused Bats/shellcheck/schema/workflow-lint check in `nix/checks.nix`, the `justfile` `build-gate` list, and the `.github/workflows/ci.yml` Build Gate list (FR-025)
 
 ### Phase 3: User Story 3 - Fail closed and prove hosted wiring (P1)
 
@@ -55,9 +55,9 @@ conflict, blocked peer-snapshot resolution, and temporary CLI drift all fail;
 the restored path and one same-repository hosted App event produce verifiable
 green evidence.
 
-- [ ] T009 [US3] Write failing wrong-origin/ref, missing-CI, missing-publication, missing-digest, unknown-field, and no-handoff tests in `tests/test-daily-amaru-handoff.bats`
-- [ ] T010 [US3] Wire schedule, manual, pull-request fixture, and explicit label-gated App probe paths to the one state machine in `.github/workflows/daily-amaru-handoff.yml`
-- [ ] T011 [US3] Document the public contracts, immutable keys, operator results, failure vocabulary, and manual trigger in `docs/daily-amaru-handoff.md` and add one navigation entry in `mkdocs.yml`
+- [x] T009 [US3] Write failing wrong-origin/ref, missing-CI, missing-publication, missing-digest, unknown-field, and no-handoff tests in `tests/test-daily-amaru-handoff.bats`
+- [x] T010 [US3] Wire schedule, manual, pull-request fixture, and explicit label-gated App probe paths to the one state machine in `.github/workflows/daily-amaru-handoff.yml`
+- [x] T011 [US3] Document the public contracts, immutable keys, operator results, failure vocabulary, and manual trigger in `docs/daily-amaru-handoff.md` and add one navigation entry in `mkdocs.yml`
 
 ### Phase 3b: Peer-snapshot coupling (A-001 option C)
 
@@ -70,9 +70,9 @@ carrying both rule-selected revisions and the regenerated record; a failing
 resolution or anchor produces `BLOCKED-PEER-SNAPSHOT-RESOLUTION` and no
 handoff; no local test performs a live query.
 
-- [ ] T017 [US3] Write failing tests for the two-revision proposal, `del(.nodes.amaru, .nodes."cardano-configurations")` lock isolation, `BLOCKED-PEER-SNAPSHOT-RESOLUTION`, and the assertion that no build/verify path invokes the resolver (FR-021..FR-024)
-- [ ] T018 [US3] Implement `resolve_peer_snapshots` and the two-revision `propose_pin` as injected-transport operations delegating to the unmodified `scripts/resolve-peer-snapshots`, in `scripts/daily-amaru-handoff.sh`
-- [ ] T019 [US3] Prove the new focused check is reachable and able to fail from the hosted Build Gate path, and that a temporary mock-only CLI command makes the exact Build Gate path red with byte-exact restoration afterwards
+- [x] T017 [US3] Write failing tests for the two-revision proposal, `del(.nodes.amaru, .nodes."cardano-configurations")` lock isolation, `BLOCKED-PEER-SNAPSHOT-RESOLUTION`, and the assertion that no build/verify path invokes the resolver (FR-021..FR-024)
+- [x] T018 [US3] Implement `resolve_peer_snapshots` and the two-revision `propose_pin` as injected-transport operations delegating to the unmodified `scripts/resolve-peer-snapshots`, in `scripts/daily-amaru-handoff.sh`
+- [x] T019 [US3] Prove the focused check derivation is able to fail from the exact `just build-gate` path, and that a temporary mock-only CLI command makes that path red with byte-exact restoration afterwards
 
 **Slice 1 commit**: `feat(ci): publish daily validated amaru handoff`
 **Trailer**: `Tasks: T001, T002, T003, T004, T005, T006, T007, T008, T009, T010, T011, T017, T018, T019`
@@ -99,7 +99,7 @@ tuple is `UNCHANGED`.
 
 - [ ] T013 Independently inspect each accepted candidate, rerun the immutable slice gate and `./gate.sh`, stamp its tasks into the accepted local commit, push, and refresh the draft PR
 - [ ] T014 Enable the explicit same-repository App probe, verify its disposable event reaches hosted `Build Gate`, verify main rules still require pull requests and `Build Gate`, and prove exact probe PR/branch cleanup
-- [ ] T015 Verify current-head hosted fixture workflow, `Build Gate`, `Live Bootstrap Producer`, and PR image-publication receipt/digest evidence, then update reviewer-facing PR evidence
+- [ ] T015 Verify current-head hosted fixture workflow, `Build Gate`, `Live Bootstrap Producer`, and PR image-publication receipt/digest evidence, then update reviewer-facing PR evidence. Includes the hosted half of check reachability: that the hosted `Build Gate` job actually invokes the focused check, which a local `just build-gate` mirror cannot establish
 - [ ] T016 Freshly run `just build-gate` and `just ci`, run the finalization audit and metadata/task checks, mark the PR ready, and publish the `handoff-v1` ticket release signal naming the additive `peer_snapshots` field, without merging
 
 ## Dependencies and Execution Order
@@ -132,3 +132,36 @@ tuple is `UNCHANGED`.
 7. Run the accepted updater against the real upstream, prove anchor red-then-green
    and lock isolation, and pass full CI on the new tuple.
 8. Obtain hosted App/rules/CI/publication evidence before ready-for-review handoff.
+
+## Forward follow-ups (not in this ticket)
+
+Raised by audit, no blocking finding, carried forward rather than re-cutting a
+passing ticket. Each is named and owned; none is silence.
+
+- **auditor-s1-R-1** — `INV-75-SINGLE-MACHINE` residual (ADVISORY). Nothing
+  asserts the pull-request job keeps invoking the focused check. Honest limit:
+  the green establishes all three trigger paths reach `reconcile` today as read
+  from YAML, not that later workflow edits preserve it.
+- **CAND-75-CHECK-MEMBERSHIP** — proposed BLOCKING, *not ratified into this
+  ticket*. List **parity** now ships (bats 25), but **membership** does not:
+  dropping a check from *both* Build Gate lists leaves the suite green, and
+  bats 25 lives inside the very check it would need to protect, so its guard is
+  unreachable in exactly that case. Today the assertion exists only in the
+  ticket owner's untracked `slice-01-v6.sh`, which retires with the ticket. Not
+  ratified here because closing it needs a shipped property and this ticket has
+  spent both audited submissions; ratifying it now would force a re-cut of a
+  passing candidate. It is a pre-existing repo-wide gap, demonstrated on
+  `cli-mock-honesty` which predates this ticket.
+- **CAND-75-TESTTREE-COMPLETE** — proposed BLOCKING, *not ratified into this
+  ticket*. The `dailyHandoffTestTree` linkFarm still enumerates workflows
+  explicitly, so a fifth workflow invoking the live resolver would be caught by
+  a local `bats` run and invisible to the check CI builds. The list is complete
+  today, so the invariant holds over the real set; a directory-level entry
+  closes it.
+- **auditor-s2-D-1** — repo-wide check reachability: the membership gap applies
+  to all sixteen entries of the two Build Gate lists; demonstrated for two.
+- **auditor-s1-D-1** — the dev shell lacks `check-jsonschema`, so
+  `nix develop -c bats tests/test-daily-amaru-handoff.bats` fails 12/23 on a
+  green candidate. Environment gap in `flake.nix`, outside this slice's fence.
+- **auditor-s1-D-2** — `find_daily_result` is implemented in both transports
+  and satisfies the operation-set check, but has no call site.

@@ -1,0 +1,9 @@
+{
+  "flake_check": ".#checks.x86_64-linux.cli-mock-honesty",
+  "invocation_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "job": "Build Gate",
+  "job_id": 7502,
+  "step": "Build all flake checks",
+  "workflow_blob_sha": "dddddddddddddddddddddddddddddddddddddddd",
+  "workflow_path": ".github/workflows/ci.yml"
+}

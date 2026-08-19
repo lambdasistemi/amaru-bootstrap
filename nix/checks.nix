@@ -19,6 +19,39 @@ let
     { name = "tests"; path = ../tests; }
   ];
 
+  dailyHandoffTestTree = pkgs.linkFarm "daily-handoff-test-tree" [
+    {
+      name = "scripts/daily-amaru-handoff.sh";
+      path = ../scripts/daily-amaru-handoff.sh;
+    }
+    {
+      name = "tests/test-daily-amaru-handoff.bats";
+      path = ../tests/test-daily-amaru-handoff.bats;
+    }
+    {
+      name = "tests/fixtures/daily-amaru-handoff";
+      path = ../tests/fixtures/daily-amaru-handoff;
+    }
+    {
+      name = "specs/075-daily-amaru-handoff/contracts";
+      path = ../specs/075-daily-amaru-handoff/contracts;
+    }
+    { name = ".github/workflows/ci.yml"; path = ../.github/workflows/ci.yml; }
+    {
+      name = ".github/workflows/daily-amaru-handoff.yml";
+      path = ../.github/workflows/daily-amaru-handoff.yml;
+    }
+    {
+      name = ".github/workflows/publish-bootstrap-image.yml";
+      path = ../.github/workflows/publish-bootstrap-image.yml;
+    }
+    {
+      name = ".github/workflows/deploy-docs.yml";
+      path = ../.github/workflows/deploy-docs.yml;
+    }
+    { name = "justfile"; path = ../justfile; }
+  ];
+
   producerRuntimePath = pkgs.lib.makeBinPath [
     pkgs.bash
     pkgs.coreutils
@@ -386,9 +419,61 @@ in
     } ''
     shellcheck -s bash -e SC1091 ${../scripts/bootstrap-producer.sh}
     shellcheck -s bash -e SC1091 ${../scripts/amaru-relay-bootstrap.sh}
+    shellcheck -s bash ${../scripts/daily-amaru-handoff.sh}
     shellcheck -s bash ${../scripts/resolve-peer-snapshots}
     shellcheck -s bash ${./peer-snapshots/anchor.sh}
     mkdir -p $out
+  '';
+
+  daily-amaru-handoff = pkgs.runCommand "daily-amaru-handoff"
+    {
+      nativeBuildInputs = [
+        pkgs.actionlint
+        pkgs.bash
+        pkgs.bats
+        pkgs.check-jsonschema
+        pkgs.coreutils
+        pkgs.gnugrep
+        pkgs.jq
+        pkgs.shellcheck
+      ];
+    } ''
+    set -euo pipefail
+    cp -rL ${dailyHandoffTestTree}/. ./
+    chmod -R u+w .
+    patchShebangs scripts tests
+
+    shellcheck -s bash scripts/daily-amaru-handoff.sh
+    operations=(
+      resolve_upstream_head
+      read_pinned_sha
+      read_bootstrap_sha
+      find_handoff
+      find_daily_result
+      publish_immutable
+      open_pull_request
+      required_ci_evidence
+      integrated_sha
+      image_publication_receipt
+      resolve_registry_digest
+      cli_honesty_evidence
+      propose_pin
+      resolve_peer_snapshots
+      read_peer_snapshot_record
+    )
+    for operation in "''${operations[@]}"; do
+      grep -q "^fixture_$operation()" scripts/daily-amaru-handoff.sh
+      grep -q "^production_$operation()" scripts/daily-amaru-handoff.sh
+    done
+    for schema in specs/075-daily-amaru-handoff/contracts/*.json; do
+      jq -e . "$schema" >/dev/null
+    done
+    actionlint -ignore 'label "nixos" is unknown' \
+      .github/workflows/ci.yml \
+      .github/workflows/daily-amaru-handoff.yml \
+      .github/workflows/publish-bootstrap-image.yml
+    bats --tap tests/test-daily-amaru-handoff.bats
+    mkdir -p "$out"
   '';
 
   # Issue #51: validate declared mock surfaces against real binaries

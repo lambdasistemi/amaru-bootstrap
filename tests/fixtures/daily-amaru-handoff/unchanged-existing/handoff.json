@@ -1,0 +1,54 @@
+{
+  "bootstrap": {
+    "repository": "https://github.com/lambdasistemi/amaru-bootstrap",
+    "sha": "3333333333333333333333333333333333333333"
+  },
+  "ci": {
+    "conclusion": "success",
+    "event": "push",
+    "head_sha": "3333333333333333333333333333333333333333",
+    "job_id": 7502,
+    "repository": "lambdasistemi/amaru-bootstrap",
+    "required_check": "Build Gate",
+    "run_attempt": 1,
+    "run_id": 7501,
+    "workflow": "CI"
+  },
+  "cli_honesty": {
+    "flake_check": ".#checks.x86_64-linux.cli-mock-honesty",
+    "invocation_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "job": "Build Gate",
+    "job_id": 7502,
+    "step": "Build all flake checks",
+    "workflow_blob_sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "workflow_path": ".github/workflows/ci.yml"
+  },
+  "image": {
+    "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "reference": "ghcr.io/lambdasistemi/amaru-bootstrap-producer:3333333333333333333333333333333333333333@sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "repository": "ghcr.io/lambdasistemi/amaru-bootstrap-producer",
+    "tag": "3333333333333333333333333333333333333333"
+  },
+  "observation_day": "2026-08-19",
+  "peer_snapshots": {
+    "configurations_repository": "https://github.com/cardano-foundation/cardano-configurations",
+    "configurations_sha": "5555555555555555555555555555555555555555",
+    "resolution_sha256": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+  },
+  "publication": {
+    "conclusion": "success",
+    "head_sha": "3333333333333333333333333333333333333333",
+    "job_id": 7602,
+    "receipt_sha256": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+    "repository": "lambdasistemi/amaru-bootstrap",
+    "run_attempt": 1,
+    "run_id": 7601,
+    "workflow": "Publish bootstrap-producer image"
+  },
+  "schema": "amaru-bootstrap-handoff/v1",
+  "upstream": {
+    "ref": "refs/heads/main",
+    "repository": "https://github.com/pragma-org/amaru",
+    "sha": "1111111111111111111111111111111111111111"
+  }
+}

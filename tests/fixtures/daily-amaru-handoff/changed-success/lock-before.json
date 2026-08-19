@@ -1,0 +1,8 @@
+{
+  "nodes": {
+    "amaru": {"locked": {"rev": "2222222222222222222222222222222222222222"}},
+    "cardano-configurations": {"locked": {"rev": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+    "nixpkgs": {"locked": {"rev": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}
+  },
+  "root": "root"
+}
