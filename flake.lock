@@ -36,11 +36,11 @@
     "amaru": {
       "flake": false,
       "locked": {
-        "lastModified": 1785311760,
-        "narHash": "sha256-bE21xRzCm00yn9nMKDEiVcNAWvq9Gu9tmdrR1TyxZWA=",
+        "lastModified": 1787208568,
+        "narHash": "sha256-uMGQEAoe3fXfAq3Fh6HCGvZYeKn8ZZvitZTYVFzWLA8=",
         "owner": "pragma-org",
         "repo": "amaru",
-        "rev": "437ff6c4fb506e1347eee9e619271a5ccb55a401",
+        "rev": "84be30a8e3bb1160a4ce168c33bf37afbbed72e9",
         "type": "github"
       },
       "original": {
