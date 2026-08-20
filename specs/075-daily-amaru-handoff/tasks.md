@@ -260,3 +260,39 @@ escalate with the auditor's evidence.
 **Inheritance**: `refs/evidence/slice03-rejected-submission2` (`19d3d32`) is
 read-only reference. Campaign 3's base is `3e8ebdf` so that everything reused
 from it is re-audited inside the new candidate rather than inherited unaudited.
+
+## Slice 4 — the proof mechanism changes (A-008)
+
+The A-007 guard fired correctly and the epic owner adopted the escalation's
+hypothesis: the recurring defect is a property of writing proofs in bash+bats,
+not of this slice's production design. The `!`-prefix/`set -e` family has now
+produced **three** assertions that could not fail, each invisible to six
+personally falsified gate versions and caught only by mutation. So slice 4
+changes the **proof mechanism**. It is a different architecture, not a fourth
+campaign on the old one.
+
+**Base**: `35ae5f4` (campaign 3's candidate) plus this mandate commit. That base
+is designated read-only inheritance by A-008 — its production behaviour and its
+43-of-46 caught mutation rows are assets — but it **carries the two open
+findings slice 4 exists to close**, so the auditor verifies them in the
+candidate rather than assuming the base is clean, and re-runs the inherited
+mutants as a regression check.
+
+- [ ] T033 Add a lint over the bats suites forbidding a `!`-prefixed pipeline anywhere but a test's final statement, wired so it runs on every proof execution; falsify it against **both** historical instances — slice-1 F-1's negated loop and AF-1's inert pipeline — which must both go RED, plus a compliant final-statement positive control
+- [ ] T034 Rewrite AF-1's inert assertion into a form that can fail (final statement, or explicit rc capture and assert), proven by the exact receipt-before-leased-push mutant that survived all 39 tests
+- [ ] T035 Fix AF-2 as the **production** defect it is: an absent ownership receipt must fail CLOSED — no receipt means not ours means touch nothing — and add the test that violates only the file-existence conjunct
+
+T033 is the one that closes the class. T034 and T035 close the two instances.
+`INV-79-PROBE-BRANCH-DISJOINT` remains **BLOCKING**; the epic owner confirmed
+the ratification.
+
+**If slice 4 also closes with that row open**, it is no longer an architecture
+question: park the lane and escalate for a desk-level decision on whether the
+probe should exist at all.
+
+**Host constraints surviving the pause** (machine RELEASE 2026-08-20): no cold
+realization while `/nix/store` is below the one-lane bar — warm incremental
+only — and every realization holds `/tmp/machine/BUILD-TOKEN`, reporting
+`available_bytes` at acquire **and** release. No new Claude-family authoritative
+seat before 2026-08-21T09:00Z, which defers slice 4's auditor but not its
+implementation.
