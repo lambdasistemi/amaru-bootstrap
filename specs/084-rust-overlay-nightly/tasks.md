@@ -7,5 +7,5 @@
 - [ ] **T084-02** Update exactly the `rust-overlay` locked node.
 - [ ] **T084-03** Capture the falsified-base and passing-candidate
   nightly evaluation witness plus the structured scope proof.
-- [ ] **T084-04** Obtain a fresh audit, finalize the accepted commit,
-  and verify required CI on the exact PR head.
+- [ ] **T084-04** Obtain a fresh audit and finalize the exact accepted
+  candidate for hosted CI verification.
