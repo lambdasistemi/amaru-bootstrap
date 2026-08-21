@@ -1,0 +1,19 @@
+{
+  "bootstrap_sha": "4444444444444444444444444444444444444444",
+  "image": {
+    "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "reference": "ghcr.io/lambdasistemi/amaru-bootstrap-producer:4444444444444444444444444444444444444444@sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "repository": "ghcr.io/lambdasistemi/amaru-bootstrap-producer",
+    "tag": "4444444444444444444444444444444444444444"
+  },
+  "publication": {
+    "conclusion": "success",
+    "head_sha": "4444444444444444444444444444444444444444",
+    "job_id": 7602,
+    "repository": "lambdasistemi/amaru-bootstrap",
+    "run_attempt": 1,
+    "run_id": 7601,
+    "workflow": "Publish bootstrap-producer image"
+  },
+  "schema": "amaru-bootstrap-image-publication/v1"
+}

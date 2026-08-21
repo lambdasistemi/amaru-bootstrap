@@ -74,6 +74,7 @@ nav:
           - Phase 0 snapshot format: history/phase-0-snapshot-format.md
   - Development:
       - Constitution: constitution.md
+      - Daily Amaru handoff: daily-amaru-handoff.md
       - Peer-snapshot pinning: peer-snapshots.md
 
 extra:

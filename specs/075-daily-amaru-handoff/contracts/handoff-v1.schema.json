@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lambdasistemi/amaru-bootstrap/specs/075-daily-amaru-handoff/contracts/handoff-v1.schema.json",
+  "title": "Validated Amaru bootstrap handoff v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "observation_day",
+    "upstream",
+    "peer_snapshots",
+    "bootstrap",
+    "image",
+    "ci",
+    "publication",
+    "cli_honesty"
+  ],
+  "properties": {
+    "schema": {
+      "const": "amaru-bootstrap-handoff/v1"
+    },
+    "observation_day": {
+      "$ref": "#/$defs/day"
+    },
+    "upstream": {
+      "$ref": "#/$defs/upstream"
+    },
+    "peer_snapshots": {
+      "$ref": "#/$defs/peerSnapshots"
+    },
+    "bootstrap": {
+      "$ref": "#/$defs/bootstrap"
+    },
+    "image": {
+      "$ref": "#/$defs/image"
+    },
+    "ci": {
+      "$ref": "#/$defs/ci"
+    },
+    "publication": {
+      "$ref": "#/$defs/publication"
+    },
+    "cli_honesty": {
+      "$ref": "#/$defs/cliHonesty"
+    }
+  },
+  "$defs": {
+    "day": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "ref", "sha"],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/pragma-org/amaru"
+        },
+        "ref": {
+          "const": "refs/heads/main"
+        },
+        "sha": {
+          "$ref": "#/$defs/gitSha"
+        }
+      }
+    },
+    "peerSnapshots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configurations_repository", "configurations_sha", "resolution_sha256"],
+      "properties": {
+        "configurations_repository": {
+          "const": "https://github.com/cardano-foundation/cardano-configurations"
+        },
+        "configurations_sha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "resolution_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "sha"],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/lambdasistemi/amaru-bootstrap"
+        },
+        "sha": {
+          "$ref": "#/$defs/gitSha"
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag", "digest", "reference"],
+      "properties": {
+        "repository": {
+          "const": "ghcr.io/lambdasistemi/amaru-bootstrap-producer"
+        },
+        "tag": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^ghcr\\.io/lambdasistemi/amaru-bootstrap-producer:[0-9a-f]{40}@sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "workflow",
+        "run_id",
+        "run_attempt",
+        "job_id",
+        "head_sha",
+        "event",
+        "required_check",
+        "conclusion"
+      ],
+      "properties": {
+        "repository": {
+          "const": "lambdasistemi/amaru-bootstrap"
+        },
+        "workflow": {
+          "const": "CI"
+        },
+        "run_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "run_attempt": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "job_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "head_sha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "event": {
+          "const": "push"
+        },
+        "required_check": {
+          "const": "Build Gate"
+        },
+        "conclusion": {
+          "const": "success"
+        }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "workflow",
+        "run_id",
+        "run_attempt",
+        "job_id",
+        "head_sha",
+        "conclusion",
+        "receipt_sha256"
+      ],
+      "properties": {
+        "repository": {
+          "const": "lambdasistemi/amaru-bootstrap"
+        },
+        "workflow": {
+          "const": "Publish bootstrap-producer image"
+        },
+        "run_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "run_attempt": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "job_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "head_sha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "conclusion": {
+          "const": "success"
+        },
+        "receipt_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "cliHonesty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "flake_check",
+        "workflow_path",
+        "workflow_blob_sha",
+        "job",
+        "step",
+        "job_id",
+        "invocation_sha256"
+      ],
+      "properties": {
+        "flake_check": {
+          "const": ".#checks.x86_64-linux.cli-mock-honesty"
+        },
+        "workflow_path": {
+          "const": ".github/workflows/ci.yml"
+        },
+        "workflow_blob_sha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "job": {
+          "const": "Build Gate"
+        },
+        "step": {
+          "const": "Build all flake checks"
+        },
+        "job_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "invocation_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

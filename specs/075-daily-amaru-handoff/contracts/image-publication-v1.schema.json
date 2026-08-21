@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lambdasistemi/amaru-bootstrap/specs/075-daily-amaru-handoff/contracts/image-publication-v1.schema.json",
+  "title": "Amaru bootstrap image publication receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "bootstrap_sha",
+    "image",
+    "publication"
+  ],
+  "properties": {
+    "schema": {
+      "const": "amaru-bootstrap-image-publication/v1"
+    },
+    "bootstrap_sha": {
+      "$ref": "#/$defs/gitSha"
+    },
+    "image": {
+      "$ref": "#/$defs/image"
+    },
+    "publication": {
+      "$ref": "#/$defs/publication"
+    }
+  },
+  "$defs": {
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "tag",
+        "digest",
+        "reference"
+      ],
+      "properties": {
+        "repository": {
+          "const": "ghcr.io/lambdasistemi/amaru-bootstrap-producer"
+        },
+        "tag": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^ghcr\\.io/lambdasistemi/amaru-bootstrap-producer:[0-9a-f]{40}@sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "workflow",
+        "run_id",
+        "run_attempt",
+        "job_id",
+        "head_sha",
+        "conclusion"
+      ],
+      "properties": {
+        "repository": {
+          "const": "lambdasistemi/amaru-bootstrap"
+        },
+        "workflow": {
+          "const": "Publish bootstrap-producer image"
+        },
+        "run_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "run_attempt": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "job_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "head_sha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "conclusion": {
+          "const": "success"
+        }
+      }
+    }
+  }
+}
