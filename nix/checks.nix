@@ -25,6 +25,10 @@ let
       path = ../scripts/daily-amaru-handoff.sh;
     }
     {
+      name = "scripts/lint-bats-negation.sh";
+      path = ../scripts/lint-bats-negation.sh;
+    }
+    {
       name = "tests/test-daily-amaru-handoff.bats";
       path = ../tests/test-daily-amaru-handoff.bats;
     }
@@ -420,6 +424,7 @@ in
     shellcheck -s bash -e SC1091 ${../scripts/bootstrap-producer.sh}
     shellcheck -s bash -e SC1091 ${../scripts/amaru-relay-bootstrap.sh}
     shellcheck -s bash ${../scripts/daily-amaru-handoff.sh}
+    shellcheck -s bash ${../scripts/lint-bats-negation.sh}
     shellcheck -s bash ${../scripts/resolve-peer-snapshots}
     shellcheck -s bash ${./peer-snapshots/anchor.sh}
     mkdir -p $out
@@ -444,6 +449,16 @@ in
     patchShebangs scripts tests
 
     shellcheck -s bash scripts/daily-amaru-handoff.sh
+    shellcheck -s bash scripts/lint-bats-negation.sh
+    bats_suites=( ${../tests}/*.bats )
+    lint_output=$(
+      scripts/lint-bats-negation.sh "''${bats_suites[@]}"
+    )
+    grep -Eq '^lint-bats-negation: checked=[1-9][0-9]* result=pass$' \
+      <<<"$lint_output" || {
+        printf 'negation lint execution receipt missing or malformed\n' >&2
+        exit 1
+      }
     operations=(
       resolve_upstream_head
       read_pinned_sha

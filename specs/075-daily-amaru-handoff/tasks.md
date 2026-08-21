@@ -203,11 +203,22 @@ on `main`, which A-004 forbids.
 its PR carries the real bump commit rather than an empty one, and no path from
 `propose` reaches the landing step.
 
-- [ ] T025 Write failing tests for a `propose` entrypoint that runs resolve → propose_pin → open_pull_request and halts, and for the absence of any landing call on that path
-- [ ] T026 Implement `propose` and recompose `reconcile`'s changed path as `propose` plus the landing step
-- [ ] T027 Prove the recomposed `reconcile` is behaviourally identical to the previous straight-line version on the same inputs, through the injected transport
-- [ ] T028 Rewrite the App-event probe to call `propose`, carrying A-004's cleanup contract verbatim: receipts frozen before deletion, PR closed unlanded, close-by-design wording
-- [ ] T029 Ship the observation property the shipped probe lacked — an observation step must give the observed system a chance to report and must distinguish *not-yet-reported* from *absent* — with a negative control exercising the not-yet-reported case
+**T025–T029 are SUPERSEDED, not delivered as written.** Campaign 2 closed at
+its two-submission cap with two blocking rows open, and A-006/A-008 re-cut the
+work. Its rejected candidates are preserved at
+`refs/evidence/slice03-rejected-submission1` and `-submission2`. The behaviour
+these tasks described — a `propose` entrypoint that halts before landing, the
+recomposed `reconcile`, and the probe calling it — was re-implemented and
+shipped under **T030–T032**, whose commits carry the `Tasks:` trailers and
+which the audits actually covered. They are not stamped here because stamping a
+task no shipped commit cites would break the commit-to-task link the
+finalization audit checks.
+
+- ~~T025 Write failing tests for a `propose` entrypoint that runs resolve → propose_pin → open_pull_request and halts, and for the absence of any landing call on that path~~
+- ~~T026 Implement `propose` and recompose `reconcile`'s changed path as `propose` plus the landing step~~
+- ~~T027 Prove the recomposed `reconcile` is behaviourally identical to the previous straight-line version on the same inputs, through the injected transport~~
+- ~~T028 Rewrite the App-event probe to call `propose`, carrying A-004's cleanup contract verbatim: receipts frozen before deletion, PR closed unlanded, close-by-design wording~~
+- ~~T029 Ship the observation property the shipped probe lacked — an observation step must give the observed system a chance to report and must distinguish *not-yet-reported* from *absent* — with a negative control exercising the not-yet-reported case~~
 
 **Why T029 exists**: the shipped probe fired accidentally on 2026-08-19 and
 concluded `failure` because it polled for checks ~4 s after creating the PR and
@@ -239,9 +250,9 @@ receipt described as an atomic lease and that nothing asserted.
 `PATH` returning representative payloads, so the classifiers and the
 remote-carrying mechanisms actually execute.
 
-- [ ] T030 Replace the production-function stubs with a `PATH` shim for `gh`, exercising representative outcomes: empty array, pending bucket, fail bucket, non-JSON/5xx body, and non-zero exit with a valid body
-- [ ] T031 Prove `INV-79-PROBE-BRANCH-DISJOINT` end to end — the `--branch-ref` value reaches the remote push, the lease is asserted, the ownership receipt is written, and cleanup refuses a ref it did not create
-- [ ] T032 Preserve campaign 2's accepted gains under the new seam: unbounded production observation with only a reported failure terminal, transport errors retried, and the three comparison-based invariants still killed
+- [x] T030 Replace the production-function stubs with a `PATH` shim for `gh`, exercising representative outcomes: empty array, pending bucket, fail bucket, non-JSON/5xx body, and non-zero exit with a valid body
+- [x] T031 Prove `INV-79-PROBE-BRANCH-DISJOINT` end to end — the `--branch-ref` value reaches the remote push, the lease is asserted, the ownership receipt is written, and cleanup refuses a ref it did not create
+- [x] T032 Preserve campaign 2's accepted gains under the new seam: unbounded production observation with only a reported failure terminal, transport errors retried, and the three comparison-based invariants still killed
 
 **Severity correction (epic altitude, A-007)**: `INV-79-OBSERVE-NOT-YET` is
 **ADVISORY**, not BLOCKING. The spec's own definition of BLOCKING is "publishes a
@@ -278,9 +289,9 @@ findings slice 4 exists to close**, so the auditor verifies them in the
 candidate rather than assuming the base is clean, and re-runs the inherited
 mutants as a regression check.
 
-- [ ] T033 Add a lint over the bats suites forbidding a `!`-prefixed pipeline anywhere but a test's final statement, wired so it runs on every proof execution; falsify it against **both** historical instances — slice-1 F-1's negated loop and AF-1's inert pipeline — which must both go RED, plus a compliant final-statement positive control
-- [ ] T034 Rewrite AF-1's inert assertion into a form that can fail (final statement, or explicit rc capture and assert), proven by the exact receipt-before-leased-push mutant that survived all 39 tests
-- [ ] T035 Fix AF-2 as the **production** defect it is: an absent ownership receipt must fail CLOSED — no receipt means not ours means touch nothing — and add the test that violates only the file-existence conjunct
+- [x] T033 Add a lint over the bats suites forbidding a `!`-prefixed pipeline anywhere but a test's final statement, wired so it runs on every proof execution; falsify it against **both** historical instances — slice-1 F-1's negated loop and AF-1's inert pipeline — which must both go RED, plus a compliant final-statement positive control
+- [x] T034 Rewrite AF-1's inert assertion into a form that can fail (final statement, or explicit rc capture and assert), proven by the exact receipt-before-leased-push mutant that survived all 39 tests
+- [x] T035 Fix AF-2 as the **production** defect it is: an absent ownership receipt must fail CLOSED — no receipt means not ours means touch nothing — and add the test that violates only the file-existence conjunct
 
 T033 is the one that closes the class. T034 and T035 close the two instances.
 `INV-79-PROBE-BRANCH-DISJOINT` remains **BLOCKING**; the epic owner confirmed
@@ -296,3 +307,20 @@ only — and every realization holds `/tmp/machine/BUILD-TOKEN`, reporting
 `available_bytes` at acquire **and** release. No new Claude-family authoritative
 seat before 2026-08-21T09:00Z, which defers slice 4's auditor but not its
 implementation.
+
+## Follow-ups from the slice-4 audit (owned by the ticket owner)
+
+Named alongside a `KILLED` row, not residuals — every slice-4 row was
+`BLOCKING`, so none was eligible to terminate as a residual. Recorded because an
+unnamed limit is how the same defect returns.
+
+- **FU-79-LINT-COUNT-DECORATIVE** — the lint receipt's `checked=` count is
+  asserted only as "some positive integer", and the shipped test asserts
+  `checked=1` against a one-file sample. So the green establishes *the lint ran
+  on at least one file*, not *on the repository's suites*; twelve of thirteen
+  could go unlinted undetected. Pre-dates the repair, so not a regression — but
+  the repair introduced the count that makes closing it cheap.
+- **FU-79-CHECKS-BLOCK-UNEXECUTED** — nothing in the repository executes
+  `nix/checks.nix`, so the assertion proving the lint runs is itself proven only
+  by reading. This is the terminal regress of "who checks the checker" and is
+  not chargeable to any commit owner.

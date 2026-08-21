@@ -104,13 +104,17 @@ jobs:
           ownership_receipt="$receipt_dir/branch-ownership.json"
           owned_branch=false
           cleanup_complete=false
+          probe_branch_is_owned() {
+            [[ -f "$ownership_receipt" ]] || return 1
+            scripts/daily-amaru-handoff.sh verify-branch-ownership \
+              --file "$ownership_receipt" --branch "$branch"
+          }
           cleanup_on_failure() {
             status=$?
             trap - EXIT
             if [[ "$cleanup_complete" != true ]]; then
               set +e
-              if scripts/daily-amaru-handoff.sh verify-branch-ownership \
-                --file "$ownership_receipt" --branch "$branch"; then
+              if probe_branch_is_owned; then
                 owned_branch=true
               fi
               if [[ -z "$pr_number" && "$owned_branch" == true ]]; then
@@ -119,12 +123,16 @@ jobs:
                   --jq 'if length == 1 then .[0].number else empty end')
               fi
               if [[ -n "$pr_number" && "$owned_branch" == true ]]; then
-                gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" \
-                  --body 'This proof run is closed by design after an interrupted probe.'
-                gh pr close "$pr_number" --repo "$GITHUB_REPOSITORY"
+                if probe_branch_is_owned; then
+                  gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" \
+                    --body 'This proof run is closed by design after an interrupted probe.'
+                  gh pr close "$pr_number" --repo "$GITHUB_REPOSITORY"
+                fi
               fi
               if [[ "$owned_branch" == true ]]; then
-                git push origin --delete "$branch"
+                if probe_branch_is_owned; then
+                  git push origin --delete "$branch"
+                fi
               fi
             fi
             exit "$status"
@@ -150,8 +158,7 @@ jobs:
           pr_number=$(sed -nE 's/.* pr=([1-9][0-9]*)$/\1/p' <<<"$proposal_line")
           [[ "$branch" =~ ^probe/daily-handoff-[1-9][0-9]*-[1-9][0-9]*$ \
             && "$pr_number" =~ ^[1-9][0-9]*$ ]]
-          scripts/daily-amaru-handoff.sh verify-branch-ownership \
-            --file "$ownership_receipt" --branch "$branch"
+          probe_branch_is_owned
           owned_branch=true
 
           nix --quiet shell \
@@ -182,6 +189,7 @@ jobs:
                 .context == "Build Gate"))
           ' <<<"$rules" >/dev/null
 
+          probe_branch_is_owned
           gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" \
             --body 'This proof run is closed by design after exercising the real proposal entrypoint; it was not rejected on content.'
           gh pr close "$pr_number" --repo "$GITHUB_REPOSITORY"
@@ -207,6 +215,7 @@ jobs:
             >"$receipt_dir/probe-receipt-before-deletion.sha256"
 
           [[ "$owned_branch" == true ]]
+          probe_branch_is_owned
           git push origin --delete "$branch"
           set +e
           git ls-remote --exit-code --heads origin "refs/heads/$branch" \

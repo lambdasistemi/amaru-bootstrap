@@ -3,6 +3,7 @@
 setup() {
   REPO_ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd)
   SCRIPT="$REPO_ROOT/scripts/daily-amaru-handoff.sh"
+  NEGATION_LINT="$REPO_ROOT/scripts/lint-bats-negation.sh"
   FIXTURES="$REPO_ROOT/tests/fixtures/daily-amaru-handoff"
   TEST_ROOT="$BATS_TEST_TMPDIR/fixture"
   DAY=2026-08-19
@@ -70,8 +71,10 @@ assert_published_set_unchanged() {
 
 assert_no_mutation_operations() {
   if [[ -f "$TEST_ROOT/operations.log" ]]; then
-    ! grep -Eq '^(resolve_peer_snapshots|propose_pin|open_pull_request) ' \
-      "$TEST_ROOT/operations.log"
+    if grep -Eq '^(resolve_peer_snapshots|propose_pin|open_pull_request) ' \
+      "$TEST_ROOT/operations.log"; then
+      return 1
+    fi
   fi
 }
 
@@ -94,11 +97,14 @@ assert_probe_execution_identity() {
     <<<"$probe")" -eq 1 ] || return 1
   [ "$(grep -Fc '              --branch-ref "$branch" --transport production)' \
     <<<"$probe")" -eq 1 ] || return 1
-  ! grep -Fq -- '--transport fixture' <<<"$probe" || return 1
+  if grep -Fq -- '--transport fixture' <<<"$probe"; then
+    return 1
+  fi
 }
 
 assert_probe_cleanup_contract() {
-  local probe close_line receipt_line ownership_line delete_line verify_line
+  local probe close_line receipt_line ownership_line ownership_verify_line
+  local delete_line verify_line
   probe=$(probe_job "$1")
   grep -Fq 'sha256sum "$receipt_dir/probe-receipt-before-deletion.json"' \
     <<<"$probe" || return 1
@@ -107,11 +113,16 @@ assert_probe_cleanup_contract() {
     <<<"$(sed -n '/cleanup_pr=/,/cleanup-verification.json/p' <<<"$probe")" \
     || return 1
   grep -Fq 'ownership_receipt' <<<"$probe" || return 1
+  grep -Fq 'probe_branch_is_owned() {' <<<"$probe" || return 1
+  grep -Fq '[[ -f "$ownership_receipt" ]] || return 1' \
+    <<<"$probe" || return 1
+  grep -Fq \
+    'scripts/daily-amaru-handoff.sh verify-branch-ownership \' \
+    <<<"$probe" || return 1
   [ "$(grep -Ec '^[[:space:]]+owned_branch=true$' \
     <<<"$probe")" -eq 2 ] || return 1
-  [ "$(grep -Fc \
-    'scripts/daily-amaru-handoff.sh verify-branch-ownership \' \
-    <<<"$probe")" -eq 2 ] || return 1
+  [ "$(grep -Fc 'probe_branch_is_owned' <<<"$probe")" -eq 7 ] \
+    || return 1
   grep -Fq \
     'if [[ -n "$pr_number" && "$owned_branch" == true ]]; then' \
     <<<"$probe" || return 1
@@ -123,14 +134,50 @@ assert_probe_cleanup_contract() {
     | tail -n 1 | cut -d: -f1)
   ownership_line=$(grep -nF '          [[ "$owned_branch" == true ]]' \
     <<<"$probe" | cut -d: -f1)
+  ownership_verify_line=$(grep -nF '          probe_branch_is_owned' \
+    <<<"$probe" | tail -n 1 | cut -d: -f1)
   delete_line=$(grep -n 'git push origin --delete ' <<<"$probe" \
     | tail -n 1 | cut -d: -f1)
   verify_line=$(grep -n 'cleanup-verification.json' <<<"$probe" \
     | tail -n 1 | cut -d: -f1)
   [ "$close_line" -lt "$receipt_line" ] || return 1
   [ "$receipt_line" -lt "$delete_line" ] || return 1
-  [ "$ownership_line" -lt "$delete_line" ] || return 1
+  [ "$receipt_line" -lt "$ownership_line" ] || return 1
+  [ "$ownership_line" -lt "$ownership_verify_line" ] || return 1
+  [ "$ownership_verify_line" -lt "$delete_line" ] || return 1
   [ "$delete_line" -lt "$verify_line" ] || return 1
+}
+
+@test "negation lint rejects both inert histories and accepts a final assertion" {
+  local sample="$BATS_TEST_TMPDIR/negation-sample.bats"
+
+  printf '%s\n' \
+    '@test "historical negated loop" {' \
+    '  for file in first second; do' \
+    '    ! grep -q forbidden "$file"' \
+    '  done' \
+    '}' >"$sample"
+  run "$NEGATION_LINT" "$sample"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *':3: !-prefixed pipeline is not the final test statement'* ]]
+
+  printf '%s\n' \
+    '@test "historical inert pipeline" {' \
+    '  ! find /tmp -name nothing | grep -q .' \
+    '  true' \
+    '}' >"$sample"
+  run "$NEGATION_LINT" "$sample"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *':2: !-prefixed pipeline is not the final test statement'* ]]
+
+  printf '%s\n' \
+    '@test "compliant final assertion" {' \
+    '  true' \
+    '  ! find /tmp -name nothing | grep -q .' \
+    '}' >"$sample"
+  run "$NEGATION_LINT" "$sample"
+  [ "$status" -eq 0 ]
+  [ "$output" = "lint-bats-negation: checked=1 result=pass" ]
 }
 
 install_gh_checks_shim() {
@@ -439,10 +486,14 @@ run_proposal_case() {
   reconcile
 
   [ "$status" -eq 0 ]
-  ! find "$TEST_ROOT/published" -type f \
-    -name '*3333333333333333333333333333333333333333*' | grep -q .
-  ! grep -R -q '3333333333333333333333333333333333333333' \
-    "$TEST_ROOT/published"
+  if find "$TEST_ROOT/published" -type f \
+    -name '*3333333333333333333333333333333333333333*' | grep -q .; then
+    return 1
+  fi
+  if grep -R -q '3333333333333333333333333333333333333333' \
+    "$TEST_ROOT/published"; then
+    return 1
+  fi
   grep -q '^read_bootstrap_sha 3333333333333333333333333333333333333333$' \
     "$TEST_ROOT/operations.log"
   grep -q '^integrated_sha 75 4444444444444444444444444444444444444444$' \
@@ -667,7 +718,7 @@ EOF
           "$BATS_TEST_TMPDIR/probe-mutant.yml"
         ;;
       ownership)
-        sed -i '/^          \[\[ "$owned_branch" == true \]\]/d' \
+        sed -i '/^          probe_branch_is_owned$/d' \
           "$BATS_TEST_TMPDIR/probe-mutant.yml"
         ;;
       ownership-verifier)
@@ -766,9 +817,29 @@ EOF
   grep -Fq -- \
     "--force-with-lease=refs/heads/$branch: origin HEAD:refs/heads/$branch" \
     "$root/process.log"
-  ! find "$root" -maxdepth 1 -name 'ownership.json*' -print -quit \
-    | grep -q .
+  run find "$root" -maxdepth 1 -name 'ownership.json*' -print -quit
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
   ! grep -Fq 'gh pr create' "$root/process.log"
+}
+
+@test "ownership verifier rejects an otherwise valid absent receipt" {
+  local root="$BATS_TEST_TMPDIR/absent-ownership"
+  local branch=probe/daily-handoff-123-1
+  mkdir -p "$root"
+  jq -S -n --arg branch "$branch" '
+    {branch: $branch, created: true,
+      head_sha: "7777777777777777777777777777777777777777"}
+  ' >"$root/ownership.json"
+
+  run "$SCRIPT" verify-branch-ownership \
+    --file "$root/ownership.json" --branch "$branch"
+  [ "$status" -eq 0 ]
+
+  rm "$root/ownership.json"
+  run "$SCRIPT" verify-branch-ownership \
+    --file "$root/ownership.json" --branch "$branch"
+  [ "$status" -ne 0 ]
 }
 
 @test "ownership verifier rejects each invalid receipt field independently" {
@@ -985,7 +1056,9 @@ EOF
     "$TEST_ROOT/operations.log"
   grep -q '^read_peer_snapshot_record 5555555555555555555555555555555555555555 ' \
     "$TEST_ROOT/operations.log"
-  ! grep -q '^resolve_peer_snapshots ' "$TEST_ROOT/operations.log"
+  if grep -q '^resolve_peer_snapshots ' "$TEST_ROOT/operations.log"; then
+    return 1
+  fi
   handoff=$(find "$TEST_ROOT/published" -name 'amaru-handoff-v1-*.json')
   jq -e '.bootstrap.sha == "3333333333333333333333333333333333333333"' \
     "$handoff"
