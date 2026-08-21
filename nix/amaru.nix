@@ -46,10 +46,40 @@ let
       };
       bigLedgerPools = [ ];
     });
+
+  shortRev = builtins.substring 0 8 amaruRev;
+
+  # Deterministic identity for both upstream build-info shapes.
+  # Stock built 0.8.1 reads BUILT_OVERRIDE_amaru_GIT_*; candidate
+  # git.rs invokes git rev-parse and git status. Unknown commands
+  # fail so stock type-alias collection still walks the tree.
+  gitIdentityShim = pkgs.writeShellApplication {
+    name = "git";
+    text = ''
+      full='${amaruRev}'
+      short='${shortRev}'
+      case "$*" in
+        'rev-parse HEAD')
+          printf '%s\n' "$full"
+          ;;
+        'rev-parse --short HEAD' | 'rev-parse --short=8 HEAD')
+          printf '%s\n' "$short"
+          ;;
+        'status --porcelain --untracked-files=no' | 'status --porcelain')
+          exit 0
+          ;;
+        *)
+          echo "amaru git identity shim: unsupported: $*" >&2
+          exit 1
+          ;;
+      esac
+    '';
+  };
 in
 assert builtins.elem peerSnapshots supportedPeerSnapshots;
 assert builtins.elem peerSnapshotFault supportedPeerSnapshotFaults;
 assert peerSnapshots == "pinned" || peerSnapshotFault == null;
+assert builtins.match "[0-9a-f]{40}" amaruRev != null;
 craneLib.buildPackage ({
   pname = "amaru" + pkgs.lib.optionalString (peerSnapshots == "placeholder-dev")
     "-placeholder-dev" + pkgs.lib.optionalString (peerSnapshotFault != null)
@@ -69,7 +99,7 @@ craneLib.buildPackage ({
   # m4 / autoconf / automake required by some sys-* crates (gmp,
   # libsodium-sys, etc.) when their build.rs invokes ./configure.
   # bindgen-pulled crates pull libclang.
-  nativeBuildInputs = with pkgs; [
+  nativeBuildInputs = (with pkgs; [
     pkg-config
     m4
     autoconf
@@ -78,13 +108,19 @@ craneLib.buildPackage ({
     cmake
     check-jsonschema
     jq
-  ];
+  ]) ++ [ gitIdentityShim ];
 
   buildInputs = with pkgs; [
     openssl
   ];
 
   LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+
+  BUILT_OVERRIDE_amaru_GIT_VERSION = shortRev;
+  BUILT_OVERRIDE_amaru_GIT_DIRTY = "false";
+  BUILT_OVERRIDE_amaru_GIT_HEAD_REF = "HEAD";
+  BUILT_OVERRIDE_amaru_GIT_COMMIT_HASH = amaruRev;
+  BUILT_OVERRIDE_amaru_GIT_COMMIT_HASH_SHORT = shortRev;
 
   # workaround-for=https://github.com/pragma-org/amaru/issues/1102
   # Skip the build-time peer-snapshot network/Git-date fetch; the staged
