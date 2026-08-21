@@ -236,7 +236,79 @@ let
     '';
 in
 {
-  amaru = amaruPkg;
+  # I-088-CHECK: execute the packaged version surface. A package-only
+  # alias would keep `nix flake check` green without observing identity.
+  amaru = pkgs.runCommand "amaru-git-identity"
+    {
+      nativeBuildInputs = [
+        pkgs.bash
+        pkgs.coreutils
+        pkgs.gnugrep
+        amaruPkg
+      ];
+    } ''
+      set -euo pipefail
+
+      expected_short='${builtins.substring 0 8 amaruRev}'
+      mismatch_short='ffffffff'
+      if [ "''${#expected_short}" -ne 8 ]; then
+        echo "amaru git identity: expected short revision is not 8 characters: $expected_short" >&2
+        exit 1
+      fi
+      if [ "$expected_short" = "$mismatch_short" ]; then
+        echo "amaru git identity: mismatch token collided with locked short revision" >&2
+        exit 1
+      fi
+
+      assert_version_identity() {
+        local output=$1
+        local expected=$2
+        printf '%s\n' "$output" | grep -F -- "$expected" >/dev/null || return 1
+        printf '%s\n' "$output" | grep -Fi -- 'dirty' >/dev/null && return 1
+        return 0
+      }
+
+      version=$(amaru --version 2>&1)
+      printf 'amaru --version: %s\n' "$version"
+      if [ -z "$version" ]; then
+        echo "amaru git identity: empty --version output" >&2
+        exit 1
+      fi
+
+      if ! assert_version_identity "$version" "$expected_short"; then
+        echo "amaru git identity: version output missing locked short revision $expected_short or reports dirty" >&2
+        echo "  output: $version" >&2
+        exit 1
+      fi
+      echo "amaru git identity: positive control OK ($expected_short, clean)"
+
+      if printf '%s\n' "$version" | grep -F -- "$mismatch_short" >/dev/null; then
+        echo "amaru git identity: observed version contains mismatch token $mismatch_short" >&2
+        exit 1
+      fi
+      set +e
+      assert_version_identity "$version" "$mismatch_short"
+      mismatch_rc=$?
+      set -e
+      if [ "$mismatch_rc" -eq 0 ]; then
+        echo "amaru git identity: NEGATIVE CONTROL FAILED - mismatch $mismatch_short accepted" >&2
+        exit 1
+      fi
+      echo "amaru git identity: mismatch negative control OK (rc=$mismatch_rc)"
+
+      dirty_output="$version+dirty"
+      set +e
+      assert_version_identity "$dirty_output" "$expected_short"
+      dirty_rc=$?
+      set -e
+      if [ "$dirty_rc" -eq 0 ]; then
+        echo "amaru git identity: NEGATIVE CONTROL FAILED - dirty marker accepted" >&2
+        exit 1
+      fi
+      echo "amaru git identity: dirty negative control OK (rc=$dirty_rc)"
+
+      mkdir -p "$out"
+    '';
   db-synthesizer = iogTools.db-synthesizer;
   db-analyser = iogTools.db-analyser;
   snapshot-converter = iogTools.snapshot-converter;
