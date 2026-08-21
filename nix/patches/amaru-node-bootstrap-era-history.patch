@@ -1,0 +1,99 @@
+diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstrap/src/bootstrap/mod.rs
+--- a/crates/amaru-bootstrap/src/bootstrap/mod.rs
++++ b/crates/amaru-bootstrap/src/bootstrap/mod.rs
+@@ -22,7 +22,7 @@
+ };
+
+ use amaru_kernel::{
+-    Epoch, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Peer, Point,
++    Epoch, EraHistory, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Peer, Point,
+     RawBlock, Slot, StakeCredential, extract_block_header_cbor, from_cbor, num::CheckedSub,
+     utils::string::display_collection,
+ };
+@@ -118,14 +118,11 @@
+ /// List S3 objects under `<network>/`, derive epoch from slot via era history, return `Vec<Snapshot>`.
+ async fn bootstrap_snapshots(
+     network: NetworkName,
++    era_history: &EraHistory,
+     s3: &AnonymousS3Client,
+ ) -> Result<(PathBuf, Vec<Snapshot>), Box<dyn Error>> {
+     let snapshots_dir: PathBuf = default_snapshots_dir(network).into();
+
+-    let era_history = network
+-        .as_era_history()
+-        .ok_or_else(|| format!("no era history available for network {network}; S3 bootstrap is only supported for mainnet, preprod, and preview"))?;
+-
+     let s3_snapshots = s3.list_snapshots(network).await?;
+
+     let mut snapshots = Vec::with_capacity(s3_snapshots.len());
+@@ -440,13 +437,14 @@
+ pub async fn bootstrap(
+     network: NetworkName,
+     global_parameters: &GlobalParameters,
++    era_history: &EraHistory,
+     ledger_dir: PathBuf,
+     chain_dir: PathBuf,
+     target_epoch: Option<Epoch>,
+     s3_config: S3Config,
+ ) -> Result<(), Box<dyn Error>> {
+     let s3 = AnonymousS3Client::new(s3_config);
+-    let (snapshots_dir, snapshots) = bootstrap_snapshots(network, &s3).await?;
++    let (snapshots_dir, snapshots) = bootstrap_snapshots(network, era_history, &s3).await?;
+     let [first_snapshot, second_snapshot, third_snapshot] = select_bootstrap_snapshots(&snapshots, target_epoch)?;
+
+     download_snapshots(&[first_snapshot, second_snapshot, third_snapshot], &snapshots_dir, &s3).await?;
+diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
+--- a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
++++ b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
+@@ -24,7 +24,7 @@
+     default_chain_dir, default_ledger_dir,
+     lifecycle::{Runnable, RuntimeKind},
+ };
+-use amaru_kernel::{Epoch, GlobalParameters, NetworkName, utils::path::relative_path};
++use amaru_kernel::{Epoch, EraHistory, GlobalParameters, NetworkName, utils::path::relative_path};
+ use amaru_observability::{info, warn};
+ use clap::Parser;
+
+@@ -69,6 +69,20 @@
+     )]
+     network: NetworkName,
+
++    /// Path to a JSON era history file overriding the network default.
++    ///
++    /// This is required for generated custom testnets whose epoch length or era bounds differ from
++    /// Amaru's built-in network profiles.
++    ///
++    /// For an example, see <https://github.com/pragma-org/amaru/blob/main/crates/amaru-kernel/src/cardano/snapshots/amaru_kernel__cardano__era_history__tests__mainnet_era_history.snap>
++    #[arg(
++        long,
++        value_name = amaru::value_names::FILEPATH,
++        env = amaru::env_vars::ERA_HISTORY,
++        help_heading = "Network Global Parameters Overrides",
++    )]
++    era_history: Option<PathBuf>,
++
+     /// Override network's global parameters for custom testnets.
+     #[command(flatten)]
+     global_parameters: GlobalParameters,
+@@ -131,6 +145,13 @@
+ async fn run(args: Args) -> Result<(), Box<dyn Error>> {
+     let network = args.network;
+
++    let era_history = network.as_era_history().cloned().map(Ok).unwrap_or_else(|| {
++        args.era_history
++            .as_deref()
++            .ok_or_else(|| "missing era history for custom network".into())
++            .and_then(|path| EraHistory::load(path).map_err(|err| -> Box<dyn Error> { Box::new(err) }))
++    })?;
++
+     let global_parameters = network.as_global_parameters().cloned().unwrap_or(args.global_parameters);
+
+     let ledger_dir = args.ledger_dir.unwrap_or_else(|| default_ledger_dir(network).into());
+@@ -171,6 +192,7 @@
+     bootstrap(
+         network,
+         &global_parameters,
++        &era_history,
+         ledger_dir,
+         chain_dir,
+         args.epoch,

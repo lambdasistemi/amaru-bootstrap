@@ -75,18 +75,59 @@ let
       esac
     '';
   };
+
+  # Issue 95: SHA-bound source patch. Identity is the exact upstream
+  # commit plus the declared patch digest. Retirement is executable:
+  # a pin that already loads era history at node bootstrap, or a pin
+  # that left this base, must remove the patch and rerun the unchanged
+  # hosted boundary checks.
+  amaruBootstrapPatch = ./patches/amaru-node-bootstrap-era-history.patch;
+  expectedAmaruPatchBase = "ba992f651d3b5e2b49f12d461b86ab8f7a55f994";
+  amaruPatchSha256 = "f09e9bf3360e6daed0fdb84780129cc4a7a0e89629be226ab7a88aae23704d70";
+  computedAmaruPatchSha256 = builtins.hashFile "sha256" amaruBootstrapPatch;
+  amaruSourceIdentity = "${amaruRev}:${computedAmaruPatchSha256}";
+  unpatchedBootstrapCli = builtins.readFile
+    "${amaru}/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs";
+  unpatchedBootstrapLib = builtins.readFile
+    "${amaru}/crates/amaru-bootstrap/src/bootstrap/mod.rs";
+  upstreamHasBootstrapEraHistoryInput =
+    pkgs.lib.hasInfix "EraHistory::load" unpatchedBootstrapCli
+    && pkgs.lib.hasInfix "era_history: &EraHistory" unpatchedBootstrapLib;
 in
 assert builtins.elem peerSnapshots supportedPeerSnapshots;
 assert builtins.elem peerSnapshotFault supportedPeerSnapshotFaults;
 assert peerSnapshots == "pinned" || peerSnapshotFault == null;
 assert builtins.match "[0-9a-f]{40}" amaruRev != null;
+assert amaruRev == expectedAmaruPatchBase ||
+  throw ''
+    Amaru pin ${amaruRev} drifted from patch base ${expectedAmaruPatchBase}.
+    Rebase the carried patch, or remove the patch if upstream now supplies
+    an equivalent bootstrap era-history input, then rerun the unchanged
+    hosted boundary checks.
+  '';
+assert computedAmaruPatchSha256 == amaruPatchSha256 ||
+  throw ''
+    Declared amaruPatchSha256 ${amaruPatchSha256} does not match patch
+    bytes ${computedAmaruPatchSha256}.
+  '';
+assert (!upstreamHasBootstrapEraHistoryInput) ||
+  throw ''
+    Upstream Amaru ${amaruRev} already loads era history at node bootstrap.
+    Remove the carried patch nix/patches/amaru-node-bootstrap-era-history.patch,
+    prove the resulting source identity, and rerun the unchanged hosted
+    boundary checks.
+  '';
 craneLib.buildPackage ({
   pname = "amaru" + pkgs.lib.optionalString (peerSnapshots == "placeholder-dev")
     "-placeholder-dev" + pkgs.lib.optionalString (peerSnapshotFault != null)
     "-${peerSnapshotFault}";
   version = "0.1.2";
 
-  src = craneLib.cleanCargoSource amaru;
+  src = craneLib.cleanCargoSource (pkgs.applyPatches {
+    name = "amaru-era-history-bootstrap";
+    src = amaru;
+    patches = [ amaruBootstrapPatch ];
+  });
   strictDeps = true;
 
   # Build only the amaru binary; its sibling crates in the workspace
@@ -227,6 +268,11 @@ craneLib.buildPackage ({
         '${peerSnapshotResolution.snapshots.preview.sha256}'
     ''}
   '';
+
+  passthru = {
+    inherit amaruSourceIdentity amaruPatchSha256;
+    amaruPatchBase = expectedAmaruPatchBase;
+  };
 } // pkgs.lib.optionalAttrs (cargoArtifacts != null) {
   inherit cargoArtifacts;
 })

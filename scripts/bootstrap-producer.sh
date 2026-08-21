@@ -17,8 +17,9 @@
 #      --snapshot + --cardano-node-db) -> per-epoch snapshot dirs with
 #      packaged bootstrap headers.
 #   4. Write per-snapshot era-history sidecars + bundle era-history.json.
-#   5. amaru node bootstrap -> ledger.<net>.db + chain.<net>.db (derives nonces
-#      from the snapshot, imports the packaged headers).
+#   5. amaru node bootstrap --era-history <staged era-history.json>
+#      -> ledger.<net>.db + chain.<net>.db (derives nonces from the
+#      snapshot, imports the packaged headers).
 #   6. mv -T <unique-tmp> <final> (atomic commit)
 #
 # Exit-code classes (data-model.md "Error class registry"):
@@ -108,13 +109,10 @@ tail_phase_log() {
 ##
 ## Build a single-era Conway era_history JSON anchored at the
 ## genesis (epoch 0, slot 0, time 0) using the genesis epochLength.
-## amaru `bootstrap` consumes this per-snapshot sidecar for custom
-## testnets (make_era_history reads history.<slot>.<hash>.json next to
-## the snapshot dir); the same document is shipped at the bundle root
-## as era-history.json so `amaru run --era-history` can override
-## the network default at consume time. Without it amaru defaults to
-## the built-in testnet era-history (epoch_size 86400) and treats every
-## short-epoch slot as still-in-epoch-0, producing wrong nonces. See
+## `amaru node bootstrap --era-history` consumes the bundle-root copy
+## for custom testnets. Per-snapshot `history.<slot>.<hash>.json`
+## sidecars remain next to each archive for re-bootstrap. Without the
+## file Amaru has no built-in history for testnet_42. See
 ## https://github.com/lambdasistemi/amaru-bootstrap/issues/37.
 ensure_era_history_input() {
     local out="$1"
@@ -575,9 +573,9 @@ phase_create_snapshots() {
 }
 
 # Step 4: era-history sidecars + bundle era-history.json. rc=6 on failure.
-# amaru `bootstrap` reads history.<slot>.<hash>.json alongside each
-# snapshot dir for custom testnets (make_era_history); `amaru run` later
-# reads era-history.json from the bundle root via --era-history.
+# `amaru node bootstrap` receives the staged bundle era-history.json
+# via --era-history (same flag as `amaru run`). Per-snapshot sidecars
+# remain next to each archive for re-bootstrap.
 phase_era_sidecars() {
     local snap_root="${UNIQUE_TMP}/snapshots/${NET_LC}"
     local targets="${UNIQUE_TMP}/targets.json"
@@ -593,7 +591,8 @@ phase_era_sidecars() {
         printf 'no era-history sidecars written\n' >&2
         exit 6
     fi
-    # Bundle-level copy for `amaru run --era-history` at consume time.
+    # Staged file for `amaru node bootstrap --era-history` and the
+    # bundle-root copy for `amaru run --era-history` at consume time.
     ensure_era_history_input "${UNIQUE_TMP}/era-history.json"
 }
 
@@ -621,7 +620,8 @@ phase_bootstrap() {
                 --network "${NETWORK}" \
                 --epoch "$(( first_epoch + 3 ))" \
                 --ledger-dir "${ledger_dir}" \
-                --chain-dir "${chain_dir}"
+                --chain-dir "${chain_dir}" \
+                --era-history "${UNIQUE_TMP}/era-history.json"
     ) 2>"${logdir}/bootstrap.stderr" || rc=$?
     if (( rc != 0 )); then
         printf 'amaru bootstrap failed (rc=%d); see %s\n' \

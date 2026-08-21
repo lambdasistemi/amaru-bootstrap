@@ -79,7 +79,8 @@ the relay startup marker and the relay process continues as `amaru run`.
 6. Write a `history.<slot>.<hash>.json` era-history sidecar next to
    each snapshot and an `era-history.json` at the bundle root, both
    built from the genesis `epochLength`.
-7. Run `amaru bootstrap`, which populates `ledger.<network>.db` and
+7. Run `amaru node bootstrap --era-history` on the staged bundle
+   `era-history.json`, which populates `ledger.<network>.db` and
    `chain.<network>.db`, deriving nonces from the latest snapshot and
    importing the packaged headers.
 8. Atomically rename (`mv -T`) the unique staging directory into the
@@ -105,15 +106,21 @@ historical epoch directories. `amaru run` opens the live ledger and then
 loads the two prior historical snapshots for rewards and leader-schedule
 stake distribution.
 
-For custom testnets, `amaru bootstrap` reads the
-`history.<slot>.<hash>.json` sidecar next to each snapshot directory.
-Without it, Amaru defaults to the built-in testnet era history
-(epoch size 86400) and computes wrong nonces on short-epoch networks.
-The bundle-root `era-history.json` is the same document, shipped for
-`amaru run --era-history-file` at consume time. The runtime
+For custom testnets, `amaru node bootstrap` loads the staged
+`era-history.json` through `--era-history` / `AMARU_ERA_HISTORY` (the
+same input as `amaru run`). Without that file Amaru has no built-in
+history for `testnet_42` and refuses to bootstrap. The per-snapshot
+`history.<slot>.<hash>.json` sidecars remain next to each archive for
+re-bootstrap. The bundle-root `era-history.json` is the same document,
+also consumed by `amaru run --era-history` at consume time. The runtime
 `era-history.json` and `global-parameters.json` consumed by `amaru run`
 in relay mode are deployment files mounted at `/amaru-runtime`; see
 [Antithesis deployment](antithesis.md#runtime-parameter-files).
+
+The Amaru build applies one repository-versioned patch at the exact
+upstream SHA in `flake.lock`. If a later pin already supplies this
+bootstrap input, that pin-bump must remove the patch, prove the bare
+source identity, and rerun the unchanged hosted boundary checks.
 
 ### Environment Knobs
 

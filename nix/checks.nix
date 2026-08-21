@@ -17,6 +17,9 @@
 let
   cliMockTestTree = pkgs.linkFarm "cli-mock-test-tree" [
     { name = "tests"; path = ../tests; }
+    # Hosted cli-mock-honesty must see carried patch artifacts so the
+    # range-whitespace property executes (I-095-AUDIT).
+    { name = "nix/patches"; path = ../nix/patches; }
   ];
 
   producerRuntimePath = pkgs.lib.makeBinPath [
@@ -492,6 +495,14 @@ in
       chmod -R u+w .
       patchShebangs tests
       bash tests/check-cli-mock-honesty.sh
+      grep -q 'amaruSourceIdentity' ${../nix/amaru.nix}
+      grep -q 'applyPatches' ${../nix/amaru.nix}
+      grep -q 'builtins.hashFile' ${../nix/amaru.nix}
+      grep -q 'expectedAmaruPatchBase' ${../nix/amaru.nix}
+      grep -F 'amaruPatchSha256 =' ${../nix/amaru.nix}
+      grep -E -q 'remove.*patch|patch.*remove' ${../nix/amaru.nix}
+      actual=$(sha256sum ${../nix/patches/amaru-node-bootstrap-era-history.patch} | cut -d' ' -f1)
+      grep -F "amaruPatchSha256 = \"$actual\";" ${../nix/amaru.nix}
       mkdir -p $out
     '';
 

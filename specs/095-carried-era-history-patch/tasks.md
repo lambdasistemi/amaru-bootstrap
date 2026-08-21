@@ -6,17 +6,17 @@ Artifact ceiling: 70 lines.
 
 - [x] T095-01 Freeze the placement decision, compact mandate, invariant set,
   and non-realizing slice gate.
-- [ ] T095-02 Add the minimal upstream-shaped patch with executable custom
+- [x] T095-02 Add the minimal upstream-shaped patch with executable custom
   history failure proofs.
-- [ ] T095-03 Bind exact upstream and patch digests into Nix build identity and
+- [x] T095-03 Bind exact upstream and patch digests into Nix build identity and
   add the executable retirement guard.
-- [ ] T095-04 Pass the staged bundle history through producer bootstrap and
+- [x] T095-04 Pass the staged bundle history through producer bootstrap and
   reconcile every strict success-capable mock.
-- [ ] T095-05 Carry PR 93's exact two fixture blobs and prove every other path
+- [x] T095-05 Carry PR 93's exact two fixture blobs and prove every other path
   belongs to the declared integration delta.
-- [ ] T095-06 Record complete non-realizing RED/GREEN evidence and a clean
+- [x] T095-06 Record complete non-realizing RED/GREEN evidence and a clean
   candidate.
-- [ ] T095-07 Obtain a fresh independent audit pass on the exact candidate.
+- [x] T095-07 Obtain a fresh independent audit pass on the exact candidate.
 - [ ] T095-08 Obtain green hosted Build Gate and Live Bootstrap Producer on
   the exact accepted head.
 - [ ] T095-09 Verify exact-head required contexts and finalize review handoff.

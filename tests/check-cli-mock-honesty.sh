@@ -30,6 +30,93 @@ else
   printf 'OK: amaru convert-ledger-state rejected\n'
 fi
 
+# --- I-095-MOCK: real node bootstrap exposes --era-history ---
+bootstrap_help=$(amaru node bootstrap --help 2>&1) || {
+  printf 'FAIL: amaru node bootstrap --help exited non-zero\n' >&2
+  fail=1
+  bootstrap_help=""
+}
+if printf '%s\n' "$bootstrap_help" | grep -q -- '--era-history'; then
+  printf 'OK: amaru node bootstrap exposes --era-history\n'
+else
+  printf 'FAIL: amaru node bootstrap --help missing --era-history\n' >&2
+  fail=1
+fi
+if printf '%s\n' "$bootstrap_help" | grep -q 'AMARU_ERA_HISTORY'; then
+  printf 'OK: amaru node bootstrap exposes AMARU_ERA_HISTORY\n'
+else
+  printf 'FAIL: amaru node bootstrap --help missing AMARU_ERA_HISTORY\n' >&2
+  fail=1
+fi
+
+# --- I-095-AUDIT / F-095-S1-RANGE-WHITESPACE ---
+# Carried patch artifacts must be free of trailing whitespace. A clean
+# worktree `git diff --check` is not range proof: an added patch file
+# with space-only unified-diff context lines is invisible there.
+# Auditor: auditor-codex-s1 instrument
+# 3fea684f8484e74b826ca9dd499d6f75a38b551fc2bfb2028231c2f8c69e36bb
+# against 0aed4f706171b9fe9216c70c34d33518dd8c4ce4.
+RANGE_WHITESPACE_BASE=5dd7c8fee7f37a7c11737595c6c5b1c6e80cdea7
+REJECTED_WHITESPACE_CANDIDATE=0aed4f706171b9fe9216c70c34d33518dd8c4ce4
+
+patch_has_trailing_whitespace() {
+  grep -nE '[[:space:]]$' "$1"
+}
+
+# Control 1: synthetic trailing space must make the scanner fail.
+ws_ctrl=$(mktemp)
+printf 'diff --git a/x b/x\n \n' >"$ws_ctrl"
+if patch_has_trailing_whitespace "$ws_ctrl" >/dev/null; then
+  printf 'OK: patch whitespace scanner fails a synthetic trailing-space mutant\n'
+else
+  printf 'FAIL: patch whitespace scanner did not fail a synthetic mutant\n' >&2
+  fail=1
+fi
+rm -f "$ws_ctrl"
+
+# Control 2: rejected candidate blob must remain red (property class).
+if git cat-file -e "$REJECTED_WHITESPACE_CANDIDATE:nix/patches/amaru-node-bootstrap-era-history.patch" 2>/dev/null; then
+  ws_rej=$(mktemp)
+  git cat-file blob \
+    "$REJECTED_WHITESPACE_CANDIDATE:nix/patches/amaru-node-bootstrap-era-history.patch" \
+    >"$ws_rej"
+  if patch_has_trailing_whitespace "$ws_rej" >/dev/null; then
+    printf 'OK: rejected candidate %s patch is whitespace-red\n' \
+      "$REJECTED_WHITESPACE_CANDIDATE"
+  else
+    printf 'FAIL: property did not fail on rejected candidate patch\n' >&2
+    fail=1
+  fi
+  rm -f "$ws_rej"
+fi
+
+shopt -s nullglob
+ws_artifacts=(nix/patches/*.patch)
+shopt -u nullglob
+if [[ ${#ws_artifacts[@]} -eq 0 ]]; then
+  printf 'FAIL: no carried patch artifacts under nix/patches/\n' >&2
+  fail=1
+fi
+for ws_patch in "${ws_artifacts[@]+"${ws_artifacts[@]}"}"; do
+  if patch_has_trailing_whitespace "$ws_patch" >/dev/null; then
+    printf 'FAIL: trailing whitespace in carried patch %s\n' "$ws_patch" >&2
+    patch_has_trailing_whitespace "$ws_patch" >&2 || true
+    fail=1
+  else
+    printf 'OK: no trailing whitespace in %s\n' "$ws_patch"
+  fi
+done
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  && git cat-file -e "${RANGE_WHITESPACE_BASE}^{commit}" 2>/dev/null; then
+  if git diff --check "${RANGE_WHITESPACE_BASE}..HEAD"; then
+    printf 'OK: git diff --check %s..HEAD\n' "$RANGE_WHITESPACE_BASE"
+  else
+    printf 'FAIL: range git diff --check %s..HEAD\n' "$RANGE_WHITESPACE_BASE" >&2
+    fail=1
+  fi
+fi
+
 # --- Guard coverage: every audited success-capable mock owner ---
 for bats_file in \
   tests/test-bootstrap-producer-canonical-cli.bats \

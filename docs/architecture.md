@@ -70,8 +70,8 @@ Nonces and bootstrap headers are baked into `chain.<network>.db` by
 `amaru bootstrap`; they are no longer separate bundle artefacts. The
 `snapshots/<network>/` directory keeps the materialized epoch snapshots
 and their era-history sidecars for re-bootstrap; `era-history.json` at
-the bundle root is the consume-time override for
-`amaru run --era-history-file`.
+the bundle root is passed to `amaru node bootstrap --era-history` and
+is the consume-time override for `amaru run --era-history`.
 
 ## Live ChainDB Contract
 
@@ -167,12 +167,11 @@ The relay passes deployment-provided runtime JSON to `amaru run`:
 ```
 
 These files must match the custom testnet genesis/config used by the
-paired cardano-node. They are separate from the
-`history.<slot>.<hash>.json` sidecars the producer writes next to each
-snapshot directory (consumed by `amaru bootstrap`) and from the
-`era-history.json` it writes at the bundle root (the consume-time
-override for `amaru run --era-history-file`). All three documents are
-built from the same genesis `epochLength`.
+paired cardano-node. The producer also passes its staged bundle
+`era-history.json` to `amaru node bootstrap --era-history`. The
+`history.<slot>.<hash>.json` sidecars next to each snapshot remain for
+re-bootstrap. All three documents are built from the same genesis
+`epochLength`.
 
 ## Node-Release Boundary
 
