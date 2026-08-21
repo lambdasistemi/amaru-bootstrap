@@ -556,12 +556,20 @@ phase_create_snapshots() {
         exit 6
     fi
 
-    local dir_count
-    dir_count=$(find "${snap_root}" -mindepth 1 -maxdepth 1 -type d \
-        -regextype posix-extended -regex '.*/[0-9]+\.[0-9a-f]+' 2>/dev/null | wc -l)
-    if (( dir_count < 3 )); then
-        printf 'create-snapshots produced %d snapshot dirs in %s, need at least 3\n' \
-               "${dir_count}" "${snap_root}" >&2
+    local artifact_count
+    artifact_count=$(
+        find "${snap_root}" -mindepth 1 -maxdepth 1 \
+            -regextype posix-extended \( \
+                -type d -regex '.*/[0-9]+\.[0-9a-f]+' -o \
+                -type f -regex '.*/[0-9]+\.[0-9a-f]+\.tar\.zst' \
+            \) -printf '%f\n' 2>/dev/null \
+        | sed 's/\.tar\.zst$//' \
+        | sort -u \
+        | wc -l
+    )
+    if (( artifact_count < 3 )); then
+        printf 'create-snapshots produced %d snapshot artifacts in %s, need at least 3\n' \
+               "${artifact_count}" "${snap_root}" >&2
         exit 6
     fi
 }

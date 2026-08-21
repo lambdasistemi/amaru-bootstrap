@@ -133,14 +133,49 @@ case "\$cmd" in
       esac
     done
     mkdir -p "\$snapdir"
-    for p in "\${points[@]}"; do
-      point="\${p%%::*}"
-      d="\$snapdir/\$point"
-      mkdir -p "\$d/tables"
-      : >"\$d/state"
-      : >"\$d/tables/tvar"
-      printf '[]\n' >"\$d/bootstrap.headers.json"
-    done
+    mode="\${SNAPSHOT_EMIT_MODE:-directories}"
+    case "\$mode" in
+      malformed)
+        : >"\$snapdir/not-a-target.tar.zst"
+        : >"\$snapdir/9.NOT-LOWERCASE-HEX.tar.zst"
+        ;;
+      none) ;;
+      *)
+        n=0
+        for p in "\${points[@]}"; do
+          n=\$((n + 1))
+          point="\${p%%::*}"
+          case "\$mode" in
+            directories)
+              d="\$snapdir/\$point"
+              mkdir -p "\$d/tables"
+              : >"\$d/state"
+              : >"\$d/tables/tvar"
+              printf '[]\n' >"\$d/bootstrap.headers.json"
+              ;;
+            archives)
+              : >"\$snapdir/\$point.tar.zst"
+              ;;
+            duplicate-two-targets)
+              [ "\$n" -le 2 ] || break
+              mkdir -p "\$snapdir/\$point"
+              : >"\$snapdir/\$point.tar.zst"
+              ;;
+            mixed-three)
+              if [ "\$n" -eq 1 ]; then
+                mkdir -p "\$snapdir/\$point"
+              else
+                : >"\$snapdir/\$point.tar.zst"
+              fi
+              ;;
+            *)
+              printf 'unknown SNAPSHOT_EMIT_MODE=%s\n' "\$mode" >&2
+              exit 64
+              ;;
+          esac
+        done
+        ;;
+    esac
     ;;
   node)
     sub="\$1"
@@ -214,4 +249,78 @@ SHIM
     sidecars=$((sidecars + 1))
   done
   [ "$sidecars" -eq 3 ]
+}
+
+assert_complete_mock_bundle() {
+  local root="$TMP_DIR/bundle/testnet_42"
+  [ -d "$root/ledger.testnet_42.db/live" ]
+  [ -d "$root/chain.testnet_42.db" ]
+  [ -f "$root/era-history.json" ]
+  local n=0 d
+  for d in "$root/ledger.testnet_42.db"/*; do
+    if [ -d "$d" ] && [[ "$(basename "$d")" =~ ^[0-9]+$ ]]; then
+      n=$((n + 1))
+    fi
+  done
+  [ "$n" -ge 3 ]
+}
+
+@test "archive snapshot artifacts complete the mock bundle" {
+  export SNAPSHOT_EMIT_MODE=archives
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 0 ]
+  assert_complete_mock_bundle
+}
+
+@test "no snapshot artifacts exits 6 with named diagnostic" {
+  export SNAPSHOT_EMIT_MODE=none
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"snapshot artifacts"* ]]
+}
+
+@test "malformed snapshot names do not satisfy the minimum" {
+  export SNAPSHOT_EMIT_MODE=malformed
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"snapshot artifacts"* ]]
+}
+
+@test "duplicate forms of only two targets do not satisfy the minimum" {
+  export SNAPSHOT_EMIT_MODE=duplicate-two-targets
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 6 ]
+  [[ "$output" == *"snapshot artifacts"* ]]
+}
+
+@test "mixed directory and archive forms count distinct targets" {
+  export SNAPSHOT_EMIT_MODE=mixed-three
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 0 ]
+  assert_complete_mock_bundle
 }
