@@ -436,16 +436,28 @@ in
   antithesis-short-epoch-samples =
     pkgs.runCommand "antithesis-short-epoch-samples"
       {
-        nativeBuildInputs = [ pkgs.coreutils pkgs.findutils ];
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.findutils
+          pkgs.gnused
+        ];
       } ''
       set -euo pipefail
       bundle=${shortEpochBootstrapBundle}/testnet_42
-      # The short-epoch producer materialized at least three snapshot dirs
-      # and the era-history override for consume.
-      snap_count=$(find "$bundle/snapshots/testnet_42" -mindepth 1 -maxdepth 1 -type d \
-        -regextype posix-extended -regex '.*/[0-9]+\.[0-9a-f]+' | wc -l)
+      # The short-epoch producer materialized at least three snapshot
+      # artifacts (directory or matching .tar.zst) and era-history.
+      snap_count=$(
+        find "$bundle/snapshots/testnet_42" -mindepth 1 -maxdepth 1 \
+          -regextype posix-extended \( \
+            -type d -regex '.*/[0-9]+\.[0-9a-f]+' -o \
+            -type f -regex '.*/[0-9]+\.[0-9a-f]+\.tar\.zst' \
+          \) -printf '%f\n' \
+        | sed 's/\.tar\.zst$//' \
+        | sort -u \
+        | wc -l
+      )
       if [ "$snap_count" -lt 3 ]; then
-        echo "expected >=3 short-epoch snapshot dirs, found $snap_count" >&2
+        echo "expected >=3 short-epoch snapshot artifacts, found $snap_count" >&2
         exit 1
       fi
       test -f "$bundle/era-history.json"
