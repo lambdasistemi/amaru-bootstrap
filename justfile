@@ -20,6 +20,7 @@ build-gate:
         .#checks.x86_64-linux.db-analyser \
         .#checks.x86_64-linux.shellcheck \
         .#checks.x86_64-linux.cli-mock-honesty \
+        .#checks.x86_64-linux.amaru-local-first-semantic \
         .#checks.x86_64-linux.db-analyser-points \
         .#checks.x86_64-linux.bootstrap-producer-bats \
         .#checks.x86_64-linux.bootstrap-producer-synthesized \

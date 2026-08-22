@@ -82,8 +82,13 @@ let
   # that left this base, must remove the patch and rerun the unchanged
   # hosted boundary checks.
   amaruBootstrapPatch = ./patches/amaru-node-bootstrap-era-history.patch;
+  patchedSource = pkgs.applyPatches {
+    name = "amaru-era-history-bootstrap";
+    src = amaru;
+    patches = [ amaruBootstrapPatch ];
+  };
   expectedAmaruPatchBase = "ba992f651d3b5e2b49f12d461b86ab8f7a55f994";
-  amaruPatchSha256 = "f09e9bf3360e6daed0fdb84780129cc4a7a0e89629be226ab7a88aae23704d70";
+  amaruPatchSha256 = "1329ec83c624aa0e90301d5d7973c70c498daa57661792d811b1d57a57fc3fa2";
   computedAmaruPatchSha256 = builtins.hashFile "sha256" amaruBootstrapPatch;
   amaruSourceIdentity = "${amaruRev}:${computedAmaruPatchSha256}";
   unpatchedBootstrapCli = builtins.readFile
@@ -117,17 +122,14 @@ assert (!upstreamHasBootstrapEraHistoryInput) ||
     prove the resulting source identity, and rerun the unchanged hosted
     boundary checks.
   '';
-craneLib.buildPackage ({
+let
+  craneArgs = {
   pname = "amaru" + pkgs.lib.optionalString (peerSnapshots == "placeholder-dev")
     "-placeholder-dev" + pkgs.lib.optionalString (peerSnapshotFault != null)
     "-${peerSnapshotFault}";
   version = "0.1.2";
 
-  src = craneLib.cleanCargoSource (pkgs.applyPatches {
-    name = "amaru-era-history-bootstrap";
-    src = amaru;
-    patches = [ amaruBootstrapPatch ];
-  });
+  src = craneLib.cleanCargoSource patchedSource;
   strictDeps = true;
 
   # Build only the amaru binary; its sibling crates in the workspace
@@ -273,6 +275,28 @@ craneLib.buildPackage ({
     inherit amaruSourceIdentity amaruPatchSha256;
     amaruPatchBase = expectedAmaruPatchBase;
   };
-} // pkgs.lib.optionalAttrs (cargoArtifacts != null) {
-  inherit cargoArtifacts;
+  } // pkgs.lib.optionalAttrs (cargoArtifacts != null) {
+    inherit cargoArtifacts;
+  };
+
+  amaruBin = craneLib.buildPackage craneArgs;
+in
+amaruBin.overrideAttrs (old: {
+  passthru = old.passthru // {
+    inherit patchedSource;
+
+    # Issue 95: run the carried patch's own behavioural fixtures for the
+    # local-first bootstrap decision against `src`, with the same toolchain,
+    # dependency artifacts and source cleaning as the shipped binary. The
+    # hosted `amaru-local-first-semantic` check runs this over the patched
+    # source, where it must pass, and over each deliberately mutated source,
+    # where it must fail.
+    localFirstTest = args: craneLib.cargoTest (craneArgs // {
+      cargoArtifacts = amaruBin.cargoArtifacts;
+      cargoExtraArgs = "";
+    } // builtins.removeAttrs args [ "name" "src" ] // {
+      pname = args.name;
+      src = craneLib.cleanCargoSource args.src;
+    });
+  };
 })

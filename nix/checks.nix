@@ -237,8 +237,102 @@ let
           "$out" \
           testnet_42
     '';
+
+  # Issue 95: the local-first bootstrap decision, proved by behavioural Rust
+  # fixtures inside the patched amaru-bootstrap crate. They drive
+  # `bootstrap_snapshots_with` — the same decision owner production calls,
+  # with a recording remote seam bound in place of S3 — so "this request
+  # never reached the network" is observable without network access.
+  #
+  # Each named mutant must make those same fixtures fail, for the named
+  # reason, so the property is re-proved able to fail on every run instead of
+  # only when it was written. A mutation whose edit does not change the source
+  # fails its own derivation, so a vacuous mutant can never be reported as
+  # killed, and a mutant that merely failed to compile is rejected because the
+  # log must carry a real test failure.
+  localFirstTest = { name, src }: amaruPkg.localFirstTest {
+    inherit name src;
+    doCheck = true;
+    cargoTestExtraArgs = "--package amaru-bootstrap --lib bootstrap::tests::local_first";
+  };
+
+  localFirstFixtures = localFirstTest {
+    name = "amaru-local-first-fixtures";
+    src = amaruPkg.patchedSource;
+  };
+
+  localFirstMutants = map
+    (mutant: mutant // {
+      failure = pkgs.testers.testBuildFailure (localFirstTest {
+        name = "amaru-local-first-${mutant.name}";
+        src = pkgs.runCommand "amaru-local-first-${mutant.name}-src" { } ''
+          cp -r ${amaruPkg.patchedSource} $out
+          chmod -R u+w $out
+          target=$out/crates/amaru-bootstrap/src/bootstrap/mod.rs
+          before=$(sha256sum "$target" | cut -d' ' -f1)
+          sed -i ${pkgs.lib.escapeShellArg mutant.sed} "$target"
+          after=$(sha256sum "$target" | cut -d' ' -f1)
+          if [ "$before" = "$after" ]; then
+            echo "mutation ${mutant.name} did not apply; it would test nothing" >&2
+            exit 1
+          fi
+        '';
+      });
+    })
+    [
+      # The rejected candidate's surviving DIFFERENT-SNAPSHOT-SET class: the
+      # selector still runs, but over a collection that is not the one
+      # discovered on disk.
+      {
+        name = "different-snapshot-set";
+        sed = ''s@select_bootstrap_snapshots(local, Some(target_epoch))@select_bootstrap_snapshots(\&[], Some(target_epoch))@'';
+        test = "exact_local_window_skips_the_remote_seam";
+        reason = "an exact local window must not reach the remote listing seam";
+      }
+      # Same class, but the substituted collection is complete, so only
+      # member identity — not mere success — can tell the two apart.
+      {
+        name = "foreign-snapshot-set";
+        sed = ''s@match select_bootstrap_snapshots(local, Some(target_epoch)) {@let foreign: Vec<Snapshot> = local.iter().map(|s| Snapshot { epoch: s.epoch, point: s.point.clone(), key: format!("foreign/{}", s.key) }).collect();\n    match select_bootstrap_snapshots(\&foreign, Some(target_epoch)) {@'';
+        test = "exact_local_window_skips_the_remote_seam";
+        reason = "local success must be supplied from the discovered local collection itself";
+      }
+      # The rejected candidate's surviving SAME-LINE-SECOND-EARLY-RETURN
+      # class: a second pre-remote success exit, sharing one physical line so
+      # no line-counting oracle can see it.
+      {
+        name = "same-line-second-early-return";
+        sed = ''s@    for (point, key) in list_remote().await? {@    if snapshots.is_empty() { return Ok((snapshots_dir, snapshots)); }\n    for (point, key) in list_remote().await? {@'';
+        test = "insufficient_local_collections_invoke_the_remote_seam";
+        reason = "empty: must fall back to the remote listing seam";
+      }
+    ];
 in
 {
+
+  amaru-local-first-semantic =
+    pkgs.runCommand "amaru-local-first-semantic"
+      { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
+      set -euo pipefail
+      echo "fixtures green on the patched source: ${localFirstFixtures}"
+      ${pkgs.lib.concatMapStrings (mutant: ''
+        log=${mutant.failure}/testBuildFailure.log
+        grep -q 'test result: FAILED' "$log" || {
+          echo "mutant ${mutant.name}: build failed without a test failure" >&2
+          exit 1
+        }
+        grep -q '${mutant.test} ... FAILED' "$log" || {
+          echo "mutant ${mutant.name}: expected ${mutant.test} to fail" >&2
+          exit 1
+        }
+        grep -qF ${pkgs.lib.escapeShellArg mutant.reason} "$log" || {
+          echo "mutant ${mutant.name}: killed for the wrong reason" >&2
+          exit 1
+        }
+        echo "mutant ${mutant.name}: killed by ${mutant.test}"
+      '') localFirstMutants}
+      mkdir -p $out
+    '';
   # I-088-CHECK: execute the packaged version surface. A package-only
   # alias would keep `nix flake check` green without observing identity.
   amaru = pkgs.runCommand "amaru-git-identity"

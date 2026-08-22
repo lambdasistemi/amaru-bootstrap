@@ -1,7 +1,14 @@
 diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstrap/src/bootstrap/mod.rs
 --- a/crates/amaru-bootstrap/src/bootstrap/mod.rs
 +++ b/crates/amaru-bootstrap/src/bootstrap/mod.rs
-@@ -22,7 +22,7 @@
+@@ -16,13 +16,14 @@ use std::{
+     collections::{BTreeMap, BTreeSet},
+     error::Error,
+     fs,
++    future::Future,
+     io::{self, Read},
+     path::{Component, Path, PathBuf},
+     time::Duration,
  };
 
  use amaru_kernel::{
@@ -10,23 +17,142 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
      RawBlock, Slot, StakeCredential, extract_block_header_cbor, from_cbor, num::CheckedSub,
      utils::string::display_collection,
  };
-@@ -118,14 +118,11 @@
- /// List S3 objects under `<network>/`, derive epoch from slot via era history, return `Vec<Snapshot>`.
- async fn bootstrap_snapshots(
-     network: NetworkName,
-+    era_history: &EraHistory,
-     s3: &AnonymousS3Client,
- ) -> Result<(PathBuf, Vec<Snapshot>), Box<dyn Error>> {
-     let snapshots_dir: PathBuf = default_snapshots_dir(network).into();
+@@ -115,31 +116,16 @@ fn snapshot_hash(snapshot: &Snapshot) -> Result<HeaderHash, Box<dyn Error>> {
+     }
+ }
 
+-/// List S3 objects under `<network>/`, derive epoch from slot via era history, return `Vec<Snapshot>`.
+-async fn bootstrap_snapshots(
++/// Snapshots already staged under `<network>/`, discovered before any remote listing.
++///
++/// A staged archive is identified by its `<slot>.<hash>.tar.zst` filename alone, so the local
++/// collection can be built without reading, validating, or downloading anything.
++fn local_snapshots(
+     network: NetworkName,
+-    s3: &AnonymousS3Client,
+-) -> Result<(PathBuf, Vec<Snapshot>), Box<dyn Error>> {
+-    let snapshots_dir: PathBuf = default_snapshots_dir(network).into();
+-
 -    let era_history = network
 -        .as_era_history()
 -        .ok_or_else(|| format!("no era history available for network {network}; S3 bootstrap is only supported for mainnet, preprod, and preview"))?;
 -
-     let s3_snapshots = s3.list_snapshots(network).await?;
+-    let s3_snapshots = s3.list_snapshots(network).await?;
+-
+-    let mut snapshots = Vec::with_capacity(s3_snapshots.len());
+-
+-    let try_push = |snapshots: &mut Vec<Snapshot>, point: String, key: String| -> Result<(), Box<dyn Error>> {
+-        let slot = parse_slot_from_point(&point)?;
+-        let epoch = era_history.slot_to_epoch_unchecked_horizon(Slot::from(slot))?;
+-        snapshots.push(Snapshot { epoch, point, key });
+-        Ok(())
+-    };
+-
+-    for s3_snap in s3_snapshots {
+-        try_push(&mut snapshots, s3_snap.point.to_string(), s3_snap.key.to_string())?;
+-    }
++    era_history: &EraHistory,
++    snapshots_dir: &Path,
++) -> Result<Vec<Snapshot>, Box<dyn Error>> {
++    let mut snapshots = Vec::new();
 
-     let mut snapshots = Vec::with_capacity(s3_snapshots.len());
-@@ -440,13 +437,14 @@
+     match snapshots_dir.read_dir() {
+         Ok(entries) => {
+@@ -147,8 +133,9 @@ async fn bootstrap_snapshots(
+                 let path = dir_entry?.path();
+                 let filename = path.file_name().unwrap_or_default().to_str().unwrap_or_default();
+                 if let Some(prefix) = filename.strip_suffix(Snapshot::ARCHIVE_SUFFIX) {
+-                    try_push(
++                    push_snapshot(
+                         &mut snapshots,
++                        era_history,
+                         prefix.to_string(),
+                         format!("{network}/{prefix}{}", Snapshot::ARCHIVE_SUFFIX),
+                     )?;
+@@ -161,12 +148,82 @@ async fn bootstrap_snapshots(
+         Err(err) => return Err(err.into()),
+     }
+
++    Ok(snapshots)
++}
++
++/// Derive a snapshot's epoch from its point through `era_history` and record it.
++fn push_snapshot(
++    snapshots: &mut Vec<Snapshot>,
++    era_history: &EraHistory,
++    point: String,
++    key: String,
++) -> Result<(), Box<dyn Error>> {
++    let slot = parse_slot_from_point(&point)?;
++    let epoch = era_history.slot_to_epoch_unchecked_horizon(Slot::from(slot))?;
++    snapshots.push(Snapshot { epoch, point, key });
++    Ok(())
++}
++
++/// The remote listing seam as production binds it: S3 objects under `<network>/`.
++async fn list_remote_snapshots(
++    network: NetworkName,
++    s3: &AnonymousS3Client,
++) -> Result<Vec<(String, String)>, Box<dyn Error>> {
++    let s3_snapshots = s3.list_snapshots(network).await?;
++    Ok(s3_snapshots.into_iter().map(|snap| (snap.point.to_string(), snap.key.to_string())).collect())
++}
++
++/// The bootstrap snapshot discovery decision owner.
++///
++/// `list_remote` is the remote listing seam, yielding `(point, key)` pairs. Production binds it
++/// to S3; fixtures bind a recording double, so "this request never reached the network" is
++/// observable without network access. Every route to a remote request passes through it.
++///
++/// INV-095-CI2-SUCCESS-EXITS: the exact-local decision below is the only success exit before
++/// that seam. A second one — including a SAME-LINE-SECOND-EARLY-RETURN sharing a physical line
++/// with the first — is caught behaviourally, because some scenario then stops recording a call.
++async fn bootstrap_snapshots_with<F, Fut>(
++    network: NetworkName,
++    era_history: &EraHistory,
++    snapshots_dir: PathBuf,
++    target_epoch: Option<Epoch>,
++    list_remote: F,
++) -> Result<(PathBuf, Vec<Snapshot>), Box<dyn Error>>
++where
++    F: FnOnce() -> Fut,
++    Fut: Future<Output = Result<Vec<(String, String)>, Box<dyn Error>>>,
++{
++    let mut snapshots = local_snapshots(network, era_history, &snapshots_dir)?;
++
++    // Not implemented yet: every request still reaches the remote seam before the archives
++    // already staged on disk are considered, which is the defect issue 95 reports.
++    let _ = target_epoch;
++
++    for (point, key) in list_remote().await? {
++        push_snapshot(&mut snapshots, era_history, point, key)?;
++    }
++
+     snapshots.sort_unstable_by_key(|snapshot| snapshot.epoch);
+     snapshots.dedup_by_key(|snapshot| snapshot.epoch);
+
+     Ok((snapshots_dir, snapshots))
+ }
+
++/// List local archives first, then S3 objects under `<network>/`, as `Vec<Snapshot>`.
++async fn bootstrap_snapshots(
++    network: NetworkName,
++    era_history: &EraHistory,
++    target_epoch: Option<Epoch>,
++    s3: &AnonymousS3Client,
++) -> Result<(PathBuf, Vec<Snapshot>), Box<dyn Error>> {
++    let snapshots_dir: PathBuf = default_snapshots_dir(network).into();
++
++    bootstrap_snapshots_with(network, era_history, snapshots_dir, target_epoch, || {
++        list_remote_snapshots(network, s3)
++    })
++    .await
++}
++
+ /// Parse the slot number from a `<slot>.<hash>` point string.
+ fn parse_slot_from_point(point: &str) -> Result<u64, Box<dyn Error>> {
+     point
+@@ -440,13 +497,14 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
  pub async fn bootstrap(
      network: NetworkName,
      global_parameters: &GlobalParameters,
@@ -38,14 +164,182 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
  ) -> Result<(), Box<dyn Error>> {
      let s3 = AnonymousS3Client::new(s3_config);
 -    let (snapshots_dir, snapshots) = bootstrap_snapshots(network, &s3).await?;
-+    let (snapshots_dir, snapshots) = bootstrap_snapshots(network, era_history, &s3).await?;
++    let (snapshots_dir, snapshots) = bootstrap_snapshots(network, era_history, target_epoch, &s3).await?;
      let [first_snapshot, second_snapshot, third_snapshot] = select_bootstrap_snapshots(&snapshots, target_epoch)?;
 
      download_snapshots(&[first_snapshot, second_snapshot, third_snapshot], &snapshots_dir, &s3).await?;
+@@ -1027,4 +1085,167 @@ mod tests {
+         let err = select_bootstrap_snapshots(&snapshots, Some(Epoch::from(2_u64))).unwrap_err();
+         assert!(dbg!(err.to_string()).contains("target epoch is too young"));
+     }
++
++    /// Issue 95: the local-first bootstrap snapshot decision.
++    ///
++    /// Every fixture drives `bootstrap_snapshots_with`, the same decision owner production
++    /// calls; only the bound remote listing seam differs. That seam records whether it was
++    /// invoked, so "this request never reached the network" is directly observable.
++    ///
++    /// INV-095-CI2-SAME-CODE: no fixture reimplements or mirrors the decision.
++    mod local_first {
++        use std::{cell::Cell, error::Error, fs, future::Future, path::Path, time::Duration};
++
++        use amaru_kernel::{Epoch, EraBound, EraHistory, EraName, EraParams, EraSummary, NetworkName, Slot};
++        use tempfile::{TempDir, tempdir};
++
++        use super::super::{Snapshot, bootstrap_snapshots_with, select_bootstrap_snapshots};
++
++        const NETWORK: NetworkName = NetworkName::Testnet(42);
++        const REMOTE_ERROR: &str = "remote listing refused";
++
++        /// One 5-slot Conway era starting at epoch 0, so slot `n` lands in epoch `n / 5`.
++        fn era_history() -> EraHistory {
++            let start = EraBound { time: Duration::from_secs(0), slot: Slot::from(0_u64), epoch: Epoch::from(0_u64) };
++            let params =
++                EraParams { epoch_size_slots: 5, slot_length: Duration::from_secs(1), era_name: EraName::Conway };
++            EraHistory::new(&[EraSummary { start, end: None, params }], Slot::from(0_u64))
++        }
++
++        /// The `<slot>.<hash>` point of a snapshot landing on the first slot of `epoch`.
++        fn point(epoch: u64) -> String {
++            format!("{}.{:064x}", epoch * 5, epoch)
++        }
++
++        /// The S3 object key the publisher would give that snapshot.
++        fn key(epoch: u64) -> String {
++            format!("{NETWORK}/{}{}", point(epoch), Snapshot::ARCHIVE_SUFFIX)
++        }
++
++        /// Stage `epochs` as plain `<point>.tar.zst` files; the local scan reads names only.
++        fn staged(epochs: &[u64]) -> TempDir {
++            let dir = tempdir().unwrap();
++            for epoch in epochs {
++                fs::write(dir.path().join(format!("{}{}", point(*epoch), Snapshot::ARCHIVE_SUFFIX)), b"").unwrap();
++            }
++            dir
++        }
++
++        /// How a fixture observes a snapshot's identity, and what staging `epoch` should yield.
++        fn identity(snapshot: &Snapshot) -> (Epoch, String, String) {
++            (snapshot.epoch, snapshot.point.clone(), snapshot.key.clone())
++        }
++
++        fn staged_identities(epochs: &[u64]) -> Vec<(Epoch, String, String)> {
++            epochs.iter().map(|epoch| (Epoch::from(*epoch), point(*epoch), key(*epoch))).collect()
++        }
++
++        /// Remote listing seam that records every invocation.
++        struct Remote {
++            calls: Cell<usize>,
++            result: Result<Vec<(String, String)>, &'static str>,
++        }
++
++        impl Remote {
++            fn listing(epochs: &[u64]) -> Self {
++                let entries = epochs.iter().map(|epoch| (point(*epoch), key(*epoch))).collect();
++                Remote { calls: Cell::new(0), result: Ok(entries) }
++            }
++
++            fn failing() -> Self {
++                Remote { calls: Cell::new(0), result: Err(REMOTE_ERROR) }
++            }
++
++            async fn list(&self) -> Result<Vec<(String, String)>, Box<dyn Error>> {
++                self.calls.set(self.calls.get() + 1);
++                self.result.clone().map_err(|err| -> Box<dyn Error> { err.into() })
++            }
++        }
++
++        /// Run the production decision owner over `dir` with the recording seam bound.
++        fn decide(dir: &Path, target_epoch: Option<u64>, remote: &Remote) -> Result<Vec<Snapshot>, Box<dyn Error>> {
++            let era_history = era_history();
++            let decision = bootstrap_snapshots_with(NETWORK, &era_history, dir.to_path_buf(), target_epoch.map(Epoch::from), || {
++                remote.list()
++            });
++            // Nothing under test performs real I/O, so a bare current-thread runtime suffices.
++            tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(decision).map(|(_, snaps)| snaps)
++        }
++
++        /// INV-095-CI2-COLLECTION-IDENTITY: the discovered collection both authorises the local
++        /// route and supplies its members, so a DIFFERENT-SNAPSHOT-SET substituted for it — empty
++        /// or complete — cannot pass, whether it changes the verdict or only the members returned.
++        #[test]
++        fn exact_local_window_skips_the_remote_seam() {
++            let dir = staged(&[10, 11, 12]);
++            let remote = Remote::listing(&[10, 11, 12, 13]);
++
++            let selected = decide(dir.path(), Some(13), &remote).unwrap();
++
++            assert_eq!(remote.calls.get(), 0, "an exact local window must not reach the remote listing seam");
++            assert_eq!(
++                selected.iter().map(identity).collect::<Vec<_>>(),
++                staged_identities(&[10, 11, 12]),
++                "local success must be supplied from the discovered local collection itself",
++            );
++        }
++
++        /// INV-095-CI2-REMOTE-FALLBACK: every local collection short of the exact request defers.
++        #[test]
++        fn insufficient_local_collections_invoke_the_remote_seam() {
++            for (label, local, target) in [
++                ("empty", &[][..], Some(13)),
++                ("gapped", &[10, 12][..], Some(13)),
++                ("wrong target", &[10, 11, 12][..], Some(16)),
++                ("no target", &[10, 11, 12][..], None),
++            ] {
++                let dir = staged(local);
++                let remote = Remote::listing(&[10, 11, 12, 13, 14, 15]);
++
++                decide(dir.path(), target, &remote).unwrap();
++
++                assert_eq!(remote.calls.get(), 1, "{label}: must fall back to the remote listing seam");
++            }
++        }
++
++        #[test]
++        fn missing_local_directory_invokes_the_remote_seam() {
++            let dir = tempdir().unwrap();
++            let remote = Remote::listing(&[10, 11, 12]);
++
++            decide(&dir.path().join("never-created"), Some(13), &remote).unwrap();
++
++            assert_eq!(remote.calls.get(), 1, "a missing local directory must fall back to the remote seam");
++        }
++
++        #[test]
++        fn remote_errors_reach_the_caller_unchanged() {
++            let dir = staged(&[10, 11]);
++            let remote = Remote::failing();
++
++            let err = decide(dir.path(), Some(13), &remote).unwrap_err();
++
++            assert_eq!(remote.calls.get(), 1);
++            assert_eq!(err.to_string(), REMOTE_ERROR, "the remote seam's error must be preserved");
++        }
++
++        #[test]
++        fn remote_results_merge_with_local_and_stay_selectable() {
++            let dir = staged(&[10]);
++            let remote = Remote::listing(&[11, 12]);
++
++            let merged = decide(dir.path(), Some(13), &remote).unwrap();
++
++            assert_eq!(remote.calls.get(), 1);
++            assert_eq!(
++                merged.iter().map(identity).collect::<Vec<_>>(),
++                staged_identities(&[10, 11, 12]),
++                "local and remote results must merge into one epoch-ordered collection",
++            );
++            assert!(
++                select_bootstrap_snapshots(&merged, Some(Epoch::from(13_u64))).is_ok(),
++                "the downstream selection route must stay reachable after a remote merge",
++            );
++        }
++    }
+ }
 diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
 --- a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
 +++ b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
-@@ -24,7 +24,7 @@
+@@ -24,7 +24,7 @@ use amaru::{
      default_chain_dir, default_ledger_dir,
      lifecycle::{Runnable, RuntimeKind},
  };
@@ -54,7 +348,7 @@ diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src
  use amaru_observability::{info, warn};
  use clap::Parser;
 
-@@ -69,6 +69,20 @@
+@@ -69,6 +69,20 @@ pub struct Args {
      )]
      network: NetworkName,
 
@@ -75,7 +369,7 @@ diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src
      /// Override network's global parameters for custom testnets.
      #[command(flatten)]
      global_parameters: GlobalParameters,
-@@ -131,6 +145,13 @@
+@@ -131,6 +145,13 @@ pub(crate) fn runnable(args: Args) -> Runnable {
  async fn run(args: Args) -> Result<(), Box<dyn Error>> {
      let network = args.network;
 
@@ -89,7 +383,7 @@ diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src
      let global_parameters = network.as_global_parameters().cloned().unwrap_or(args.global_parameters);
 
      let ledger_dir = args.ledger_dir.unwrap_or_else(|| default_ledger_dir(network).into());
-@@ -171,6 +192,7 @@
+@@ -171,6 +192,7 @@ async fn run(args: Args) -> Result<(), Box<dyn Error>> {
      bootstrap(
          network,
          &global_parameters,
