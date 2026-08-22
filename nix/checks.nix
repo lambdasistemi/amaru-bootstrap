@@ -239,17 +239,12 @@ let
     '';
 
   # Issue 95: the local-first bootstrap decision, proved by behavioural Rust
-  # fixtures inside the patched amaru-bootstrap crate. They drive
-  # `bootstrap_snapshots_with` — the same decision owner production calls,
-  # with a recording remote seam bound in place of S3 — so "this request
-  # never reached the network" is observable without network access.
-  #
-  # Each named mutant must make those same fixtures fail, for the named
-  # reason, so the property is re-proved able to fail on every run instead of
-  # only when it was written. A mutation whose edit does not change the source
-  # fails its own derivation, so a vacuous mutant can never be reported as
-  # killed, and a mutant that merely failed to compile is rejected because the
-  # log must carry a real test failure.
+  # fixtures inside the patched amaru-bootstrap crate that drive production's own
+  # functions. Each named mutant must make those fixtures fail for a named
+  # reason, so the property is re-proved able to fail on every run. A mutation
+  # whose edit does not change the source fails its own derivation, and a
+  # mutant that merely failed to compile is rejected, so neither can be
+  # reported as killed.
   localFirstTest = { name, src }: amaruPkg.localFirstTest {
     inherit name src;
     doCheck = true;
@@ -280,32 +275,27 @@ let
       });
     })
     [
-      # The rejected candidate's surviving DIFFERENT-SNAPSHOT-SET class: the
-      # selector still runs, but over a collection that is not the one
-      # discovered on disk.
-      {
-        name = "different-snapshot-set";
-        sed = ''s@select_bootstrap_snapshots(local, Some(target_epoch))@select_bootstrap_snapshots(\&[], Some(target_epoch))@'';
-        test = "exact_local_window_skips_the_remote_seam";
-        reason = "an exact local window must not reach the remote listing seam";
-      }
-      # Same class, but the substituted collection is complete, so only
-      # member identity — not mere success — can tell the two apart.
-      {
-        name = "foreign-snapshot-set";
-        sed = ''s@match select_bootstrap_snapshots(local, Some(target_epoch)) {@let foreign: Vec<Snapshot> = local.iter().map(|s| Snapshot { epoch: s.epoch, point: s.point.clone(), key: format!("foreign/{}", s.key) }).collect();\n    match select_bootstrap_snapshots(\&foreign, Some(target_epoch)) {@'';
-        test = "exact_local_window_skips_the_remote_seam";
+      # DIFFERENT-SNAPSHOT-SET, carried: the selector runs, but not over the disk collection.
+      { name = "different-snapshot-set"; test = "exact_local_window_skips_the_remote_index";
+        reason = "an exact local window must not reach the remote index";
+        sed = ''s@select_bootstrap_snapshots(local, Some(target_epoch))@select_bootstrap_snapshots(\&[], Some(target_epoch))@''; }
+      # Same class, complete substitute: only member identity tells the two apart.
+      { name = "foreign-snapshot-set"; test = "exact_local_window_skips_the_remote_index";
         reason = "local success must be supplied from the discovered local collection itself";
-      }
-      # The rejected candidate's surviving SAME-LINE-SECOND-EARLY-RETURN
-      # class: a second pre-remote success exit, sharing one physical line so
-      # no line-counting oracle can see it.
-      {
-        name = "same-line-second-early-return";
-        sed = ''s@    for (point, key) in list_remote().await? {@    if snapshots.is_empty() { return Ok((snapshots_dir, snapshots)); }\n    for (point, key) in list_remote().await? {@'';
-        test = "insufficient_local_collections_invoke_the_remote_seam";
-        reason = "empty: must fall back to the remote listing seam";
-      }
+        sed = ''s@match select_bootstrap_snapshots(local, Some(target_epoch)) {@let foreign: Vec<Snapshot> = local.iter().map(|s| Snapshot { epoch: s.epoch, point: s.point.clone(), key: format!("foreign/{}", s.key) }).collect();\n    match select_bootstrap_snapshots(\&foreign, Some(target_epoch)) {@''; }
+      # SAME-LINE-SECOND-EARLY-RETURN, carried, in the frozen shape: close the guarded
+      # branch and open a second success exit on that same physical line.
+      { name = "same-line-second-early-return"; test = "insufficient_local_collections_consult_the_remote_index";
+        reason = "wrong target: must consult the remote index";
+        sed = ''s@        return download_selected(selected, snapshots_dir, s3).await;@        return download_selected(selected, snapshots_dir, s3).await; } if snapshots.len() >= 3 { return download_selected([snapshots[0].clone(), snapshots[1].clone(), snapshots[2].clone()], snapshots_dir, s3).await;@''; }
+      # The production call binding stops asking for the exact local window.
+      { name = "production-owner-disconnect"; test = "production_owner_uses_the_exact_local_window";
+        reason = "production must satisfy an exact local window without the remote index";
+        sed = ''s@snapshots_dir, target_epoch, || {@snapshots_dir, None, || {@''; }
+      # The production download seam is removed entirely.
+      { name = "production-download-disconnect"; test = "remotely_listed_snapshots_reach_the_download_seam";
+        reason = "a remotely listed snapshot must reach the download seam";
+        sed = ''/download_snapshots(.*&snapshots_dir, s3)/d''; }
     ];
 in
 {

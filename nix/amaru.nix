@@ -88,7 +88,7 @@ let
     patches = [ amaruBootstrapPatch ];
   };
   expectedAmaruPatchBase = "ba992f651d3b5e2b49f12d461b86ab8f7a55f994";
-  amaruPatchSha256 = "bafe88256886851142f6a11f71bed6dfe6279c09a71f88c6c3ae6bbac0bc0998";
+  amaruPatchSha256 = "bc7292573bb17d173cf2686786b3a1ce3e4d7016cb8c005b3c7dc512c88ae8fc";
   computedAmaruPatchSha256 = builtins.hashFile "sha256" amaruBootstrapPatch;
   amaruSourceIdentity = "${amaruRev}:${computedAmaruPatchSha256}";
   unpatchedBootstrapCli = builtins.readFile
@@ -285,12 +285,9 @@ amaruBin.overrideAttrs (old: {
   passthru = old.passthru // {
     inherit patchedSource;
 
-    # Issue 95: run the carried patch's own behavioural fixtures for the
-    # local-first bootstrap decision against `src`, with the same toolchain,
-    # dependency artifacts and source cleaning as the shipped binary. The
-    # hosted `amaru-local-first-semantic` check runs this over the patched
-    # source, where it must pass, and over each deliberately mutated source,
-    # where it must fail.
+    # Issue 95: run the carried patch's own behavioural fixtures against `src`,
+    # with the toolchain, dependency artifacts and source cleaning of the
+    # shipped binary. Hosted `amaru-local-first-semantic` drives both sides.
     localFirstTest = args: craneLib.cargoTest (craneArgs // {
       cargoArtifacts = amaruBin.cargoArtifacts;
       cargoExtraArgs = "";
