@@ -88,7 +88,7 @@ let
     patches = [ amaruBootstrapPatch ];
   };
   expectedAmaruPatchBase = "ba992f651d3b5e2b49f12d461b86ab8f7a55f994";
-  amaruPatchSha256 = "1329ec83c624aa0e90301d5d7973c70c498daa57661792d811b1d57a57fc3fa2";
+  amaruPatchSha256 = "bafe88256886851142f6a11f71bed6dfe6279c09a71f88c6c3ae6bbac0bc0998";
   computedAmaruPatchSha256 = builtins.hashFile "sha256" amaruBootstrapPatch;
   amaruSourceIdentity = "${amaruRev}:${computedAmaruPatchSha256}";
   unpatchedBootstrapCli = builtins.readFile

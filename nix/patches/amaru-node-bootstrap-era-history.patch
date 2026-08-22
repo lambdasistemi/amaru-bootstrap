@@ -69,7 +69,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
                          prefix.to_string(),
                          format!("{network}/{prefix}{}", Snapshot::ARCHIVE_SUFFIX),
                      )?;
-@@ -161,12 +148,82 @@ async fn bootstrap_snapshots(
+@@ -161,12 +148,110 @@ async fn bootstrap_snapshots(
          Err(err) => return Err(err.into()),
      }
 
@@ -98,6 +98,34 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +    Ok(s3_snapshots.into_iter().map(|snap| (snap.point.to_string(), snap.key.to_string())).collect())
 +}
 +
++/// Outcome of the local-first decision.
++///
++/// `UseLocal` is the only route that may skip the remote listing seam, and it carries snapshots
++/// taken from the discovered local collection itself.
++#[derive(Debug)]
++enum LocalFirst {
++    UseLocal(Vec<Snapshot>),
++    ListRemote,
++}
++
++/// Decide whether the already-discovered `local` collection alone satisfies `target_epoch`.
++///
++/// Authorising and supplying are one act: the snapshots returned are exactly the members of
++/// `local` that `select_bootstrap_snapshots` picked for the requested window, so no other
++/// collection can authorise a local success and none can be substituted for the result. Without
++/// an explicit target the latest epoch is only knowable from the remote index, so the decision
++/// defers rather than guessing from whatever happens to be on disk.
++fn decide_local_first(local: &[Snapshot], target_epoch: Option<Epoch>) -> LocalFirst {
++    let Some(target_epoch) = target_epoch else {
++        return LocalFirst::ListRemote;
++    };
++
++    match select_bootstrap_snapshots(local, Some(target_epoch)) {
++        Ok(selected) => LocalFirst::UseLocal(selected.into_iter().cloned().collect()),
++        Err(_) => LocalFirst::ListRemote,
++    }
++}
++
 +/// The bootstrap snapshot discovery decision owner.
 +///
 +/// `list_remote` is the remote listing seam, yielding `(point, key)` pairs. Production binds it
@@ -120,9 +148,9 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +{
 +    let mut snapshots = local_snapshots(network, era_history, &snapshots_dir)?;
 +
-+    // Not implemented yet: every request still reaches the remote seam before the archives
-+    // already staged on disk are considered, which is the defect issue 95 reports.
-+    let _ = target_epoch;
++    if let LocalFirst::UseLocal(selected) = decide_local_first(&snapshots, target_epoch) {
++        return Ok((snapshots_dir, selected));
++    }
 +
 +    for (point, key) in list_remote().await? {
 +        push_snapshot(&mut snapshots, era_history, point, key)?;
@@ -152,7 +180,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
  /// Parse the slot number from a `<slot>.<hash>` point string.
  fn parse_slot_from_point(point: &str) -> Result<u64, Box<dyn Error>> {
      point
-@@ -440,13 +497,14 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
+@@ -440,13 +525,14 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
  pub async fn bootstrap(
      network: NetworkName,
      global_parameters: &GlobalParameters,
@@ -168,7 +196,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
      let [first_snapshot, second_snapshot, third_snapshot] = select_bootstrap_snapshots(&snapshots, target_epoch)?;
 
      download_snapshots(&[first_snapshot, second_snapshot, third_snapshot], &snapshots_dir, &s3).await?;
-@@ -1027,4 +1085,167 @@ mod tests {
+@@ -1027,4 +1113,167 @@ mod tests {
          let err = select_bootstrap_snapshots(&snapshots, Some(Epoch::from(2_u64))).unwrap_err();
          assert!(dbg!(err.to_string()).contains("target epoch is too young"));
      }
