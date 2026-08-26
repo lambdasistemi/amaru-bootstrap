@@ -36,11 +36,11 @@
     "amaru": {
       "flake": false,
       "locked": {
-        "lastModified": 1785311760,
-        "narHash": "sha256-bE21xRzCm00yn9nMKDEiVcNAWvq9Gu9tmdrR1TyxZWA=",
+        "lastModified": 1787702861,
+        "narHash": "sha256-CdZZfw/iGWoejen0yx568DIZAPA2RHPdMNncygM6xJM=",
         "owner": "pragma-org",
         "repo": "amaru",
-        "rev": "437ff6c4fb506e1347eee9e619271a5ccb55a401",
+        "rev": "b693f815983d74f9b34e93641c82bc153baef4c7",
         "type": "github"
       },
       "original": {
@@ -104,11 +104,11 @@
     "cardano-configurations": {
       "flake": false,
       "locked": {
-        "lastModified": 1784171452,
-        "narHash": "sha256-9BcdBASOWZki0biggDMJ/R6UiZAkt7W+F6lJpBJxSrI=",
+        "lastModified": 1786503569,
+        "narHash": "sha256-fGDWpvb9QfMHX1ApeKC//1VnuK0CskJ4IGpGLAmcjIk=",
         "owner": "cardano-foundation",
         "repo": "cardano-configurations",
-        "rev": "4a9b69103507b124679fcb185eeabd4dc15e9c75",
+        "rev": "46364b2dcd0c24e4b8f09ab33f9b46e5bdaa13da",
         "type": "github"
       },
       "original": {
