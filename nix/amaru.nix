@@ -76,19 +76,30 @@ let
     '';
   };
 
-  # Issue 95: SHA-bound source patch. Identity is the exact upstream
-  # commit plus the declared patch digest. Retirement is executable:
-  # a pin that already loads era history at node bootstrap, or a pin
-  # that left this base, must remove the patch and rerun the unchanged
-  # hosted boundary checks.
+  # Issue 95: carried source patch. Identity is the exact upstream commit plus
+  # the declared patch digest. Retirement is executable: a pin that already
+  # loads era history at node bootstrap must remove the patch and rerun the
+  # unchanged hosted boundary checks.
+  #
+  # The patch base is recorded, not asserted. This repository exists to be
+  # bumped to Amaru main every night, so an equality assert between the pin and
+  # a frozen base is a standing guarantee that the next bump fails at
+  # evaluation, before anything about the candidate is learned -- and it fails
+  # identically whether or not the patch would still have applied. The honest
+  # boundary is `applyPatches`, which fails loudly and specifically when the
+  # carried hunks no longer match the pin. Drift is then a fact about the
+  # patch, discovered by trying it, not a prophecy made by a constant.
   amaruBootstrapPatch = ./patches/amaru-node-bootstrap-era-history.patch;
   patchedSource = pkgs.applyPatches {
     name = "amaru-era-history-bootstrap";
     src = amaru;
     patches = [ amaruBootstrapPatch ];
   };
-  expectedAmaruPatchBase = "ba992f651d3b5e2b49f12d461b86ab8f7a55f994";
-  amaruPatchSha256 = "bc7292573bb17d173cf2686786b3a1ce3e4d7016cb8c005b3c7dc512c88ae8fc";
+  # The upstream commit the carried hunks were last rebased onto. Informational:
+  # it tells a reader how far the pin has travelled from the last human review
+  # of this patch. It does not gate the build.
+  recordedAmaruPatchBase = "b92459781adc3d8e1b4ce1d9c74da7de39b7602f";
+  amaruPatchSha256 = "ab02bc3ab648aa2eb57570db0da83eaeda929b139c193014e49816400cef0c08";
   computedAmaruPatchSha256 = builtins.hashFile "sha256" amaruBootstrapPatch;
   amaruSourceIdentity = "${amaruRev}:${computedAmaruPatchSha256}";
   unpatchedBootstrapCli = builtins.readFile
@@ -103,13 +114,6 @@ assert builtins.elem peerSnapshots supportedPeerSnapshots;
 assert builtins.elem peerSnapshotFault supportedPeerSnapshotFaults;
 assert peerSnapshots == "pinned" || peerSnapshotFault == null;
 assert builtins.match "[0-9a-f]{40}" amaruRev != null;
-assert amaruRev == expectedAmaruPatchBase ||
-  throw ''
-    Amaru pin ${amaruRev} drifted from patch base ${expectedAmaruPatchBase}.
-    Rebase the carried patch, or remove the patch if upstream now supplies
-    an equivalent bootstrap era-history input, then rerun the unchanged
-    hosted boundary checks.
-  '';
 assert computedAmaruPatchSha256 == amaruPatchSha256 ||
   throw ''
     Declared amaruPatchSha256 ${amaruPatchSha256} does not match patch
@@ -273,7 +277,7 @@ let
 
   passthru = {
     inherit amaruSourceIdentity amaruPatchSha256;
-    amaruPatchBase = expectedAmaruPatchBase;
+    amaruPatchBase = recordedAmaruPatchBase;
   };
   } // pkgs.lib.optionalAttrs (cargoArtifacts != null) {
     inherit cargoArtifacts;

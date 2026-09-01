@@ -1,9 +1,10 @@
 diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstrap/src/bootstrap/mod.rs
+index dc67ee2c..29733eff 100644
 --- a/crates/amaru-bootstrap/src/bootstrap/mod.rs
 +++ b/crates/amaru-bootstrap/src/bootstrap/mod.rs
-@@ -16,13 +16,14 @@ use std::{
+@@ -15,13 +15,14 @@
+ use std::{
      collections::{BTreeMap, BTreeSet},
-     error::Error,
      fs,
 +    future::Future,
      io::{self, Read},
@@ -12,35 +13,28 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
  };
 
  use amaru_kernel::{
--    Epoch, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Peer, Point,
-+    Epoch, EraHistory, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Peer, Point,
-     RawBlock, Slot, StakeCredential, extract_block_header_cbor, from_cbor, num::CheckedSub,
-     utils::string::display_collection,
+-    Credential, Epoch, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Peer,
++    Credential, Epoch, EraHistory, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Peer,
+     Point, RawBlock, Slot, extract_block_header_cbor, from_cbor, num::CheckedSub, utils::string::display_collection,
  };
-@@ -115,31 +116,15 @@ fn snapshot_hash(snapshot: &Snapshot) -> Result<HeaderHash, Box<dyn Error>> {
+ use amaru_ledger::store::{EpochTransitionProgress, ReadStore, Store, TransactionalContext};
+@@ -113,28 +114,15 @@ fn snapshot_hash(snapshot: &Snapshot) -> anyhow::Result<HeaderHash> {
      }
  }
 
 -/// List S3 objects under `<network>/`, derive epoch from slot via era history, return `Vec<Snapshot>`.
--async fn bootstrap_snapshots(
-+/// Snapshots already staged under `<network>/`, discovered before any remote listing. A staged
-+/// archive is identified by its `<slot>.<hash>.tar.zst` filename alone, so the local collection
-+/// is built without reading, validating, or downloading anything.
-+fn local_snapshots(
-     network: NetworkName,
--    s3: &AnonymousS3Client,
--) -> Result<(PathBuf, Vec<Snapshot>), Box<dyn Error>> {
+-async fn bootstrap_snapshots(network: NetworkName, s3: &AnonymousS3Client) -> anyhow::Result<(PathBuf, Vec<Snapshot>)> {
 -    let snapshots_dir: PathBuf = default_snapshots_dir(network).into();
 -
 -    let era_history = network
 -        .as_era_history()
--        .ok_or_else(|| format!("no era history available for network {network}; S3 bootstrap is only supported for mainnet, preprod, and preview"))?;
+-        .ok_or_else(|| anyhow!("no era history available for network {network}; S3 bootstrap is only supported for mainnet, preprod, and preview"))?;
 -
 -    let s3_snapshots = s3.list_snapshots(network).await?;
 -
 -    let mut snapshots = Vec::with_capacity(s3_snapshots.len());
 -
--    let try_push = |snapshots: &mut Vec<Snapshot>, point: String, key: String| -> Result<(), Box<dyn Error>> {
+-    let try_push = |snapshots: &mut Vec<Snapshot>, point: String, key: String| -> anyhow::Result<()> {
 -        let slot = parse_slot_from_point(&point)?;
 -        let epoch = era_history.slot_to_epoch_unchecked_horizon(Slot::from(slot))?;
 -        snapshots.push(Snapshot { epoch, point, key });
@@ -50,14 +44,19 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 -    for s3_snap in s3_snapshots {
 -        try_push(&mut snapshots, s3_snap.point.to_string(), s3_snap.key.to_string())?;
 -    }
++/// Snapshots already staged under `<network>/`, discovered before any remote listing. A staged
++/// archive is identified by its `<slot>.<hash>.tar.zst` filename alone, so the local collection
++/// is built without reading, validating, or downloading anything.
++fn local_snapshots(
++    network: NetworkName,
 +    era_history: &EraHistory,
 +    snapshots_dir: &Path,
-+) -> Result<Vec<Snapshot>, Box<dyn Error>> {
++) -> anyhow::Result<Vec<Snapshot>> {
 +    let mut snapshots = Vec::new();
 
      match snapshots_dir.read_dir() {
          Ok(entries) => {
-@@ -147,8 +132,9 @@ async fn bootstrap_snapshots(
+@@ -142,8 +130,9 @@ async fn bootstrap_snapshots(network: NetworkName, s3: &AnonymousS3Client) -> an
                  let path = dir_entry?.path();
                  let filename = path.file_name().unwrap_or_default().to_str().unwrap_or_default();
                  if let Some(prefix) = filename.strip_suffix(Snapshot::ARCHIVE_SUFFIX) {
@@ -68,7 +67,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
                          prefix.to_string(),
                          format!("{network}/{prefix}{}", Snapshot::ARCHIVE_SUFFIX),
                      )?;
-@@ -161,10 +147,116 @@ async fn bootstrap_snapshots(
+@@ -156,10 +145,116 @@ async fn bootstrap_snapshots(network: NetworkName, s3: &AnonymousS3Client) -> an
          Err(err) => return Err(err.into()),
      }
 
@@ -81,7 +80,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +    era_history: &EraHistory,
 +    point: String,
 +    key: String,
-+) -> Result<(), Box<dyn Error>> {
++) -> anyhow::Result<()> {
 +    let slot = parse_slot_from_point(&point)?;
 +    let epoch = era_history.slot_to_epoch_unchecked_horizon(Slot::from(slot))?;
 +    snapshots.push(Snapshot { epoch, point, key });
@@ -92,7 +91,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +async fn list_remote_snapshots(
 +    network: NetworkName,
 +    s3: &AnonymousS3Client,
-+) -> Result<Vec<(String, String)>, Box<dyn Error>> {
++) -> anyhow::Result<Vec<(String, String)>> {
 +    let s3_snapshots = s3.list_snapshots(network).await?;
 +    Ok(s3_snapshots.into_iter().map(|snap| (snap.point.to_string(), snap.key.to_string())).collect())
 +}
@@ -137,10 +136,10 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +    target_epoch: Option<Epoch>,
 +    list_remote: F,
 +    s3: &AnonymousS3Client,
-+) -> Result<(PathBuf, [Snapshot; 3]), Box<dyn Error>>
++) -> anyhow::Result<(PathBuf, [Snapshot; 3])>
 +where
 +    F: FnOnce() -> Fut,
-+    Fut: Future<Output = Result<Vec<(String, String)>, Box<dyn Error>>>,
++    Fut: Future<Output = anyhow::Result<Vec<(String, String)>>>,
 +{
 +    let mut snapshots = local_snapshots(network, era_history, &snapshots_dir)?;
 +
@@ -165,7 +164,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +    selected: [Snapshot; 3],
 +    snapshots_dir: PathBuf,
 +    s3: &AnonymousS3Client,
-+) -> Result<(PathBuf, [Snapshot; 3]), Box<dyn Error>> {
++) -> anyhow::Result<(PathBuf, [Snapshot; 3])> {
 +    download_snapshots(&[&selected[0], &selected[1], &selected[2]], &snapshots_dir, s3).await?;
 +    Ok((snapshots_dir, selected))
 +}
@@ -176,7 +175,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +    era_history: &EraHistory,
 +    target_epoch: Option<Epoch>,
 +    s3: &AnonymousS3Client,
-+) -> Result<(PathBuf, [Snapshot; 3]), Box<dyn Error>> {
++) -> anyhow::Result<(PathBuf, [Snapshot; 3])> {
 +    let snapshots_dir: PathBuf = default_snapshots_dir(network).into();
 +
 +    bootstrap_snapshots_with(network, era_history, snapshots_dir, target_epoch, || {
@@ -186,7 +185,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
  }
 
  /// Parse the slot number from a `<slot>.<hash>` point string.
-@@ -440,16 +532,15 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
+@@ -435,16 +530,15 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
  pub async fn bootstrap(
      network: NetworkName,
      global_parameters: &GlobalParameters,
@@ -195,7 +194,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
      chain_dir: PathBuf,
      target_epoch: Option<Epoch>,
      s3_config: S3Config,
- ) -> Result<(), Box<dyn Error>> {
+ ) -> anyhow::Result<()> {
      let s3 = AnonymousS3Client::new(s3_config);
 -    let (snapshots_dir, snapshots) = bootstrap_snapshots(network, &s3).await?;
 -    let [first_snapshot, second_snapshot, third_snapshot] = select_bootstrap_snapshots(&snapshots, target_epoch)?;
@@ -206,7 +205,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 
      let first_snapshot_path = resolve_snapshot_path(&snapshots_dir, first_snapshot)
          .ok_or_else(|| BootstrapError::MissingSnapshot(snapshot_archive_path(&snapshots_dir, first_snapshot)))?;
-@@ -1027,4 +1118,189 @@ mod tests {
+@@ -1022,4 +1116,189 @@ mod tests {
          let err = select_bootstrap_snapshots(&snapshots, Some(Epoch::from(2_u64))).unwrap_err();
          assert!(dbg!(err.to_string()).contains("target epoch is too young"));
      }
@@ -217,7 +216,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +    /// doubled, and the real S3 client is pinned to an unroutable endpoint, so an unintended
 +    /// remote request fails rather than silently reaching the published CDN.
 +    mod local_first {
-+        use std::{cell::Cell, error::Error, fs, future::Future, path::Path, path::PathBuf, time::Duration};
++        use std::{cell::Cell, fs, future::Future, path::Path, path::PathBuf, time::Duration};
 +
 +        use amaru_kernel::{Epoch, EraBound, EraHistory, EraName, EraParams, EraSummary, NetworkName, Slot};
 +        use tempfile::{TempDir, tempdir};
@@ -284,9 +283,9 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +                Remote { calls: Cell::new(0), result: Err(REMOTE_ERROR) }
 +            }
 +
-+            async fn list(&self) -> Result<Vec<(String, String)>, Box<dyn Error>> {
++            async fn list(&self) -> anyhow::Result<Vec<(String, String)>> {
 +                self.calls.set(self.calls.get() + 1);
-+                self.result.clone().map_err(|err| -> Box<dyn Error> { err.into() })
++                self.result.clone().map_err(anyhow::Error::msg)
 +            }
 +        }
 +
@@ -295,7 +294,7 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +        }
 +
 +        /// Run the decision owner over `dir` with the remote index doubled.
-+        fn decide(dir: &Path, target_epoch: Option<u64>, remote: &Remote) -> Result<[Snapshot; 3], Box<dyn Error>> {
++        fn decide(dir: &Path, target_epoch: Option<u64>, remote: &Remote) -> anyhow::Result<[Snapshot; 3]> {
 +            let (era_history, s3) = (era_history(), offline_s3());
 +            block_on(bootstrap_snapshots_with(
 +                NETWORK,
@@ -397,9 +396,10 @@ diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstra
 +    }
  }
 diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
+index 109106f7..e1c2e1ae 100644
 --- a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
 +++ b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
-@@ -24,7 +24,7 @@ use amaru::{
+@@ -23,7 +23,7 @@ use amaru::{
      default_chain_dir, default_ledger_dir,
      lifecycle::{Runnable, RuntimeKind},
  };
@@ -408,7 +408,7 @@ diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src
  use amaru_observability::{info, warn};
  use clap::Parser;
 
-@@ -69,6 +69,20 @@ pub struct Args {
+@@ -68,6 +68,20 @@ pub struct Args {
      )]
      network: NetworkName,
 
@@ -429,21 +429,28 @@ diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src
      /// Override network's global parameters for custom testnets.
      #[command(flatten)]
      global_parameters: GlobalParameters,
-@@ -131,6 +145,13 @@ pub(crate) fn runnable(args: Args) -> Runnable {
- async fn run(args: Args) -> Result<(), Box<dyn Error>> {
+@@ -130,6 +144,20 @@ pub(crate) fn runnable(args: Args) -> Runnable {
+ async fn run(args: Args) -> anyhow::Result<()> {
      let network = args.network;
 
-+    let era_history = network.as_era_history().cloned().map(Ok).unwrap_or_else(|| {
-+        args.era_history
-+            .as_deref()
-+            .ok_or_else(|| "missing era history for custom network".into())
-+            .and_then(|path| EraHistory::load(path).map_err(|err| -> Box<dyn Error> { Box::new(err) }))
-+    })?;
++    // A built-in profile wins; a custom network has none, so the operator must supply one. Both
++    // arms fail loudly: an absent file and an unreadable one are distinct, named errors, never a
++    // silent fallback to another network's era history.
++    let era_history = match network.as_era_history() {
++        Some(era_history) => era_history.clone(),
++        None => {
++            let path = args.era_history.as_deref().ok_or_else(|| {
++                anyhow::anyhow!("no era history available for network {network}; pass --era-history <FILEPATH> for custom networks")
++            })?;
++            EraHistory::load(path)
++                .map_err(|err| anyhow::anyhow!("could not load era history from {}: {err}", path.display()))?
++        }
++    };
 +
      let global_parameters = network.as_global_parameters().cloned().unwrap_or(args.global_parameters);
 
      let ledger_dir = args.ledger_dir.unwrap_or_else(|| default_ledger_dir(network).into());
-@@ -171,6 +192,7 @@ async fn run(args: Args) -> Result<(), Box<dyn Error>> {
+@@ -170,6 +198,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
      bootstrap(
          network,
          &global_parameters,

@@ -6,7 +6,9 @@ Artifact ceiling: 90 lines.
 
 - A-EPIC-003 is the narrow governing amendment to constitution principles I
   and II; all other constitution constraints remain binding.
-- The upstream source is the bare SHA `ba992f651d3b5e2b49f12d461b86ab8f7a55f994`.
+- The upstream source is the bare SHA held in `flake.lock`; the carried hunks
+  were last rebased onto `b92459781adc3d8e1b4ce1d9c74da7de39b7602f`, which is
+  recorded in `nix/amaru.nix` and not asserted against the pin.
 - The patch is a Nix build input, not a fork, branch, vendored tree, or runtime
   source substitution.
 - The PR 93 fixture blobs are immutable; candidate-only paths form the explicit

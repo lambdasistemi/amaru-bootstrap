@@ -582,7 +582,7 @@ in
       grep -q 'amaruSourceIdentity' ${../nix/amaru.nix}
       grep -q 'applyPatches' ${../nix/amaru.nix}
       grep -q 'builtins.hashFile' ${../nix/amaru.nix}
-      grep -q 'expectedAmaruPatchBase' ${../nix/amaru.nix}
+      grep -q 'recordedAmaruPatchBase' ${../nix/amaru.nix}
       grep -F 'amaruPatchSha256 =' ${../nix/amaru.nix}
       grep -E -q 'remove.*patch|patch.*remove' ${../nix/amaru.nix}
       actual=$(sha256sum ${../nix/patches/amaru-node-bootstrap-era-history.patch} | cut -d' ' -f1)

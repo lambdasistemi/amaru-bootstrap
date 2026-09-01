@@ -19,10 +19,16 @@ builds a complete ledger/chain bundle and its live producer succeeds.
 
 ## Requirements
 
-- **R-095-01 — joined build identity:** The Amaru package MUST apply one
-  repository-versioned patch only to upstream
-  `ba992f651d3b5e2b49f12d461b86ab8f7a55f994`; the full upstream SHA and
-  declared SHA-256 of the exact patch bytes MUST jointly identify the build.
+- **R-095-01 — joined build identity:** The Amaru package MUST apply exactly one
+  repository-versioned patch to the locked upstream pin; the full upstream SHA
+  and declared SHA-256 of the exact patch bytes MUST jointly identify the build.
+  The pin is whatever `flake.lock` holds, because this repository is bumped to
+  Amaru main nightly. The last-rebased base MUST be recorded for readers but
+  MUST NOT gate evaluation: an equality assert between the pin and a frozen base
+  fails every bump identically, whether or not the carried hunks would still
+  have applied, and so reports drift it has not observed. Drift MUST instead be
+  established by applying the patch to the pin and failing loudly when a hunk
+  no longer matches.
 - **R-095-02 — bootstrap input:** The patch MUST expose custom-network era
   history on `node bootstrap` with the existing `node run` flag/environment
   names and thread the loaded value into full bootstrap snapshot epoch
