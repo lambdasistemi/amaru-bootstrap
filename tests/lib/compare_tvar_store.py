@@ -3,8 +3,9 @@
 
 Owned copy of commit-auditor-cbor instrument
 sha256 3933ad56e355360a108422efea9845abc8cb5248a5b9b29d0be6f06a72e735af
-against candidate 1f676da. --drop-last-store-key is the required
-negative control: the exact-set property must be able to fail.
+against candidate 1f676da. --drop-last-store-key and
+--inject-extra-store-key are the required negative controls: the
+exact-set property must be able to fail in both directions.
 """
 
 from __future__ import annotations
@@ -78,6 +79,11 @@ def cbor_uint(value: int) -> bytes:
     return b"\x1b" + value.to_bytes(8, "big")
 
 
+# A well-formed store key that cannot collide with a real TxIn key: the
+# TxIn hash is 32 0xff bytes and the output index is 0xffff.
+EXTRA_STORE_KEY = b"utxo" + b"\x82\x58\x20" + b"\xff" * 32 + cbor_uint(0xFFFF)
+
+
 def store_key(raw: bytes) -> bytes:
     if len(raw) != 34:
         raise DecodeError(f"expected 34-byte TxIn key, got {len(raw)}")
@@ -110,6 +116,7 @@ def main() -> int:
     parser.add_argument("tvar", type=Path)
     parser.add_argument("scan", type=Path)
     parser.add_argument("--drop-last-store-key", action="store_true")
+    parser.add_argument("--inject-extra-store-key", action="store_true")
     args = parser.parse_args()
 
     pairs = parse_tvar(args.tvar)
@@ -118,6 +125,10 @@ def main() -> int:
     actual = {key: value for key, value in rows.items() if key.startswith(b"utxo")}
     if args.drop_last_store_key and actual:
         del actual[sorted(actual)[-1]]
+    if args.inject_extra_store_key:
+        # Non-empty value, so the extra branch stays isolated from the
+        # empty_values mismatch class.
+        actual[EXTRA_STORE_KEY] = b"injected"
 
     missing = sorted(set(expected) - set(actual))
     extra = sorted(set(actual) - set(expected))
