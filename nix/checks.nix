@@ -274,6 +274,12 @@ let
         '';
       });
     })
+    # Every pattern is anchored to a contiguous substring that rustfmt keeps on
+    # one physical line (a call or statement under the crate's max_width), or
+    # captures the leading indentation instead of pinning it, or is a range
+    # that survives the call being reflowed. A pattern matched only by luck of
+    # the current formatting is how production-owner-disconnect went vacuous
+    # when the rebase reformatted its call site.
     [
       # DIFFERENT-SNAPSHOT-SET, carried: the selector runs, but not over the disk collection.
       { name = "different-snapshot-set"; test = "exact_local_window_skips_the_remote_index";
@@ -282,20 +288,27 @@ let
       # Same class, complete substitute: only member identity tells the two apart.
       { name = "foreign-snapshot-set"; test = "exact_local_window_skips_the_remote_index";
         reason = "local success must be supplied from the discovered local collection itself";
-        sed = ''s@match select_bootstrap_snapshots(local, Some(target_epoch)) {@let foreign: Vec<Snapshot> = local.iter().map(|s| Snapshot { epoch: s.epoch, point: s.point.clone(), key: format!("foreign/{}", s.key) }).collect();\n    match select_bootstrap_snapshots(\&foreign, Some(target_epoch)) {@''; }
+        sed = ''s@^\(\s*\)match select_bootstrap_snapshots(local, Some(target_epoch)) {@\1let foreign: Vec<Snapshot> = local.iter().map(|s| Snapshot { epoch: s.epoch, point: s.point.clone(), key: format!("foreign/{}", s.key) }).collect();\n\1match select_bootstrap_snapshots(\&foreign, Some(target_epoch)) {@''; }
       # SAME-LINE-SECOND-EARLY-RETURN, carried, in the frozen shape: close the guarded
       # branch and open a second success exit on that same physical line.
       { name = "same-line-second-early-return"; test = "insufficient_local_collections_consult_the_remote_index";
         reason = "wrong target: must consult the remote index";
-        sed = ''s@        return download_selected(selected, snapshots_dir, s3).await;@        return download_selected(selected, snapshots_dir, s3).await; } if snapshots.len() >= 3 { return download_selected([snapshots[0].clone(), snapshots[1].clone(), snapshots[2].clone()], snapshots_dir, s3).await;@''; }
-      # The production call binding stops asking for the exact local window.
+        sed = ''s@^\(\s*\)return download_selected(selected, snapshots_dir, s3)\.await;@\1return download_selected(selected, snapshots_dir, s3).await; }\1if snapshots.len() >= 3 {\1return download_selected([snapshots[0].clone(), snapshots[1].clone(), snapshots[2].clone()], snapshots_dir, s3).await;@''; }
+      # The production decision owner stops being told the exact local window:
+      # with None it defers even when the local collection satisfies the
+      # request, so production goes remote to ask for what it already had.
       { name = "production-owner-disconnect"; test = "production_owner_uses_the_exact_local_window";
         reason = "production must satisfy an exact local window without the remote index";
-        sed = ''s@snapshots_dir, target_epoch, || {@snapshots_dir, None, || {@''; }
-      # The production download seam is removed entirely.
+        sed = ''s@decide_local_first(\&snapshots, target_epoch)@decide_local_first(\&snapshots, None)@''; }
+      # The production download seam is removed entirely. GNU sed never tests
+      # a range's end address on the line where the range starts, so a lone
+      # range would run past the one-line call: the first expression deletes
+      # the call when rustfmt keeps it on one physical line, and the range
+      # only ever opens when the call was reflowed. The definition line
+      # starts with "async fn", so only the call site matches.
       { name = "production-download-disconnect"; test = "remotely_listed_snapshots_reach_the_download_seam";
         reason = "a remotely listed snapshot must reach the download seam";
-        sed = ''/download_snapshots(.*&snapshots_dir, s3)/d''; }
+        sed = ''/^\s*download_snapshots(.*\.await?;/d;/^\s*download_snapshots(/,/\.await/d''; }
     ];
 in
 {
@@ -823,6 +836,7 @@ in
         nativeBuildInputs = [
           pkgs.bash
           pkgs.coreutils
+          pkgs.gawk
           pkgs.gnugrep
           pkgs.gnutar
           pkgs.jq
