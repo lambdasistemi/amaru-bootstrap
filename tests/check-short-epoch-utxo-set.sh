@@ -51,11 +51,17 @@ if ((${#archives[@]} < 3)); then
 fi
 
 comparator_field() {
-  # First stdout line of the comparator is
+  # First stdout line of the comparator must be exactly
   #   declared=N parsed=N stored=N missing=N extra=N empty_values=N
-  # Print one field's value; exit 1 if the field is absent.
+  # in that order: one decimal value per field, no duplicates, no extra
+  # or trailing tokens. The whole line is validated against that grammar
+  # before anything is extracted, so a contradictory summary (say
+  # missing=1 ... missing=2, or an appended extra=1) can never satisfy a
+  # first-match scan. Print the requested field from the validated
+  # line; exit nonzero on any other shape or an absent field.
   awk -v key="$2" '
     NR == 1 {
+      if ($0 !~ /^declared=[0-9]+ parsed=[0-9]+ stored=[0-9]+ missing=[0-9]+ extra=[0-9]+ empty_values=[0-9]+$/) exit 1
       for (i = 1; i <= NF; i++) {
         split($i, kv, "=")
         if (kv[1] == key) { print kv[2]; found = 1; exit }
@@ -124,7 +130,73 @@ expect_mismatch_verdict() {
     cat "$out" >&2
     exit 1
   fi
+  # The asserted direction excludes the opposite key line: a drop
+  # verdict naming extra keys, or an inject verdict naming missing
+  # keys, is contradictory evidence.
+  if [[ $want_extra == 0 ]] && grep -q '^extra_keys=' "$out"; then
+    echo "utxo-set: NEGATIVE CONTROL INCONCLUSIVE - $mode named extra keys for $label but the asserted verdict has none" >&2
+    cat "$out" >&2
+    exit 1
+  fi
+  if [[ $want_missing == 0 ]] && grep -q '^missing_keys=' "$out"; then
+    echo "utxo-set: NEGATIVE CONTROL INCONCLUSIVE - $mode named missing keys for $label but the asserted verdict has none" >&2
+    cat "$out" >&2
+    exit 1
+  fi
 }
+
+# NEGATIVE CONTROLS on the verdict parser itself, run on every
+# invocation: if any malformed or contradictory summary is ever
+# accepted, the controls above cannot distinguish verdicts and the
+# whole check is void. Each malformed shape must be rejected and each
+# valid shape must still parse; loosening the grammar turns the check
+# red here, on every run, before any real comparison happens.
+parser_must_reject() {
+  printf '%s\n' "$1" >"$workdir/parser-control.log"
+  if comparator_field "$workdir/parser-control.log" "$2" >/dev/null 2>&1; then
+    echo "utxo-set: NEGATIVE CONTROL FAILED - verdict parser accepted malformed summary [$1]" >&2
+    exit 1
+  fi
+}
+parser_must_accept() {
+  printf '%s\n' "$1" >"$workdir/parser-control.log"
+  local got
+  got=$(comparator_field "$workdir/parser-control.log" "$2") || {
+    echo "utxo-set: NEGATIVE CONTROL FAILED - verdict parser rejected a valid summary [$1]" >&2
+    exit 1
+  }
+  if [[ $got != "$3" ]]; then
+    echo "utxo-set: NEGATIVE CONTROL FAILED - verdict parser extracted $2=$got, wanted $3, from [$1]" >&2
+    exit 1
+  fi
+}
+
+parser_must_reject "declared=10 parsed=10 stored=9 missing=1 extra=0 empty_values=0 extra=1" missing
+parser_must_reject "declared=10 parsed=10 stored=9 missing=1 missing=2 extra=0 empty_values=0" missing
+parser_must_reject "declared=10 parsed=10 stored=9 missing=1 extra=0 empty_values=0 trailing=1" missing
+parser_must_reject "declared=10 parsed=10 stored=9 missing=1 extra=0" missing
+parser_must_reject "declared=ten parsed=10 stored=9 missing=1 extra=0 empty_values=0" missing
+parser_must_reject "declared=10 parsed=10 stored=9 missing=1 extra=0 empty_values=0 " missing
+parser_must_reject "extra=0 declared=10 parsed=10 stored=9 missing=1 empty_values=0" missing
+parser_must_accept "declared=10 parsed=10 stored=9 missing=1 extra=0 empty_values=0" missing 1
+parser_must_accept "declared=10 parsed=10 stored=11 missing=0 extra=1 empty_values=0" extra 1
+
+# The opposite-direction key-line rejection must itself be able to
+# fail: a contradictory log is rejected, a consistent one accepted.
+printf 'declared=10 parsed=10 stored=9 missing=1 extra=0 empty_values=0\nmissing_keys=aa\nextra_keys=bb\n' \
+  >"$workdir/parser-control.log"
+if (expect_mismatch_verdict parserctl drop "$workdir/parser-control.log" 1 0 9 10 10 "missing_keys=aa") >/dev/null 2>&1; then
+  echo "utxo-set: NEGATIVE CONTROL FAILED - contradictory opposite-direction key line accepted" >&2
+  exit 1
+fi
+printf 'declared=10 parsed=10 stored=9 missing=1 extra=0 empty_values=0\nmissing_keys=aa\n' \
+  >"$workdir/parser-control.log"
+if ! (expect_mismatch_verdict parserctl drop "$workdir/parser-control.log" 1 0 9 10 10 "missing_keys=aa") >/dev/null 2>&1; then
+  echo "utxo-set: NEGATIVE CONTROL FAILED - consistent drop verdict rejected" >&2
+  exit 1
+fi
+
+echo "utxo-set: verdict parser controls green (malformed rejected, valid parsed, contradictory key lines rejected)"
 
 compare_store() {
   local label=$1
