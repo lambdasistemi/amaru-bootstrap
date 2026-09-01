@@ -314,6 +314,13 @@ amaruBin.overrideAttrs (old: {
     } // builtins.removeAttrs args [ "name" "src" ] // {
       pname = args.name;
       src = craneLib.cleanCargoSource args.src;
+      # The fixtures construct the real S3 client (pinned to an unroutable
+      # endpoint) at startup, and reqwest refuses to build a client without
+      # a CA store. A sandbox without host /etc/ssl/certs therefore panics
+      # before any assertion runs; supply the standard bundle so the
+      # derivation is environment-independent rather than
+      # sandbox-config-dependent.
+      env.SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
     });
   };
 })
