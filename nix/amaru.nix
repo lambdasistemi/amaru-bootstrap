@@ -85,10 +85,11 @@ let
   # bumped to Amaru main every night, so an equality assert between the pin and
   # a frozen base is a standing guarantee that the next bump fails at
   # evaluation, before anything about the candidate is learned -- and it fails
-  # identically whether or not the patch would still have applied. The honest
-  # boundary is `applyPatches`, which fails loudly and specifically when the
-  # carried hunks no longer match the pin. Drift is then a fact about the
-  # patch, discovered by trying it, not a prophecy made by a constant.
+  # identically whether or not the patch would still have applied.
+  # `applyPatches` catches textual hunk drift: it fails when a carried hunk no
+  # longer matches the pin. It does not guard behaviour outside those hunks.
+  # Custom-testnet era history is a separate assert plus the pin-semantics
+  # check; a moved pin can apply cleanly and still ignore --era-history.
   amaruBootstrapPatch = ./patches/amaru-node-bootstrap-era-history.patch;
   patchedSource = pkgs.applyPatches {
     name = "amaru-era-history-bootstrap";
@@ -106,9 +107,18 @@ let
     "${amaru}/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs";
   unpatchedBootstrapLib = builtins.readFile
     "${amaru}/crates/amaru-bootstrap/src/bootstrap/mod.rs";
+  unpatchedNetworkName = builtins.readFile
+    "${amaru}/crates/amaru-kernel/src/cardano/network_name.rs";
   upstreamHasBootstrapEraHistoryInput =
     pkgs.lib.hasInfix "EraHistory::load" unpatchedBootstrapCli
     && pkgs.lib.hasInfix "era_history: &EraHistory" unpatchedBootstrapLib;
+  # Unique to as_era_history: the next item is as_global_parameters.
+  # A pin that returns Some(PREPROD) for Testnet still applies the carried
+  # patch, and would ignore --era-history.
+  customTestnetHasNoBuiltInEraHistory =
+    pkgs.lib.hasInfix
+      "Some(&PREVIEW_ERA_HISTORY),\n            NetworkName::Testnet(_) => None,"
+      unpatchedNetworkName;
 in
 assert builtins.elem peerSnapshots supportedPeerSnapshots;
 assert builtins.elem peerSnapshotFault supportedPeerSnapshotFaults;
@@ -125,6 +135,12 @@ assert (!upstreamHasBootstrapEraHistoryInput) ||
     Remove the carried patch nix/patches/amaru-node-bootstrap-era-history.patch,
     prove the resulting source identity, and rerun the unchanged hosted
     boundary checks.
+  '';
+assert customTestnetHasNoBuiltInEraHistory ||
+  throw ''
+    Upstream Amaru ${amaruRev} no longer returns None from
+    NetworkName::as_era_history for Testnet. Custom --era-history would
+    be ignored. applyPatches cannot see this: it only matches hunk text.
   '';
 let
   craneArgs = {

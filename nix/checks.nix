@@ -559,6 +559,9 @@ in
     shellcheck -s bash -e SC1091 ${../scripts/amaru-relay-bootstrap.sh}
     shellcheck -s bash ${../scripts/resolve-peer-snapshots}
     shellcheck -s bash ${./peer-snapshots/anchor.sh}
+    shellcheck -s bash ${../tests/check-short-epoch-utxo-set.sh}
+    shellcheck -s bash ${../tests/check-short-epoch-tvar-decode.sh}
+    shellcheck -s bash ${../tests/check-pin-semantics.sh}
     mkdir -p $out
   '';
 
@@ -571,6 +574,7 @@ in
           pkgs.bash
           pkgs.coreutils
           pkgs.gnugrep
+          pkgs.gnupatch
           amaruPkg
         ];
       } ''
@@ -587,6 +591,11 @@ in
       grep -E -q 'remove.*patch|patch.*remove' ${../nix/amaru.nix}
       actual=$(sha256sum ${../nix/patches/amaru-node-bootstrap-era-history.patch} | cut -d' ' -f1)
       grep -F "amaruPatchSha256 = \"$actual\";" ${../nix/amaru.nix}
+      bash ${../tests/check-pin-semantics.sh} \
+        ${amaruPkg.patchedSource.src} \
+        ${amaruPkg.patchedSource} \
+        ${../nix/patches/amaru-node-bootstrap-era-history.patch} \
+        ${../tests/fixtures/network-era-history-semantic-mutant.patch}
       mkdir -p $out
     '';
 
@@ -815,6 +824,11 @@ in
           pkgs.bash
           pkgs.coreutils
           pkgs.gnugrep
+          pkgs.gnutar
+          pkgs.jq
+          pkgs.python3
+          pkgs.rocksdb.tools
+          pkgs.zstd
           amaruPkg
         ];
       } ''
@@ -825,6 +839,16 @@ in
 
       cp -rL ${shortEpochBootstrapBundle}/testnet_42 $TMPDIR/testnet_42
       chmod -R u+w $TMPDIR/testnet_42
+
+      tests=${../tests}
+      bash "$tests/check-short-epoch-utxo-set.sh" $TMPDIR/testnet_42
+
+      # Short-epoch synthesis: epochLength=120, k=8, activeSlotsCoeff=1.0
+      # => epoch_length = k*(1/f)*scale = 8*1*15.
+      export AMARU_GLOBAL_CONSENSUS_SECURITY_PARAM=8
+      export AMARU_GLOBAL_ACTIVE_SLOT_COEFF_INVERSE=1
+      export AMARU_GLOBAL_EPOCH_LENGTH_SCALE_FACTOR=15
+      bash "$tests/check-short-epoch-tvar-decode.sh" $TMPDIR/testnet_42
 
       log=$TMPDIR/amaru-run.log
       set +e

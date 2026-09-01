@@ -28,7 +28,12 @@ builds a complete ledger/chain bundle and its live producer succeeds.
   fails every bump identically, whether or not the carried hunks would still
   have applied, and so reports drift it has not observed. Drift MUST instead be
   established by applying the patch to the pin and failing loudly when a hunk
-  no longer matches.
+  no longer matches. The single patch also carries the definite-length
+  `tables/tvar` decoder fix. That remains one patch, so it complies with
+  “exactly one”, but the hunks are coupled: if upstream lands only the
+  decoder, that hunk blocks a pin bump while the era-history hunks are still
+  required. Do not split the patch until this requirement is amended, or
+  until the decoder hunk is retired because upstream absorbed it.
 - **R-095-02 — bootstrap input:** The patch MUST expose custom-network era
   history on `node bootstrap` with the existing `node run` flag/environment
   names and thread the loaded value into full bootstrap snapshot epoch

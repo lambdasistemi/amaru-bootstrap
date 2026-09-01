@@ -1,0 +1,11 @@
+diff --git a/crates/amaru-kernel/src/cardano/network_name.rs b/crates/amaru-kernel/src/cardano/network_name.rs
+--- a/crates/amaru-kernel/src/cardano/network_name.rs
++++ b/crates/amaru-kernel/src/cardano/network_name.rs
+@@ -99,7 +99,7 @@ impl NetworkName {
+             NetworkName::Mainnet => Some(&MAINNET_ERA_HISTORY),
+             NetworkName::Preprod => Some(&PREPROD_ERA_HISTORY),
+             NetworkName::Preview => Some(&PREVIEW_ERA_HISTORY),
+-            NetworkName::Testnet(_) => None,
++            NetworkName::Testnet(_) => Some(&PREPROD_ERA_HISTORY),
+         }
+     }
