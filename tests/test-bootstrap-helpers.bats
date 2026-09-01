@@ -36,7 +36,10 @@ teardown() {
 }
 
 @test "cleanliness: zero on clean log" {
-  printf 'build_ledger done\nchain sync ok\n' >"$TMP_DIR/log"
+  # Fixture text tracks the startup trace the pinned Amaru actually emits
+  # (build.ledger_opened; build_ledger was renamed away upstream), so the
+  # cleanliness matcher is proven not to treat the real marker as fatal.
+  printf 'build.ledger_opened\nchain sync ok\n' >"$TMP_DIR/log"
   run assert_amaru_log_clean "$TMP_DIR/log"
   [ "$status" -eq 0 ]
 }
