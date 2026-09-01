@@ -99,7 +99,7 @@ let
   # it tells a reader how far the pin has travelled from the last human review
   # of this patch. It does not gate the build.
   recordedAmaruPatchBase = "b92459781adc3d8e1b4ce1d9c74da7de39b7602f";
-  amaruPatchSha256 = "ab02bc3ab648aa2eb57570db0da83eaeda929b139c193014e49816400cef0c08";
+  amaruPatchSha256 = "b39e24077d7da988060d38130da65a3f7800f7c99181ce57d6b4f4d837952434";
   computedAmaruPatchSha256 = builtins.hashFile "sha256" amaruBootstrapPatch;
   amaruSourceIdentity = "${amaruRev}:${computedAmaruPatchSha256}";
   unpatchedBootstrapCli = builtins.readFile

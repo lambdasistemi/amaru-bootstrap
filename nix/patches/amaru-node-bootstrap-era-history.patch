@@ -1,8 +1,8 @@
 diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstrap/src/bootstrap/mod.rs
-index dc67ee2c..29733eff 100644
+index dc67ee2c..8980fe57 100644
 --- a/crates/amaru-bootstrap/src/bootstrap/mod.rs
 +++ b/crates/amaru-bootstrap/src/bootstrap/mod.rs
-@@ -15,13 +15,14 @@
+@@ -15,20 +15,22 @@
  use std::{
      collections::{BTreeMap, BTreeSet},
      fs,
@@ -14,11 +14,30 @@ index dc67ee2c..29733eff 100644
 
  use amaru_kernel::{
 -    Credential, Epoch, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Peer,
-+    Credential, Epoch, EraHistory, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Peer,
-     Point, RawBlock, Slot, extract_block_header_cbor, from_cbor, num::CheckedSub, utils::string::display_collection,
+-    Point, RawBlock, Slot, extract_block_header_cbor, from_cbor, num::CheckedSub, utils::string::display_collection,
++    extract_block_header_cbor, from_cbor, num::CheckedSub, utils::string::display_collection, Credential, Epoch,
++    EraHistory, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Peer, Point,
++    RawBlock, Slot,
  };
  use amaru_ledger::store::{EpochTransitionProgress, ReadStore, Store, TransactionalContext};
-@@ -113,28 +114,15 @@ fn snapshot_hash(snapshot: &Snapshot) -> anyhow::Result<HeaderHash> {
+ use amaru_observability::{error, info};
+ use amaru_ouroboros::{BaseReadChainStore, ChainStore, Nonces, OpcertSequenceNumbers, WriteChainStore};
+ use amaru_progress_bar::{ProgressBar, TerminalProgressBar};
+-use amaru_stores::rocksdb::{ReadOnlyRocksDB, RocksDB, RocksDbConfig, consensus::RocksDBStore};
++use amaru_stores::rocksdb::{consensus::RocksDBStore, ReadOnlyRocksDB, RocksDB, RocksDbConfig};
+ use anyhow::anyhow;
+ use pallas_network::{facades::PeerClient, miniprotocols::chainsync::NextResponse};
+ use serde::{Deserialize, Serialize};
+@@ -37,7 +39,7 @@ use tokio::{fs as async_fs, time::timeout};
+ use zstd::Decoder as ZstdDecoder;
+
+ mod chain_sync_client;
+-use chain_sync_client::{ChainSyncClient, from_pallas_point, from_pallas_tip};
++use chain_sync_client::{from_pallas_point, from_pallas_tip, ChainSyncClient};
+
+ use crate::{
+     aws::{AnonymousS3Client, S3Config},
+@@ -113,28 +115,15 @@ fn snapshot_hash(snapshot: &Snapshot) -> anyhow::Result<HeaderHash> {
      }
  }
 
@@ -56,7 +75,7 @@ index dc67ee2c..29733eff 100644
 
      match snapshots_dir.read_dir() {
          Ok(entries) => {
-@@ -142,8 +130,9 @@ async fn bootstrap_snapshots(network: NetworkName, s3: &AnonymousS3Client) -> an
+@@ -142,8 +131,9 @@ async fn bootstrap_snapshots(network: NetworkName, s3: &AnonymousS3Client) -> an
                  let path = dir_entry?.path();
                  let filename = path.file_name().unwrap_or_default().to_str().unwrap_or_default();
                  if let Some(prefix) = filename.strip_suffix(Snapshot::ARCHIVE_SUFFIX) {
@@ -67,7 +86,7 @@ index dc67ee2c..29733eff 100644
                          prefix.to_string(),
                          format!("{network}/{prefix}{}", Snapshot::ARCHIVE_SUFFIX),
                      )?;
-@@ -156,10 +145,116 @@ async fn bootstrap_snapshots(network: NetworkName, s3: &AnonymousS3Client) -> an
+@@ -156,10 +146,118 @@ async fn bootstrap_snapshots(network: NetworkName, s3: &AnonymousS3Client) -> an
          Err(err) => return Err(err.into()),
      }
 
@@ -88,10 +107,7 @@ index dc67ee2c..29733eff 100644
 +}
 +
 +/// The remote listing seam as production binds it: S3 objects under `<network>/`.
-+async fn list_remote_snapshots(
-+    network: NetworkName,
-+    s3: &AnonymousS3Client,
-+) -> anyhow::Result<Vec<(String, String)>> {
++async fn list_remote_snapshots(network: NetworkName, s3: &AnonymousS3Client) -> anyhow::Result<Vec<(String, String)>> {
 +    let s3_snapshots = s3.list_snapshots(network).await?;
 +    Ok(s3_snapshots.into_iter().map(|snap| (snap.point.to_string(), snap.key.to_string())).collect())
 +}
@@ -178,14 +194,19 @@ index dc67ee2c..29733eff 100644
 +) -> anyhow::Result<(PathBuf, [Snapshot; 3])> {
 +    let snapshots_dir: PathBuf = default_snapshots_dir(network).into();
 +
-+    bootstrap_snapshots_with(network, era_history, snapshots_dir, target_epoch, || {
-+        list_remote_snapshots(network, s3)
-+    }, s3)
++    bootstrap_snapshots_with(
++        network,
++        era_history,
++        snapshots_dir,
++        target_epoch,
++        || list_remote_snapshots(network, s3),
++        s3,
++    )
 +    .await
  }
 
  /// Parse the slot number from a `<slot>.<hash>` point string.
-@@ -435,16 +530,15 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
+@@ -435,16 +533,15 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
  pub async fn bootstrap(
      network: NetworkName,
      global_parameters: &GlobalParameters,
@@ -205,7 +226,29 @@ index dc67ee2c..29733eff 100644
 
      let first_snapshot_path = resolve_snapshot_path(&snapshots_dir, first_snapshot)
          .ok_or_else(|| BootstrapError::MissingSnapshot(snapshot_archive_path(&snapshots_dir, first_snapshot)))?;
-@@ -1022,4 +1116,189 @@ mod tests {
+@@ -807,7 +904,8 @@ fn import_node_snapshot_archive_data(
+                 &point,
+                 &era_history,
+                 network,
+-            )?;
++            )
++            .map_err(|err| anyhow!("import {SNAPSHOT_UTXO_FILE_NAME}: {err}"))?;
+
+             return Ok((epoch, point, chain_state));
+         }
+@@ -830,9 +928,9 @@ mod tests {
+     use tempfile::tempdir;
+
+     use super::{
+-        Snapshot, read_snapshot_archive_entry, select_bootstrap_snapshots, should_download_snapshot,
++        read_snapshot_archive_entry, select_bootstrap_snapshots, should_download_snapshot,
+         snapshot_archive_entry_matches, sort_snapshots_by_slot, validate_publishable_snapshot_archive,
+-        validate_snapshot_archive,
++        validate_snapshot_archive, Snapshot,
+     };
+     use crate::cardano_node::ParsedStateSnapshot;
+
+@@ -1022,4 +1120,188 @@ mod tests {
          let err = select_bootstrap_snapshots(&snapshots, Some(Epoch::from(2_u64))).unwrap_err();
          assert!(dbg!(err.to_string()).contains("target epoch is too young"));
      }
@@ -219,11 +262,10 @@ index dc67ee2c..29733eff 100644
 +        use std::{cell::Cell, fs, future::Future, path::Path, path::PathBuf, time::Duration};
 +
 +        use amaru_kernel::{Epoch, EraBound, EraHistory, EraName, EraParams, EraSummary, NetworkName, Slot};
-+        use tempfile::{TempDir, tempdir};
++        use tempfile::{tempdir, TempDir};
 +
 +        use super::super::{
-+            AnonymousS3Client, S3Config, Snapshot, bootstrap_snapshots, bootstrap_snapshots_with,
-+            default_snapshots_dir,
++            bootstrap_snapshots, bootstrap_snapshots_with, default_snapshots_dir, AnonymousS3Client, S3Config, Snapshot,
 +        };
 +        use super::write_snapshot_archive;
 +
@@ -365,8 +407,8 @@ index dc67ee2c..29733eff 100644
 +            let dir = staged(&[10, 11]);
 +            let remote = Remote::listing(&[10, 11, 12]);
 +
-+            let err = decide(dir.path(), None, &remote)
-+                .expect_err("a remotely listed snapshot must reach the download seam");
++            let err =
++                decide(dir.path(), None, &remote).expect_err("a remotely listed snapshot must reach the download seam");
 +
 +            assert_eq!(remote.calls.get(), 1);
 +            assert!(err.to_string().contains(&key(12)), "download seam was not reached for {}", key(12));
@@ -395,6 +437,86 @@ index dc67ee2c..29733eff 100644
 +        }
 +    }
  }
+diff --git a/crates/amaru-bootstrap/src/cardano_node/tvar.rs b/crates/amaru-bootstrap/src/cardano_node/tvar.rs
+index dc826c2e..1a587c56 100644
+--- a/crates/amaru-bootstrap/src/cardano_node/tvar.rs
++++ b/crates/amaru-bootstrap/src/cardano_node/tvar.rs
+@@ -26,8 +26,8 @@ use std::{
+ };
+
+ use amaru_kernel::{
+-    Credential, Epoch, EraHistory, GlobalParameters, Hash, HeaderHash, MemoizedTransactionOutput, NetworkName, Point,
+-    TransactionInput, cbor, cbor::lazy::LazyDecoder,
++    cbor, cbor::lazy::LazyDecoder, Credential, Epoch, EraHistory, GlobalParameters, Hash, HeaderHash,
++    MemoizedTransactionOutput, NetworkName, Point, TransactionInput,
+ };
+ use amaru_ledger::{
+     bootstrap::import_initial_snapshot_with_decoder,
+@@ -160,15 +160,26 @@ where
+             let mut chunk_size = 0;
+
+             loop {
+-                if d.datatype()? == cbor::data::Type::Break {
+-                    d.skip()?;
++                // Definite-length maps have no Break. Check remaining
++                // entries before datatype(), or the byte after the last
++                // pair is end_of_input and LazyDecoder treats it as fatal.
++                if size.is_some_and(|len| actual_size + chunk_size >= len) {
+                     done = true;
+                     break;
+                 }
+
+-                if size.is_some_and(|len| actual_size + chunk_size >= len) {
+-                    done = true;
+-                    break;
++                match d.datatype() {
++                    Ok(cbor::data::Type::Break) => {
++                        d.skip()?;
++                        done = true;
++                        break;
++                    }
++                    Err(err) if err.is_end_of_input() && !utxo.is_empty() => break,
++                    Err(err) if err.is_end_of_input() => {
++                        Err(cbor::decode::Error::end_of_input())?;
++                    }
++                    Err(err) => return Err(err.into()),
++                    Ok(_) => {}
+                 }
+
+                 let mut probe = d.probe();
+@@ -176,17 +187,21 @@ where
+                     cbor::decode_bytes(&mut probe).map(|output| (input.into_owned(), output.into_owned()))
+                 });
+
+-                if let Ok((input, output)) = io {
+-                    chunk_size += 1;
+-                    d.skip()?;
+-                    d.skip()?;
+-
+-                    let (input, output) = decode_tvar_entry(&input, &output).map_err(cbor::decode::Error::message)?;
+-                    utxo.insert(input, output);
+-                } else if utxo.is_empty() {
+-                    Err(cbor::decode::Error::end_of_input())?;
+-                } else {
+-                    break;
++                match io {
++                    Ok((input, output)) => {
++                        chunk_size += 1;
++                        d.skip()?;
++                        d.skip()?;
++
++                        let (input, output) =
++                            decode_tvar_entry(&input, &output).map_err(cbor::decode::Error::message)?;
++                        utxo.insert(input, output);
++                    }
++                    Err(err) if err.is_end_of_input() && utxo.is_empty() => {
++                        Err(cbor::decode::Error::end_of_input())?;
++                    }
++                    Err(err) if err.is_end_of_input() => break,
++                    Err(err) => return Err(err.into()),
+                 }
+             }
+
 diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
 index 109106f7..e1c2e1ae 100644
 --- a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs

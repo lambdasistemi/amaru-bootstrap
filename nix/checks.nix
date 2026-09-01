@@ -747,8 +747,9 @@ in
   # Prove that the produced bootstrap bundle is not only importable but
   # usable as Amaru startup state. The command is intentionally run
   # without a live upstream peer; success means Amaru opened the ledger
-  # and chain stores, logged build_ledger, and stayed alive until the
-  # timeout instead of failing during bootstrap.
+  # and chain stores, logged build.ledger_opened (historically
+  # build_ledger), and stayed alive until the timeout instead of failing
+  # during bootstrap.
   amaru-run-bootstrap =
     pkgs.runCommand "amaru-run-bootstrap"
       {
@@ -793,7 +794,7 @@ in
         echo "amaru opened the ledger but could not align the chain store" >&2
         exit 1
       fi
-      if ! grep -q 'build_ledger' "$log"; then
+      if ! grep -F -e 'build_ledger' -e 'build.ledger_opened' "$log"; then
         echo "amaru did not reach ledger startup from the bootstrap bundle" >&2
         exit 1
       fi
@@ -847,7 +848,7 @@ in
         echo "amaru failed to create the short-epoch ledger" >&2
         exit 1
       fi
-      if ! grep -q 'build_ledger' "$log"; then
+      if ! grep -F -e 'build_ledger' -e 'build.ledger_opened' "$log"; then
         echo "amaru did not reach ledger startup from the short-epoch bundle" >&2
         exit 1
       fi
