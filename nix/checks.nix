@@ -17,6 +17,9 @@
 let
   cliMockTestTree = pkgs.linkFarm "cli-mock-test-tree" [
     { name = "tests"; path = ../tests; }
+    # Hosted cli-mock-honesty must see carried patch artifacts so the
+    # range-whitespace property executes (I-095-AUDIT).
+    { name = "nix/patches"; path = ../nix/patches; }
   ];
 
   producerRuntimePath = pkgs.lib.makeBinPath [
@@ -234,8 +237,105 @@ let
           "$out" \
           testnet_42
     '';
+
+  # Issue 95: the local-first bootstrap decision, proved by behavioural Rust
+  # fixtures inside the patched amaru-bootstrap crate that drive production's own
+  # functions. Each named mutant must make those fixtures fail for a named
+  # reason, so the property is re-proved able to fail on every run. A mutation
+  # whose edit does not change the source fails its own derivation, and a
+  # mutant that merely failed to compile is rejected, so neither can be
+  # reported as killed.
+  localFirstTest = { name, src }: amaruPkg.localFirstTest {
+    inherit name src;
+    doCheck = true;
+    cargoTestExtraArgs = "--package amaru-bootstrap --lib bootstrap::tests::local_first";
+  };
+
+  localFirstFixtures = localFirstTest {
+    name = "amaru-local-first-fixtures";
+    src = amaruPkg.patchedSource;
+  };
+
+  localFirstMutants = map
+    (mutant: mutant // {
+      failure = pkgs.testers.testBuildFailure (localFirstTest {
+        name = "amaru-local-first-${mutant.name}";
+        src = pkgs.runCommand "amaru-local-first-${mutant.name}-src" { } ''
+          cp -r ${amaruPkg.patchedSource} $out
+          chmod -R u+w $out
+          target=$out/crates/amaru-bootstrap/src/bootstrap/mod.rs
+          before=$(sha256sum "$target" | cut -d' ' -f1)
+          sed -i ${pkgs.lib.escapeShellArg mutant.sed} "$target"
+          after=$(sha256sum "$target" | cut -d' ' -f1)
+          if [ "$before" = "$after" ]; then
+            echo "mutation ${mutant.name} did not apply; it would test nothing" >&2
+            exit 1
+          fi
+        '';
+      });
+    })
+    # Every pattern is anchored to a contiguous substring that rustfmt keeps on
+    # one physical line (a call or statement under the crate's max_width), or
+    # captures the leading indentation instead of pinning it, or is a range
+    # that survives the call being reflowed. A pattern matched only by luck of
+    # the current formatting is how production-owner-disconnect went vacuous
+    # when the rebase reformatted its call site.
+    [
+      # DIFFERENT-SNAPSHOT-SET, carried: the selector runs, but not over the disk collection.
+      { name = "different-snapshot-set"; test = "exact_local_window_skips_the_remote_index";
+        reason = "an exact local window must not reach the remote index";
+        sed = ''s@select_bootstrap_snapshots(local, Some(target_epoch))@select_bootstrap_snapshots(\&[], Some(target_epoch))@''; }
+      # Same class, complete substitute: only member identity tells the two apart.
+      { name = "foreign-snapshot-set"; test = "exact_local_window_skips_the_remote_index";
+        reason = "local success must be supplied from the discovered local collection itself";
+        sed = ''s@^\(\s*\)match select_bootstrap_snapshots(local, Some(target_epoch)) {@\1let foreign: Vec<Snapshot> = local.iter().map(|s| Snapshot { epoch: s.epoch, point: s.point.clone(), key: format!("foreign/{}", s.key) }).collect();\n\1match select_bootstrap_snapshots(\&foreign, Some(target_epoch)) {@''; }
+      # SAME-LINE-SECOND-EARLY-RETURN, carried, in the frozen shape: close the guarded
+      # branch and open a second success exit on that same physical line.
+      { name = "same-line-second-early-return"; test = "insufficient_local_collections_consult_the_remote_index";
+        reason = "wrong target: must consult the remote index";
+        sed = ''s@^\(\s*\)return download_selected(selected, snapshots_dir, s3)\.await;@\1return download_selected(selected, snapshots_dir, s3).await; }\1if snapshots.len() >= 3 {\1return download_selected([snapshots[0].clone(), snapshots[1].clone(), snapshots[2].clone()], snapshots_dir, s3).await;@''; }
+      # The production decision owner stops being told the exact local window:
+      # with None it defers even when the local collection satisfies the
+      # request, so production goes remote to ask for what it already had.
+      { name = "production-owner-disconnect"; test = "production_owner_uses_the_exact_local_window";
+        reason = "production must satisfy an exact local window without the remote index";
+        sed = ''s@decide_local_first(\&snapshots, target_epoch)@decide_local_first(\&snapshots, None)@''; }
+      # The production download seam is removed entirely. GNU sed never tests
+      # a range's end address on the line where the range starts, so a lone
+      # range would run past the one-line call: the first expression deletes
+      # the call when rustfmt keeps it on one physical line, and the range
+      # only ever opens when the call was reflowed. The definition line
+      # starts with "async fn", so only the call site matches.
+      { name = "production-download-disconnect"; test = "remotely_listed_snapshots_reach_the_download_seam";
+        reason = "a remotely listed snapshot must reach the download seam";
+        sed = ''/^\s*download_snapshots(.*\.await?;/d;/^\s*download_snapshots(/,/\.await/d''; }
+    ];
 in
 {
+
+  amaru-local-first-semantic =
+    pkgs.runCommand "amaru-local-first-semantic"
+      { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
+      set -euo pipefail
+      echo "fixtures green on the patched source: ${localFirstFixtures}"
+      ${pkgs.lib.concatMapStrings (mutant: ''
+        log=${mutant.failure}/testBuildFailure.log
+        grep -q 'test result: FAILED' "$log" || {
+          echo "mutant ${mutant.name}: build failed without a test failure" >&2
+          exit 1
+        }
+        grep -q '${mutant.test} ... FAILED' "$log" || {
+          echo "mutant ${mutant.name}: expected ${mutant.test} to fail" >&2
+          exit 1
+        }
+        grep -qF ${pkgs.lib.escapeShellArg mutant.reason} "$log" || {
+          echo "mutant ${mutant.name}: killed for the wrong reason" >&2
+          exit 1
+        }
+        echo "mutant ${mutant.name}: killed by ${mutant.test}"
+      '') localFirstMutants}
+      mkdir -p $out
+    '';
   # I-088-CHECK: execute the packaged version surface. A package-only
   # alias would keep `nix flake check` green without observing identity.
   amaru = pkgs.runCommand "amaru-git-identity"
@@ -472,6 +572,9 @@ in
     shellcheck -s bash -e SC1091 ${../scripts/amaru-relay-bootstrap.sh}
     shellcheck -s bash ${../scripts/resolve-peer-snapshots}
     shellcheck -s bash ${./peer-snapshots/anchor.sh}
+    shellcheck -s bash ${../tests/check-short-epoch-utxo-set.sh}
+    shellcheck -s bash ${../tests/check-short-epoch-tvar-decode.sh}
+    shellcheck -s bash ${../tests/check-pin-semantics.sh}
     mkdir -p $out
   '';
 
@@ -484,6 +587,7 @@ in
           pkgs.bash
           pkgs.coreutils
           pkgs.gnugrep
+          pkgs.gnupatch
           amaruPkg
         ];
       } ''
@@ -492,6 +596,19 @@ in
       chmod -R u+w .
       patchShebangs tests
       bash tests/check-cli-mock-honesty.sh
+      grep -q 'amaruSourceIdentity' ${../nix/amaru.nix}
+      grep -q 'applyPatches' ${../nix/amaru.nix}
+      grep -q 'builtins.hashFile' ${../nix/amaru.nix}
+      grep -q 'recordedAmaruPatchBase' ${../nix/amaru.nix}
+      grep -F 'amaruPatchSha256 =' ${../nix/amaru.nix}
+      grep -E -q 'remove.*patch|patch.*remove' ${../nix/amaru.nix}
+      actual=$(sha256sum ${../nix/patches/amaru-node-bootstrap-era-history.patch} | cut -d' ' -f1)
+      grep -F "amaruPatchSha256 = \"$actual\";" ${../nix/amaru.nix}
+      bash ${../tests/check-pin-semantics.sh} \
+        ${amaruPkg.patchedSource.src} \
+        ${amaruPkg.patchedSource} \
+        ${../nix/patches/amaru-node-bootstrap-era-history.patch} \
+        ${../tests/fixtures/network-era-history-semantic-mutant.patch}
       mkdir -p $out
     '';
 
@@ -652,8 +769,9 @@ in
   # Prove that the produced bootstrap bundle is not only importable but
   # usable as Amaru startup state. The command is intentionally run
   # without a live upstream peer; success means Amaru opened the ledger
-  # and chain stores, logged build_ledger, and stayed alive until the
-  # timeout instead of failing during bootstrap.
+  # and chain stores, logged build.ledger_opened (historically
+  # build_ledger), and stayed alive until the timeout instead of failing
+  # during bootstrap.
   amaru-run-bootstrap =
     pkgs.runCommand "amaru-run-bootstrap"
       {
@@ -698,7 +816,7 @@ in
         echo "amaru opened the ledger but could not align the chain store" >&2
         exit 1
       fi
-      if ! grep -q 'build_ledger' "$log"; then
+      if ! grep -F -e 'build_ledger' -e 'build.ledger_opened' "$log"; then
         echo "amaru did not reach ledger startup from the bootstrap bundle" >&2
         exit 1
       fi
@@ -718,7 +836,13 @@ in
         nativeBuildInputs = [
           pkgs.bash
           pkgs.coreutils
+          pkgs.gawk
           pkgs.gnugrep
+          pkgs.gnutar
+          pkgs.jq
+          pkgs.python3
+          pkgs.rocksdb.tools
+          pkgs.zstd
           amaruPkg
         ];
       } ''
@@ -729,6 +853,16 @@ in
 
       cp -rL ${shortEpochBootstrapBundle}/testnet_42 $TMPDIR/testnet_42
       chmod -R u+w $TMPDIR/testnet_42
+
+      tests=${../tests}
+      bash "$tests/check-short-epoch-utxo-set.sh" $TMPDIR/testnet_42
+
+      # Short-epoch synthesis: epochLength=120, k=8, activeSlotsCoeff=1.0
+      # => epoch_length = k*(1/f)*scale = 8*1*15.
+      export AMARU_GLOBAL_CONSENSUS_SECURITY_PARAM=8
+      export AMARU_GLOBAL_ACTIVE_SLOT_COEFF_INVERSE=1
+      export AMARU_GLOBAL_EPOCH_LENGTH_SCALE_FACTOR=15
+      bash "$tests/check-short-epoch-tvar-decode.sh" $TMPDIR/testnet_42
 
       log=$TMPDIR/amaru-run.log
       set +e
@@ -752,7 +886,7 @@ in
         echo "amaru failed to create the short-epoch ledger" >&2
         exit 1
       fi
-      if ! grep -q 'build_ledger' "$log"; then
+      if ! grep -F -e 'build_ledger' -e 'build.ledger_opened' "$log"; then
         echo "amaru did not reach ledger startup from the short-epoch bundle" >&2
         exit 1
       fi

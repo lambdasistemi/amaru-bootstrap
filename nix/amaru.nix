@@ -75,18 +75,81 @@ let
       esac
     '';
   };
+
+  # Issue 95: carried source patch. Identity is the exact upstream commit plus
+  # the declared patch digest. Retirement is executable: a pin that already
+  # loads era history at node bootstrap must remove the patch and rerun the
+  # unchanged hosted boundary checks.
+  #
+  # The patch base is recorded, not asserted. This repository exists to be
+  # bumped to Amaru main every night, so an equality assert between the pin and
+  # a frozen base is a standing guarantee that the next bump fails at
+  # evaluation, before anything about the candidate is learned -- and it fails
+  # identically whether or not the patch would still have applied.
+  # `applyPatches` catches textual hunk drift: it fails when a carried hunk no
+  # longer matches the pin. It does not guard behaviour outside those hunks.
+  # Custom-testnet era history is a separate assert plus the pin-semantics
+  # check; a moved pin can apply cleanly and still ignore --era-history.
+  amaruBootstrapPatch = ./patches/amaru-node-bootstrap-era-history.patch;
+  patchedSource = pkgs.applyPatches {
+    name = "amaru-era-history-bootstrap";
+    src = amaru;
+    patches = [ amaruBootstrapPatch ];
+  };
+  # The upstream commit the carried hunks were last rebased onto. Informational:
+  # it tells a reader how far the pin has travelled from the last human review
+  # of this patch. It does not gate the build.
+  recordedAmaruPatchBase = "b92459781adc3d8e1b4ce1d9c74da7de39b7602f";
+  amaruPatchSha256 = "b39e24077d7da988060d38130da65a3f7800f7c99181ce57d6b4f4d837952434";
+  computedAmaruPatchSha256 = builtins.hashFile "sha256" amaruBootstrapPatch;
+  amaruSourceIdentity = "${amaruRev}:${computedAmaruPatchSha256}";
+  unpatchedBootstrapCli = builtins.readFile
+    "${amaru}/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs";
+  unpatchedBootstrapLib = builtins.readFile
+    "${amaru}/crates/amaru-bootstrap/src/bootstrap/mod.rs";
+  unpatchedNetworkName = builtins.readFile
+    "${amaru}/crates/amaru-kernel/src/cardano/network_name.rs";
+  upstreamHasBootstrapEraHistoryInput =
+    pkgs.lib.hasInfix "EraHistory::load" unpatchedBootstrapCli
+    && pkgs.lib.hasInfix "era_history: &EraHistory" unpatchedBootstrapLib;
+  # Unique to as_era_history: the next item is as_global_parameters.
+  # A pin that returns Some(PREPROD) for Testnet still applies the carried
+  # patch, and would ignore --era-history.
+  customTestnetHasNoBuiltInEraHistory =
+    pkgs.lib.hasInfix
+      "Some(&PREVIEW_ERA_HISTORY),\n            NetworkName::Testnet(_) => None,"
+      unpatchedNetworkName;
 in
 assert builtins.elem peerSnapshots supportedPeerSnapshots;
 assert builtins.elem peerSnapshotFault supportedPeerSnapshotFaults;
 assert peerSnapshots == "pinned" || peerSnapshotFault == null;
 assert builtins.match "[0-9a-f]{40}" amaruRev != null;
-craneLib.buildPackage ({
+assert computedAmaruPatchSha256 == amaruPatchSha256 ||
+  throw ''
+    Declared amaruPatchSha256 ${amaruPatchSha256} does not match patch
+    bytes ${computedAmaruPatchSha256}.
+  '';
+assert (!upstreamHasBootstrapEraHistoryInput) ||
+  throw ''
+    Upstream Amaru ${amaruRev} already loads era history at node bootstrap.
+    Remove the carried patch nix/patches/amaru-node-bootstrap-era-history.patch,
+    prove the resulting source identity, and rerun the unchanged hosted
+    boundary checks.
+  '';
+assert customTestnetHasNoBuiltInEraHistory ||
+  throw ''
+    Upstream Amaru ${amaruRev} no longer returns None from
+    NetworkName::as_era_history for Testnet. Custom --era-history would
+    be ignored. applyPatches cannot see this: it only matches hunk text.
+  '';
+let
+  craneArgs = {
   pname = "amaru" + pkgs.lib.optionalString (peerSnapshots == "placeholder-dev")
     "-placeholder-dev" + pkgs.lib.optionalString (peerSnapshotFault != null)
     "-${peerSnapshotFault}";
   version = "0.1.2";
 
-  src = craneLib.cleanCargoSource amaru;
+  src = craneLib.cleanCargoSource patchedSource;
   strictDeps = true;
 
   # Build only the amaru binary; its sibling crates in the workspace
@@ -227,6 +290,37 @@ craneLib.buildPackage ({
         '${peerSnapshotResolution.snapshots.preview.sha256}'
     ''}
   '';
-} // pkgs.lib.optionalAttrs (cargoArtifacts != null) {
-  inherit cargoArtifacts;
+
+  passthru = {
+    inherit amaruSourceIdentity amaruPatchSha256;
+    amaruPatchBase = recordedAmaruPatchBase;
+  };
+  } // pkgs.lib.optionalAttrs (cargoArtifacts != null) {
+    inherit cargoArtifacts;
+  };
+
+  amaruBin = craneLib.buildPackage craneArgs;
+in
+amaruBin.overrideAttrs (old: {
+  passthru = old.passthru // {
+    inherit patchedSource;
+
+    # Issue 95: run the carried patch's own behavioural fixtures against `src`,
+    # with the toolchain, dependency artifacts and source cleaning of the
+    # shipped binary. Hosted `amaru-local-first-semantic` drives both sides.
+    localFirstTest = args: craneLib.cargoTest (craneArgs // {
+      cargoArtifacts = amaruBin.cargoArtifacts;
+      cargoExtraArgs = "";
+    } // builtins.removeAttrs args [ "name" "src" ] // {
+      pname = args.name;
+      src = craneLib.cleanCargoSource args.src;
+      # The fixtures construct the real S3 client (pinned to an unroutable
+      # endpoint) at startup, and reqwest refuses to build a client without
+      # a CA store. A sandbox without host /etc/ssl/certs therefore panics
+      # before any assertion runs; supply the standard bundle so the
+      # derivation is environment-independent rather than
+      # sandbox-config-dependent.
+      env.SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+    });
+  };
 })

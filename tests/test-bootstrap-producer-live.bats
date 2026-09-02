@@ -212,13 +212,12 @@ teardown() {
   while true; do
     poll_amaru_consumer_once "$AMARU_CONSUMER_CONTAINER" "$consumer_log" \
       "$hold_seconds" "$start_epoch"
-    if grep -q 'build_ledger' "$consumer_log" \
-      && grep 'connection established' "$consumer_log" \
-        | grep -q '"peer":"127.0.0.1:3001"'; then
+    if amaru_log_has_ledger_opened "$consumer_log" \
+      && amaru_log_has_connected_to "$consumer_log" 127.0.0.1:3001; then
       break
     fi
     [ "$(date +%s)" -ge "$marker_deadline" ] && {
-      echo "timed out waiting for build_ledger + connection established" >&2
+      diagnose_consumer_markers "$consumer_log" 127.0.0.1:3001
       false
     }
     sleep 2

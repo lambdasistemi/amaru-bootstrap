@@ -186,13 +186,62 @@ case "\$cmd" in
     }
     ledger=""
     chain=""
+    era_history=""
     while [[ \$# -gt 0 ]]; do
       case "\$1" in
         --ledger-dir) ledger="\$2"; shift 2 ;;
         --chain-dir) chain="\$2"; shift 2 ;;
+        --era-history) era_history="\$2"; shift 2 ;;
+        --network|--epoch) shift 2 ;;
         *) shift ;;
       esac
     done
+    if [[ -z "\$era_history" ]]; then
+      printf 'no era history available for network testnet_42; missing --era-history\n' >&2
+      exit 1
+    fi
+    case "\${ERA_HISTORY_FAULT:-}" in
+      missing) rm -f "\$era_history" ;;
+      malformed) printf '{not json\n' >"\$era_history" ;;
+      wrong-epoch)
+        jq '.eras[0].params.epoch_size_slots = 86400' "\$era_history" \
+          >"\$era_history.tmp"
+        mv "\$era_history.tmp" "\$era_history"
+        ;;
+    esac
+    if [[ ! -f "\$era_history" ]]; then
+      printf 'missing era history file: %s\n' "\$era_history" >&2
+      exit 1
+    fi
+    if ! jq -e . "\$era_history" >/dev/null 2>&1; then
+      printf 'malformed era history: %s is not valid JSON\n' "\$era_history" >&2
+      exit 1
+    fi
+    epoch_size=\$(jq -r '.eras[0].params.epoch_size_slots // empty' "\$era_history")
+    if [[ -z "\$epoch_size" || "\$epoch_size" == "null" ]]; then
+      printf 'malformed era history: missing epoch_size_slots\n' >&2
+      exit 1
+    fi
+    epochs=()
+    for p in snapshots/*/*; do
+      [[ -e "\$p" ]] || continue
+      base=\$(basename "\$p")
+      base=\${base%.tar.zst}
+      slot=\${base%%.*}
+      [[ "\$slot" =~ ^[0-9]+\$ ]] || continue
+      epochs+=(\$(( slot / epoch_size )))
+    done
+    if [[ \${#epochs[@]} -ge 3 ]]; then
+      uniq_epochs=\$(printf '%s\\n' "\${epochs[@]}" | sort -n | uniq)
+      n=\$(printf '%s\\n' "\$uniq_epochs" | grep -c .)
+      first=\$(printf '%s\\n' "\$uniq_epochs" | head -1)
+      last=\$(printf '%s\\n' "\$uniq_epochs" | tail -1)
+      if [[ "\$n" -lt 3 || \$(( last - first + 1 )) -ne "\$n" ]]; then
+        printf 'inconsistent epoch mapping: snapshot slots map to epochs %s\n' \
+          "\$(printf '%s ' \$uniq_epochs)" >&2
+        exit 1
+      fi
+    fi
     mkdir -p "\$ledger/live" "\$ledger/0" "\$ledger/1" "\$ledger/2" "\$chain"
     ;;
   create-snapshots|bootstrap)
@@ -323,4 +372,47 @@ assert_complete_mock_bundle() {
 
   [ "$status" -eq 0 ]
   assert_complete_mock_bundle
+}
+
+assert_no_committed_bundle() {
+  [ ! -d "$TMP_DIR/bundle/testnet_42/ledger.testnet_42.db/live" ]
+}
+
+@test "missing era-history file fails closed before a complete bundle" {
+  export ERA_HISTORY_FAULT=missing
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 9 ]
+  [[ "$output" == *"missing era history file:"* ]]
+  assert_no_committed_bundle
+}
+
+@test "malformed era-history JSON fails closed before a complete bundle" {
+  export ERA_HISTORY_FAULT=malformed
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 9 ]
+  [[ "$output" == *"malformed era history:"* ]]
+  assert_no_committed_bundle
+}
+
+@test "fixture-inconsistent epoch mapping (wrong epoch size) is rejected" {
+  export ERA_HISTORY_FAULT=wrong-epoch
+  run "$BOOTSTRAP_PRODUCER_SCRIPT" \
+      "$TMP_DIR/chain-db" \
+      "$TMP_DIR/config" \
+      "$TMP_DIR/bundle" \
+      testnet_42
+
+  [ "$status" -eq 9 ]
+  [[ "$output" == *"inconsistent epoch mapping:"* ]]
+  assert_no_committed_bundle
 }

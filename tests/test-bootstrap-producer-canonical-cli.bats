@@ -176,16 +176,31 @@ case "\$cmd" in
             "\$inv_val" "\$scale_val" "\$k_val" "\$computed_epoch_length" "\$genesis_epoch_length" >&2
           exit 1
         fi
-        # Parse args, create DB dirs
-        ledger="" chain="" network=""
+        # Parse args, create DB dirs. I-095-MOCK: same --era-history
+        # flag/path contract as the real node bootstrap CLI.
+        ledger="" chain="" network="" era_history=""
         while [[ \$# -gt 0 ]]; do
           case "\$1" in
             --ledger-dir) ledger="\$2"; shift 2 ;;
             --chain-dir) chain="\$2"; shift 2 ;;
             --network) network="\$2"; shift 2 ;;
+            --era-history) era_history="\$2"; shift 2 ;;
+            --epoch) shift 2 ;;
             *) shift ;;
           esac
         done
+        if [[ -z "\$era_history" ]]; then
+          printf 'no era history available for network testnet_42; missing --era-history\n' >&2
+          exit 1
+        fi
+        if [[ ! -f "\$era_history" ]]; then
+          printf 'missing era history file: %s\n' "\$era_history" >&2
+          exit 1
+        fi
+        if ! jq -e '.eras[0].params.epoch_size_slots' "\$era_history" >/dev/null; then
+          printf 'malformed era history: %s\n' "\$era_history" >&2
+          exit 1
+        fi
         if [[ -n "\$ledger" ]]; then
           mkdir -p "\$ledger/live" "\$ledger/0" "\$ledger/1" "\$ledger/2"
         fi

@@ -342,6 +342,80 @@ poll_amaru_consumer_once() {
   return 0
 }
 
+# amaru_log_has_ledger_opened <log-path>
+#
+# Return 0 if the consumer log shows Amaru opened the ledger. Both
+# spellings are accepted because upstream renamed the trace between
+# pins: build_ledger (legacy) and the build.ledger_opened trace
+# emitted at the current pin. Fixed strings: the dot in
+# build.ledger_opened must not act as a wildcard.
+amaru_log_has_ledger_opened() {
+  local log="$1"
+  grep -qF -e 'build_ledger' -e 'build.ledger_opened' "$log"
+}
+
+# amaru_log_has_connected_to <log-path> <peer>
+#
+# Return 0 if the consumer log shows the consumer reached <peer> and
+# negotiated chainsync against its chain. Spellings accepted:
+#
+#   - the info-level consensus::chainsync::INTERSECT_FOUND event emitted
+#     by track_peers on the upstream chainsync path at the current pin
+#     (peer_selection.peer.CONNECTED is only a debug_span!, so it is
+#     never recorded by the AMARU_LOG=info console filter the consumer
+#     runs with; an intersection found is also the stronger claim: not
+#     just a socket handshake but successful chainsync negotiation).
+#     Matched by the 'intersect_found' substring, which survives both
+#     the console rendering (message field) and the --with-json-traces
+#     rendering (fields.message) whatever the dotted path; the
+#     near-miss failure outcome intersect_not_found does not contain it.
+#   - the legacy literal 'connection established' string, so the
+#     predicate still works against an older pin.
+#
+# The peer address must appear on the same line as the spelling, so
+# evidence for one peer cannot be combined with a marker line about
+# another. The peer is matched as the bare address: it renders that way
+# on every layer (Peer::from_addr names the peer by its socket address,
+# and Display/JSON both emit the name unchanged).
+amaru_log_has_connected_to() {
+  local log="$1" peer="$2"
+  if grep -F 'connection established' "$log" | grep -qF -- "\"peer\":\"$peer\""; then
+    return 0
+  fi
+  grep -F 'intersect_found' "$log" | grep -qF -- "$peer"
+}
+
+# diagnose_consumer_markers <log-path> <peer>
+#
+# Self-diagnosis for the bounded startup wait: report which marker
+# clauses were and were not satisfied, then dump the tail of the
+# consumer log, so a renamed trace is diagnosed from the first failing
+# run instead of one hosted round-trip per spelling guess.
+diagnose_consumer_markers() {
+  local log="$1" peer="$2"
+  echo "timed out waiting for ledger-opened marker + connected evidence for $peer" >&2
+  echo "--- marker clause status at timeout ---" >&2
+  if amaru_log_has_ledger_opened "$log"; then
+    echo "ledger-opened marker (build_ledger / build.ledger_opened): seen" >&2
+  else
+    echo "ledger-opened marker (build_ledger / build.ledger_opened): NOT seen" >&2
+  fi
+  if amaru_log_has_connected_to "$log" "$peer"; then
+    echo "connected evidence for $peer (connection established / chainsync intersect_found): seen" >&2
+  else
+    echo "connected evidence for $peer (connection established / chainsync intersect_found): NOT seen" >&2
+    if grep -qF 'intersect_found' "$log"; then
+      echo "intersect_found present for other peers; last 5 lines:" >&2
+      grep -F 'intersect_found' "$log" | tail -n 5 >&2
+    elif grep -qF 'intersect_not_found' "$log"; then
+      echo "chainsync ran but no intersection was found; last 5 intersect_not_found lines:" >&2
+      grep -F 'intersect_not_found' "$log" | tail -n 5 >&2
+    fi
+  fi
+  echo "--- last 80 lines of $log ---" >&2
+  tail -n 80 "$log" >&2
+}
+
 # scan_amaru_log_for_fatal <log-path>
 #
 # Grep -F the five fatal substrings from the failure-classes contract
