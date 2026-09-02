@@ -44,6 +44,79 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+# --- consumer startup-marker helpers (live predicate logic, docker-free) ---
+
+@test "markers: ledger-opened accepts both spellings, rejects absence" {
+  printf 'noise\n{"level":"INFO","fields":{"message":"build.ledger_opened","tip":[2519,"aa"]}}\n' >"$TMP_DIR/log"
+  run amaru_log_has_ledger_opened "$TMP_DIR/log"
+  [ "$status" -eq 0 ]
+
+  printf 'build_ledger done\n' >"$TMP_DIR/log"
+  run amaru_log_has_ledger_opened "$TMP_DIR/log"
+  [ "$status" -eq 0 ]
+
+  printf 'neither spelling anywhere\n' >"$TMP_DIR/log"
+  run amaru_log_has_ledger_opened "$TMP_DIR/log"
+  [ "$status" -ne 0 ]
+}
+
+@test "markers: connected-to accepts the info chainsync intersect_found event in both renderings and the legacy string" {
+  # The info-level observable at the pinned node:
+  # consensus::chainsync::INTERSECT_FOUND (track_peers, on the consumer's
+  # upstream chainsync path). Console rendering: name as the message field
+  # after the target, peer as a bare Display value.
+  printf '%s\n' \
+    '2026-01-01T00:00:00.000000Z  INFO amaru::consensus: chainsync.intersect_found peer=127.0.0.1:3001 conn_id=17 current=Point { slot: Slot(2519), hash: Hash(aa) } highest=Point { slot: Slot(2520), hash: Hash(bb) }' \
+    >"$TMP_DIR/log"
+  run amaru_log_has_connected_to "$TMP_DIR/log" 127.0.0.1:3001
+  [ "$status" -eq 0 ]
+
+  # --with-json-traces rendering: name inside fields.message, peer as a
+  # JSON string. The full dotted path is NOT pinned by the helper, so
+  # this line exercises the substring that both renderings share.
+  printf '%s\n' \
+    '{"timestamp":"2026-01-01T00:00:00.000000Z","level":"INFO","fields":{"message":"chainsync.intersect_found","peer":"127.0.0.1:3001","conn_id":17,"current":{"slot":2519},"highest":{"slot":2520}},"target":"amaru::consensus"}' \
+    >"$TMP_DIR/log"
+  run amaru_log_has_connected_to "$TMP_DIR/log" 127.0.0.1:3001
+  [ "$status" -eq 0 ]
+
+  # Legacy spelling still accepted (line carries both marker and peer).
+  printf 'connection established with "peer":"127.0.0.1:3001"\n' >"$TMP_DIR/log"
+  run amaru_log_has_connected_to "$TMP_DIR/log" 127.0.0.1:3001
+  [ "$status" -eq 0 ]
+}
+
+@test "markers: connected-to is falsifiable in every wrong direction" {
+  # Intersected with a different port must not satisfy the requested peer.
+  printf '%s\n' \
+    'INFO amaru::consensus: chainsync.intersect_found peer=127.0.0.1:3002 conn_id=17' \
+    >"$TMP_DIR/log"
+  run amaru_log_has_connected_to "$TMP_DIR/log" 127.0.0.1:3001
+  [ "$status" -ne 0 ]
+
+  # The peer address on its own line must not be combined with a marker
+  # line about another peer: both spellings are line-scoped.
+  printf '%s\n%s\n' \
+    'chainsync.intersect_found peer=127.0.0.1:3002' \
+    '"peer":"127.0.0.1:3001" alone on a line' \
+    >"$TMP_DIR/log"
+  run amaru_log_has_connected_to "$TMP_DIR/log" 127.0.0.1:3001
+  [ "$status" -ne 0 ]
+
+  # Near-miss names must not match: INTERSECT_NOT_FOUND is the failure
+  # outcome, not success evidence.
+  printf '%s\n' \
+    'INFO amaru::consensus: chainsync.intersect_not_found peer=127.0.0.1:3001 highest=Point' \
+    >"$TMP_DIR/log"
+  run amaru_log_has_connected_to "$TMP_DIR/log" 127.0.0.1:3001
+  [ "$status" -ne 0 ]
+
+  # A consumer that never connects matches nothing.
+  printf 'no connections here\n' >"$TMP_DIR/log"
+  run amaru_log_has_connected_to "$TMP_DIR/log" 127.0.0.1:3001
+  [ "$status" -ne 0 ]
+}
+
 @test "cleanliness: nonzero and names path on missing log" {
   run assert_amaru_log_clean "$TMP_DIR/does-not-exist"
   [ "$status" -ne 0 ]
