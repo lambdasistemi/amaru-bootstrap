@@ -245,6 +245,54 @@ let
   # whose edit does not change the source fails its own derivation, and a
   # mutant that merely failed to compile is rejected, so neither can be
   # reported as killed.
+  # Apply `sed` to one file in the patched Amaru tree. The edit must
+  # change production and must not change the `#[cfg(test)]` module: a
+  # kill attributable only to a fixture replica is not evidence (F-001).
+  # Files with no test module treat the whole file as production.
+  applyProductionOnlySed = { name, sed, file }:
+    pkgs.runCommand "amaru-mutant-${name}-src" { } ''
+      set -euo pipefail
+      cp -r ${amaruPkg.patchedSource} $out
+      chmod -R u+w $out
+      target=$out/${file}
+      if [ ! -f "$target" ]; then
+        echo "mutation ${name}: missing $target" >&2
+        exit 1
+      fi
+      hash_region() {
+        if grep -q '^#\[cfg(test)\]$' "$target"; then
+          case "$1" in
+            prod) sed '/^#\[cfg(test)\]$/,$d' "$target" ;;
+            tests) sed -n '/^#\[cfg(test)\]$/,$p' "$target" ;;
+          esac | sha256sum | cut -d' ' -f1
+        else
+          case "$1" in
+            prod) sha256sum "$target" | cut -d' ' -f1 ;;
+            tests) printf 'none\n' ;;
+          esac
+        fi
+      }
+      prod_before=$(hash_region prod)
+      tests_before=$(hash_region tests)
+      before=$(sha256sum "$target" | cut -d' ' -f1)
+      sed -i ${pkgs.lib.escapeShellArg sed} "$target"
+      after=$(sha256sum "$target" | cut -d' ' -f1)
+      if [ "$before" = "$after" ]; then
+        echo "mutation ${name} did not apply; it would test nothing" >&2
+        exit 1
+      fi
+      prod_after=$(hash_region prod)
+      tests_after=$(hash_region tests)
+      if [ "$prod_before" = "$prod_after" ]; then
+        echo "mutation ${name} did not edit production; the kill would not be attributable to production" >&2
+        exit 1
+      fi
+      if [ "$tests_before" != "$tests_after" ]; then
+        echo "mutation ${name} edited the test module; the kill would not be attributable to production" >&2
+        exit 1
+      fi
+    '';
+
   localFirstTest = { name, src }: amaruPkg.localFirstTest {
     inherit name src;
     doCheck = true;
@@ -256,22 +304,38 @@ let
     src = amaruPkg.patchedSource;
   };
 
+  localFirstFile = "crates/amaru-bootstrap/src/bootstrap/mod.rs";
+
+  # F-001 seed: the pre-repair two-site download sed. It must keep editing
+  # the test module on this tree, so the production-only guard is shown able
+  # to fire rather than sitting over an empty trap.
+  twoSiteDownloadSed =
+    ''/^\s*download_snapshots(.*\.await?;/d;/^\s*download_snapshots(/,/\.await/d'';
+
+  testModuleEditRejected =
+    pkgs.runCommand "local-first-test-module-edit-rejected" { } ''
+      set -euo pipefail
+      cp -r ${amaruPkg.patchedSource} work
+      chmod -R u+w work
+      target=work/${localFirstFile}
+      tests_before=$(sed -n '/^#\[cfg(test)\]$/,$p' "$target" | sha256sum | cut -d' ' -f1)
+      sed -i ${pkgs.lib.escapeShellArg twoSiteDownloadSed} "$target"
+      tests_after=$(sed -n '/^#\[cfg(test)\]$/,$p' "$target" | sha256sum | cut -d' ' -f1)
+      if [ "$tests_before" = "$tests_after" ]; then
+        echo "control: two-site download sed did not edit the test module; the production-only guard cannot be shown to fire" >&2
+        exit 1
+      fi
+      echo "control: two-site download sed edits the test module" >"$out"
+    '';
+
   localFirstMutants = map
     (mutant: mutant // {
       failure = pkgs.testers.testBuildFailure (localFirstTest {
         name = "amaru-local-first-${mutant.name}";
-        src = pkgs.runCommand "amaru-local-first-${mutant.name}-src" { } ''
-          cp -r ${amaruPkg.patchedSource} $out
-          chmod -R u+w $out
-          target=$out/crates/amaru-bootstrap/src/bootstrap/mod.rs
-          before=$(sha256sum "$target" | cut -d' ' -f1)
-          sed -i ${pkgs.lib.escapeShellArg mutant.sed} "$target"
-          after=$(sha256sum "$target" | cut -d' ' -f1)
-          if [ "$before" = "$after" ]; then
-            echo "mutation ${mutant.name} did not apply; it would test nothing" >&2
-            exit 1
-          fi
-        '';
+        src = applyProductionOnlySed {
+          inherit (mutant) name sed;
+          file = mutant.file or localFirstFile;
+        };
       });
     })
     # Every pattern is anchored to a contiguous substring that rustfmt keeps on
@@ -280,6 +344,11 @@ let
     # that survives the call being reflowed. A pattern matched only by luck of
     # the current formatting is how production-owner-disconnect went vacuous
     # when the rebase reformatted its call site.
+    # F-001 class: applyProductionOnlySed requires each pattern to change
+    # production and leave the test module untouched, so a fixture replica
+    # of a production call cannot author the kill. Combined with the named
+    # test having to fail, the kill is attributable to a production site on
+    # that test's path.
     [
       # DIFFERENT-SNAPSHOT-SET, carried: the selector runs, but not over the disk collection.
       { name = "different-snapshot-set"; test = "exact_local_window_skips_the_remote_index";
@@ -293,23 +362,67 @@ let
       # branch and open a second success exit on that same physical line.
       { name = "same-line-second-early-return"; test = "insufficient_local_collections_consult_the_remote_index";
         reason = "wrong target: must consult the remote index";
-        sed = ''s@^\(\s*\)return download_selected(selected, snapshots_dir, s3)\.await;@\1return download_selected(selected, snapshots_dir, s3).await; }\1if snapshots.len() >= 3 {\1return download_selected([snapshots[0].clone(), snapshots[1].clone(), snapshots[2].clone()], snapshots_dir, s3).await;@''; }
+        sed = ''s@^\(\s*\)return Ok(selected\.to_vec());@\1return Ok(selected.to_vec()); }\1if snapshots.len() >= 3 {\1return Ok(vec![snapshots[0].clone(), snapshots[1].clone(), snapshots[2].clone()]);@''; }
       # The production decision owner stops being told the exact local window:
       # with None it defers even when the local collection satisfies the
       # request, so production goes remote to ask for what it already had.
       { name = "production-owner-disconnect"; test = "production_owner_uses_the_exact_local_window";
         reason = "production must satisfy an exact local window without the remote index";
         sed = ''s@decide_local_first(\&snapshots, target_epoch)@decide_local_first(\&snapshots, None)@''; }
-      # The production download seam is removed entirely. GNU sed never tests
-      # a range's end address on the line where the range starts, so a lone
-      # range would run past the one-line call: the first expression deletes
-      # the call when rustfmt keeps it on one physical line, and the range
-      # only ever opens when the call was reflowed. The definition line
-      # starts with "async fn", so only the call site matches.
+      # Skip every archive inside production's download_snapshots. Unique
+      # to that function's body (the fixtures call the function; they do
+      # not contain this predicate), so the named test's kill is the
+      # production seam, not a fixture replica of the call.
       { name = "production-download-disconnect"; test = "remotely_listed_snapshots_reach_the_download_seam";
         reason = "a remotely listed snapshot must reach the download seam";
-        sed = ''/^\s*download_snapshots(.*\.await?;/d;/^\s*download_snapshots(/,/\.await/d''; }
+        sed = ''s@if !should_download_snapshot(snapshots_dir, snapshot) {@if true { continue; } if !should_download_snapshot(snapshots_dir, snapshot) {@''; }
     ];
+
+  tvarFile = "crates/amaru-bootstrap/src/cardano_node/tvar.rs";
+
+  # F-002: disable the remaining-entry count that runs before datatype().
+  # A complete definite-length map then hits EOF at datatype() and import
+  # fails as end_of_input; the truncated corpus case does not discriminate.
+  tvarSizeBeforeDatatypeSed =
+    ''s@if size.is_some_and(|len| actual_size + chunk_size >= len) {@if false \&\& size.is_some_and(|len| actual_size + chunk_size >= len) {@'';
+
+  tvarSizeBeforeDatatypeSrc = applyProductionOnlySed {
+    name = "tvar-size-before-datatype";
+    file = tvarFile;
+    sed = tvarSizeBeforeDatatypeSed;
+  };
+
+  tvarSizeBeforeDatatypeAmaru = amaruPkg.buildPackageFromSrc {
+    name = "amaru-tvar-size-before-datatype";
+    src = tvarSizeBeforeDatatypeSrc;
+  };
+
+  tvarSizeBeforeDatatypeFailure =
+    pkgs.testers.testBuildFailure (pkgs.runCommand "tvar-size-before-datatype-complete-import"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.gnugrep
+          pkgs.gnutar
+          pkgs.jq
+          pkgs.python3
+          pkgs.zstd
+          tvarSizeBeforeDatatypeAmaru
+        ];
+      } ''
+      set -euo pipefail
+      export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+      export AMARU_GLOBAL_CONSENSUS_SECURITY_PARAM=8
+      export AMARU_GLOBAL_ACTIVE_SLOT_COEFF_INVERSE=1
+      export AMARU_GLOBAL_EPOCH_LENGTH_SCALE_FACTOR=15
+      cp -rL ${shortEpochBootstrapBundle}/testnet_42 $TMPDIR/testnet_42
+      chmod -R u+w $TMPDIR/testnet_42
+      tests=${../tests}
+      bash "$tests/check-short-epoch-tvar-decode.sh" $TMPDIR/testnet_42
+      echo "complete definite-length map imported without the size-before-datatype guard" >&2
+      exit 0
+    '');
 in
 {
 
@@ -318,6 +431,9 @@ in
       { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
       set -euo pipefail
       echo "fixtures green on the patched source: ${localFirstFixtures}"
+      echo "mutant count: ${toString (builtins.length localFirstMutants)}"
+      [ ${toString (builtins.length localFirstMutants)} -ge 1 ]
+      echo "test-module-edit control: ${testModuleEditRejected}"
       ${pkgs.lib.concatMapStrings (mutant: ''
         log=${mutant.failure}/testBuildFailure.log
         grep -q 'test result: FAILED' "$log" || {
@@ -855,6 +971,18 @@ in
       chmod -R u+w $TMPDIR/testnet_42
 
       tests=${../tests}
+      echo "tvar size-before-datatype mutant: ${tvarSizeBeforeDatatypeFailure}"
+      log=${tvarSizeBeforeDatatypeFailure}/testBuildFailure.log
+      grep -q 'complete definite-length map failed to import' "$log" || {
+        echo "tvar size-before-datatype mutant: expected the complete-map positive control to fail" >&2
+        cat "$log" >&2
+        exit 1
+      }
+      grep -q 'end of input' "$log" || {
+        echo "tvar size-before-datatype mutant: expected complete import to fail as end of input" >&2
+        cat "$log" >&2
+        exit 1
+      }
       bash "$tests/check-short-epoch-utxo-set.sh" $TMPDIR/testnet_42
 
       # Short-epoch synthesis: epochLength=120, k=8, activeSlotsCoeff=1.0

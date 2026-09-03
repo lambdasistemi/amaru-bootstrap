@@ -123,6 +123,20 @@ assert_failed_with() {
   fi
 }
 
+# Complete definite-length map: the remaining-entry count must run before
+# datatype(), or the byte after the last pair is end_of_input and import
+# fails. The truncated corpus case does not discriminate that guard.
+complete=$workdir/complete
+stage_bundle "$complete"
+complete_log=$workdir/complete.log
+complete_rc=$(run_bootstrap "$complete" "$complete_log")
+if [[ $complete_rc -ne 0 ]]; then
+  echo "tvar-decode: complete definite-length map failed to import (rc=$complete_rc)" >&2
+  cat "$complete_log" >&2
+  exit 1
+fi
+echo "tvar-decode: complete definite-length map imported (rc=0)"
+
 trunc=$workdir/trunc
 stage_bundle "$trunc"
 repack_first "$trunc" "$workdir/tvar.truncated"
