@@ -20,3 +20,18 @@ Artifact ceiling: 70 lines.
 - [ ] T095-08 Obtain green hosted Build Gate and Live Bootstrap Producer on
   the exact accepted head.
 - [ ] T095-09 Verify exact-head required contexts and finalize review handoff.
+
+## Slice S-095-02 — rebase the carried patch onto Amaru 92f435b6
+
+- [x] T095-10 Rebuild the carried delta on upstream 92f435b6 in upstream's
+  refactored shape and re-bind the patch digest and pins.
+- [x] T095-11 Bind /etc/resolv.conf into the Build Gate sandbox for the two
+  `amaru run` checks, with the trusted-user limit recorded as a residual.
+- [x] T095-12 Anchor every local-first mutation pattern to a unique production
+  site on its named test's executed path.
+- [x] T095-13 Give the definite-length tvar row a code-level mutant proved red
+  and kept red by the shipped check.
+- [x] T095-14 Obtain a fresh independent audit on the exact candidate with no
+  blocking findings.
+- [ ] T095-15 Obtain green hosted Build Gate and Live Bootstrap Producer on the
+  exact accepted head.

@@ -28,8 +28,21 @@ jobs:
           name: paolino
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build all flake checks
+        # --option extra-sandbox-paths /etc/resolv.conf: upstream amaru's
+        # amaru-network crate calls init_resolver() unconditionally at node
+        # startup (crates/amaru-node/src/stages/build_node.rs), and
+        # hickory-resolver reads the hardcoded /etc/resolv.conf
+        # (crates/amaru-network/src/resolve.rs). The nix sandbox does not
+        # bind the host file, so the two `amaru run` checks
+        # (amaru-run-bootstrap, antithesis-short-epoch-golden) abort at
+        # startup without this binding.
+        # KNOWN RISK: extra-sandbox-paths is a trusted-user setting; on a
+        # runner whose user is not trusted the option is silently ignored
+        # and those two checks fail there. That is an infrastructure
+        # escalation, not a gate defect.
         run: >-
           nix build --quiet
+          --option extra-sandbox-paths /etc/resolv.conf
           .#checks.x86_64-linux.amaru
           .#checks.x86_64-linux.peer-snapshot-negative-control
           .#checks.x86_64-linux.peer-snapshot-anchor
