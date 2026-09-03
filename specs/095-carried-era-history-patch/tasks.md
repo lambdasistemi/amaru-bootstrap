@@ -33,5 +33,5 @@ Artifact ceiling: 70 lines.
   and kept red by the shipped check.
 - [x] T095-14 Obtain a fresh independent audit on the exact candidate with no
   blocking findings.
-- [ ] T095-15 Obtain green hosted Build Gate and Live Bootstrap Producer on the
+- [x] T095-15 Obtain green hosted Build Gate and Live Bootstrap Producer on the
   exact accepted head.
