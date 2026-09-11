@@ -1,9 +1,9 @@
 {
-  "amaru_rev": "d178bb3548a6b72c2659d3a75fdf38b81ce6fb4b",
-  "amaru_committer_date_utc": "2026-09-07T15:26:46Z",
+  "amaru_rev": "4bbf10dc60014048eecb6793a08839fb88590bf2",
+  "amaru_committer_date_utc": "2026-09-10T12:46:39Z",
   "configs_rev": "46364b2dcd0c24e4b8f09ab33f9b46e5bdaa13da",
-  "resolved_at_utc": "2026-09-08T04:30:09Z",
-  "query_url": "https://api.github.com/repos/cardano-foundation/cardano-configurations/commits?until=2026-09-07T15%3A26%3A46Z&per_page=1",
+  "resolved_at_utc": "2026-09-11T04:30:28Z",
+  "query_url": "https://api.github.com/repos/cardano-foundation/cardano-configurations/commits?until=2026-09-10T12%3A46%3A39Z&per_page=1",
   "snapshots": {
     "mainnet": {
       "sha256": "2e0c42572060c6c4edc95907977195f08e5880d521206436134237493ba274de"
