@@ -1,5 +1,5 @@
 diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstrap/src/bootstrap/mod.rs
-index 7dbb740e9..9cfae4fec 100644
+index 07edd981c..82308792e 100644
 --- a/crates/amaru-bootstrap/src/bootstrap/mod.rs
 +++ b/crates/amaru-bootstrap/src/bootstrap/mod.rs
 @@ -15,14 +15,16 @@
@@ -21,7 +21,7 @@ index 7dbb740e9..9cfae4fec 100644
  };
  use amaru_ledger::store::{EpochTransitionProgress, ReadStore, Store, TransactionalContext};
  use amaru_observability::{error, info};
-@@ -115,30 +117,15 @@ fn snapshot_hash(snapshot: &Snapshot) -> anyhow::Result<HeaderHash> {
+@@ -123,30 +125,15 @@ fn snapshot_hash(snapshot: &Snapshot) -> anyhow::Result<HeaderHash> {
      }
  }
 
@@ -58,7 +58,7 @@ index 7dbb740e9..9cfae4fec 100644
 
      match snapshots_dir.read_dir() {
          Ok(entries) => {
-@@ -146,8 +133,9 @@ async fn bootstrap_snapshots(
+@@ -154,8 +141,9 @@ async fn bootstrap_snapshots(
                  let path = dir_entry?.path();
                  let filename = path.file_name().unwrap_or_default().to_str().unwrap_or_default();
                  if let Some(prefix) = filename.strip_suffix(Snapshot::ARCHIVE_SUFFIX) {
@@ -69,7 +69,7 @@ index 7dbb740e9..9cfae4fec 100644
                          prefix.to_string(),
                          format!("{network}/{prefix}{}", Snapshot::ARCHIVE_SUFFIX),
                      )?;
-@@ -160,12 +148,100 @@ async fn bootstrap_snapshots(
+@@ -168,12 +156,100 @@ async fn bootstrap_snapshots(
          Err(err) => return Err(err.into()),
      }
 
@@ -170,7 +170,7 @@ index 7dbb740e9..9cfae4fec 100644
  /// Parse the slot number from a `<slot>.<hash>` point string.
  fn parse_slot_from_point(point: &str) -> anyhow::Result<u64> {
      point
-@@ -439,6 +515,7 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
+@@ -462,6 +538,7 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
  pub async fn bootstrap(
      network: NetworkName,
      global_parameters: &GlobalParameters,
@@ -178,26 +178,42 @@ index 7dbb740e9..9cfae4fec 100644
      ledger_dir: PathBuf,
      chain_dir: PathBuf,
      snapshots_dir: PathBuf,
-@@ -447,7 +524,7 @@ pub async fn bootstrap(
- ) -> anyhow::Result<()> {
+@@ -473,6 +550,7 @@ pub async fn bootstrap(
+     let result = bootstrap_inner(
+         network,
+         global_parameters,
++        era_history,
+         ledger_dir,
+         chain_dir,
+         snapshots_dir,
+@@ -489,6 +567,7 @@ pub async fn bootstrap(
+ async fn bootstrap_inner(
+     network: NetworkName,
+     global_parameters: &GlobalParameters,
++    era_history: &EraHistory,
+     ledger_dir: PathBuf,
+     chain_dir: PathBuf,
+     snapshots_dir: PathBuf,
+@@ -499,7 +578,7 @@ async fn bootstrap_inner(
      let started_at = Instant::now();
+     checkpoint(&cancellation)?;
      let s3 = AnonymousS3Client::new(s3_config);
 -    let snapshots = bootstrap_snapshots(network, &s3, &snapshots_dir).await?;
 +    let snapshots = bootstrap_snapshots(network, &s3, &snapshots_dir, era_history, target_epoch).await?;
      let [first_snapshot, second_snapshot, third_snapshot] = select_bootstrap_snapshots(&snapshots, target_epoch)?;
 
-     download_snapshots(&[first_snapshot, second_snapshot, third_snapshot], &snapshots_dir, &s3).await?;
-@@ -809,7 +886,8 @@ fn import_node_snapshot_archive_data(
-                 )
-             })?;
-
--            import_utxo_from_tvar(&mut entry, db, &BootstrapProgressFactory, &point, &era_history, network)?;
-+            import_utxo_from_tvar(&mut entry, db, &BootstrapProgressFactory, &point, &era_history, network)
-+                .map_err(|err| anyhow!("import {SNAPSHOT_UTXO_FILE_NAME}: {err}"))?;
+     download_snapshots(&[first_snapshot, second_snapshot, third_snapshot], &snapshots_dir, &s3, &cancellation).await?;
+@@ -911,7 +990,8 @@ fn import_node_snapshot_archive_data(
+                 &era_history,
+                 network,
+                 cancellation,
+-            )?;
++            )
++            .map_err(|err| anyhow!("import {SNAPSHOT_UTXO_FILE_NAME}: {err}"))?;
 
              return Ok((epoch, point, chain_state));
          }
-@@ -1024,4 +1102,208 @@ mod tests {
+@@ -1178,4 +1258,208 @@ mod tests {
          let err = select_bootstrap_snapshots(&snapshots, Some(Epoch::from(2_u64))).unwrap_err();
          assert!(dbg!(err.to_string()).contains("target epoch is too young"));
      }
@@ -221,8 +237,8 @@ index 7dbb740e9..9cfae4fec 100644
 +
 +        use super::{
 +            super::{
-+                AnonymousS3Client, S3Config, Snapshot, bootstrap_snapshots, bootstrap_snapshots_with,
-+                download_snapshots, select_bootstrap_snapshots,
++                AnonymousS3Client, BootstrapCancellation, S3Config, Snapshot, bootstrap_snapshots,
++                bootstrap_snapshots_with, download_snapshots, select_bootstrap_snapshots,
 +            },
 +            write_snapshot_archive,
 +        };
@@ -312,7 +328,7 @@ index 7dbb740e9..9cfae4fec 100644
 +                    })
 +                    .await?;
 +                let selected = select_bootstrap_snapshots(&snapshots, target_epoch.map(Epoch::from))?;
-+                download_snapshots(&selected, dir, &s3).await?;
++                download_snapshots(&selected, dir, &s3, &BootstrapCancellation::new()).await?;
 +                Ok(selected.map(Clone::clone))
 +            })
 +        }
@@ -407,10 +423,10 @@ index 7dbb740e9..9cfae4fec 100644
 +    }
  }
 diff --git a/crates/amaru-bootstrap/src/cardano_node/tvar.rs b/crates/amaru-bootstrap/src/cardano_node/tvar.rs
-index 4fb85d0ed..164ff7f79 100644
+index 83a380d1c..78a8321d9 100644
 --- a/crates/amaru-bootstrap/src/cardano_node/tvar.rs
 +++ b/crates/amaru-bootstrap/src/cardano_node/tvar.rs
-@@ -158,15 +158,26 @@ where
+@@ -169,15 +169,26 @@ where
              let mut chunk_size = 0;
 
              loop {
@@ -442,7 +458,7 @@ index 4fb85d0ed..164ff7f79 100644
                  }
 
                  let mut probe = d.probe();
-@@ -174,17 +185,21 @@ where
+@@ -185,17 +196,21 @@ where
                      cbor::decode_bytes(&mut probe).map(|output| (input.into_owned(), output.into_owned()))
                  });
 
@@ -476,7 +492,7 @@ index 4fb85d0ed..164ff7f79 100644
              }
 
 diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
-index c1c911257..22bbdc9e7 100644
+index f6e6a13b7..36c572d3b 100644
 --- a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
 +++ b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
 @@ -23,7 +23,7 @@ use amaru::{
