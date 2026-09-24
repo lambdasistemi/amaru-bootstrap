@@ -60,7 +60,7 @@
       # BARE pragma-org/amaru origin/main — no fork, no branch, no patches.
       # Native snapshot create + node bootstrap + node run with
       # AMARU_GLOBAL_* overrides and --era-history (all upstreamed).
-      url = "github:pragma-org/amaru/437ff6c4fb506e1347eee9e619271a5ccb55a401";
+      url = "github:pragma-org/amaru/21c882c2019915bf8a0bc9984fb07a312c7c8c42";
       flake = false;
     };
 
@@ -68,7 +68,7 @@
     # this non-flake source at the exact resolved commit so builds remain
     # offline and reproducible.
     cardano-configurations = {
-      url = "github:cardano-foundation/cardano-configurations/4a9b69103507b124679fcb185eeabd4dc15e9c75";
+      url = "github:cardano-foundation/cardano-configurations/dc2643c70565792bfd8fad1f7752bec34f14664e";
       flake = false;
     };
   };
