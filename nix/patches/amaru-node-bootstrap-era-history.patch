@@ -556,3 +556,44 @@ index f6e6a13b7..36c572d3b 100644
          ledger_dir,
          chain_dir,
          default_snapshots_dir(network).into(),
+diff --git a/crates/amaru-bootstrap/src/lib.rs b/crates/amaru-bootstrap/src/lib.rs
+index 0cdac973d..e9d827877 100644
+--- a/crates/amaru-bootstrap/src/lib.rs
++++ b/crates/amaru-bootstrap/src/lib.rs
+@@ -45,6 +45,7 @@
+ //! # async fn example() -> anyhow::Result<()> {
+ //! let network = NetworkName::Preprod;
+ //! let global = network.as_global_parameters().cloned().expect("known network");
++//! let era_history = network.as_era_history().cloned().expect("known network");
+ //! let ledger_dir = PathBuf::from(default_ledger_dir(network));
+ //! let chain_dir = PathBuf::from(default_chain_dir(network));
+ //! let snapshots_dir = PathBuf::from(default_snapshots_dir(network));
+@@ -55,6 +56,7 @@
+ //! bootstrap(
+ //!     network,
+ //!     &global,
++//!     &era_history,
+ //!     ledger_dir,
+ //!     chain_dir,
+ //!     snapshots_dir,          // `snapshots/<network>/`; reuses archives already on disk
+diff --git a/crates/amaru-node/src/tests/world/fragment.rs b/crates/amaru-node/src/tests/world/fragment.rs
+index e99ccdbec..39ebc7232 100644
+--- a/crates/amaru-node/src/tests/world/fragment.rs
++++ b/crates/amaru-node/src/tests/world/fragment.rs
+@@ -199,6 +199,8 @@ async fn populate_fragment_stores(root: &Path, meta: &FragmentMeta) -> anyhow::R
+         let network = NetworkName::Preprod;
+         let global =
+             network.as_global_parameters().cloned().ok_or_else(|| anyhow::anyhow!("preprod global parameters"))?;
++        let era_history =
++            network.as_era_history().cloned().ok_or_else(|| anyhow::anyhow!("preprod era history"))?;
+         let snapshots_dir = workspace_snapshots_dir(network);
+         tracing::info!(
+             target = "world_fragment",
+@@ -208,6 +210,7 @@ async fn populate_fragment_stores(root: &Path, meta: &FragmentMeta) -> anyhow::R
+         bootstrap(
+             network,
+             &global,
++            &era_history,
+             ledger,
+             chain,
+             snapshots_dir,
