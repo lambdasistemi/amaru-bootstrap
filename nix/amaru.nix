@@ -99,8 +99,8 @@ let
   # The upstream commit the carried hunks were last rebased onto. Informational:
   # it tells a reader how far the pin has travelled from the last human review
   # of this patch. It does not gate the build.
-  recordedAmaruPatchBase = "05a5735b4b93a5cc8b7ca8bc0e9feacbc0f4b6a4";
-  amaruPatchSha256 = "b8ab109d0521fc63d0207e5af5686e0b5c78cc6319e8a08999ec48d67d71dc61";
+  recordedAmaruPatchBase = "34a453005bcaaf837ee73bd996b99eab8ef92961";
+  amaruPatchSha256 = "8c3647e54ae42fafc980efb1f2131de2d57f099a606e5f8db19eac49b8782756";
   computedAmaruPatchSha256 = builtins.hashFile "sha256" amaruBootstrapPatch;
   amaruSourceIdentity = "${amaruRev}:${computedAmaruPatchSha256}";
   unpatchedBootstrapCli = builtins.readFile

@@ -1,18 +1,18 @@
 {
-  "amaru_rev": "05a5735b4b93a5cc8b7ca8bc0e9feacbc0f4b6a4",
-  "amaru_committer_date_utc": "2026-09-20T14:19:24Z",
-  "configs_rev": "0a0ed646e3b490e3e9a7fef3bafa80eb17ae4242",
-  "resolved_at_utc": "2026-09-21T04:33:51Z",
-  "query_url": "https://api.github.com/repos/cardano-foundation/cardano-configurations/commits?until=2026-09-20T14%3A19%3A24Z&per_page=1",
+  "amaru_rev": "34a453005bcaaf837ee73bd996b99eab8ef92961",
+  "amaru_committer_date_utc": "2026-10-06T13:53:28Z",
+  "configs_rev": "855282a19638228e889081c1d7c35ef1e2ce02a0",
+  "resolved_at_utc": "2026-10-07T04:35:05Z",
+  "query_url": "https://api.github.com/repos/cardano-foundation/cardano-configurations/commits?until=2026-10-06T13%3A53%3A28Z&per_page=1",
   "snapshots": {
     "mainnet": {
-      "sha256": "62b420574f09eff499e26ad2c363dffbad6eaeb99438ce12d467b361ccfa1885"
+      "sha256": "b0503d91d162e9e6b52954d5271dd7fd325e68939c7df1b3828c5c303ca22b7a"
     },
     "preprod": {
-      "sha256": "48f2a2d85e29bd2e03ccd6e2904249d9723e32bc61a79cb5c6a28c7063f0acb3"
+      "sha256": "fa3b636ef1e1c9f16a1d40ef9aa1486764321320d2db48f2605b571c7f4550b0"
     },
     "preview": {
-      "sha256": "0ec68574303ed1f1d7ea1e638b8808ca8a64a4b38d820ef494686e8777dd3794"
+      "sha256": "3889208f2b205c81fa64849542d2d4bfd2ddfe68ee0f1895e78ab15ce7dcafdd"
     }
   }
 }

@@ -1,5 +1,5 @@
 diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstrap/src/bootstrap/mod.rs
-index 07edd981c..82308792e 100644
+index 8d1fab242..1d3122f99 100644
 --- a/crates/amaru-bootstrap/src/bootstrap/mod.rs
 +++ b/crates/amaru-bootstrap/src/bootstrap/mod.rs
 @@ -15,14 +15,16 @@
@@ -21,8 +21,8 @@ index 07edd981c..82308792e 100644
  };
  use amaru_ledger::store::{EpochTransitionProgress, ReadStore, Store, TransactionalContext};
  use amaru_observability::{error, info};
-@@ -123,30 +125,15 @@ fn snapshot_hash(snapshot: &Snapshot) -> anyhow::Result<HeaderHash> {
-     }
+@@ -151,30 +153,15 @@ fn parse_snapshot_point(point: &str) -> Result<NetworkPoint, BootstrapError> {
+         .map_err(|reason| BootstrapError::InvalidSnapshotPoint { point: point.to_string(), reason })
  }
 
 -/// List S3 objects under `<network>/`, derive epoch from slot via era history, return `Vec<Snapshot>`.
@@ -58,7 +58,7 @@ index 07edd981c..82308792e 100644
 
      match snapshots_dir.read_dir() {
          Ok(entries) => {
-@@ -154,8 +141,9 @@ async fn bootstrap_snapshots(
+@@ -182,8 +169,9 @@ async fn bootstrap_snapshots(
                  let path = dir_entry?.path();
                  let filename = path.file_name().unwrap_or_default().to_str().unwrap_or_default();
                  if let Some(prefix) = filename.strip_suffix(Snapshot::ARCHIVE_SUFFIX) {
@@ -69,7 +69,7 @@ index 07edd981c..82308792e 100644
                          prefix.to_string(),
                          format!("{network}/{prefix}{}", Snapshot::ARCHIVE_SUFFIX),
                      )?;
-@@ -168,12 +156,100 @@ async fn bootstrap_snapshots(
+@@ -196,12 +184,100 @@ async fn bootstrap_snapshots(
          Err(err) => return Err(err.into()),
      }
 
@@ -170,7 +170,7 @@ index 07edd981c..82308792e 100644
  /// Parse the slot number from a `<slot>.<hash>` point string.
  fn parse_slot_from_point(point: &str) -> anyhow::Result<u64> {
      point
-@@ -462,6 +538,7 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
+@@ -556,6 +632,7 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
  pub async fn bootstrap(
      network: NetworkName,
      global_parameters: &GlobalParameters,
@@ -178,7 +178,23 @@ index 07edd981c..82308792e 100644
      ledger_dir: PathBuf,
      chain_dir: PathBuf,
      snapshots_dir: PathBuf,
-@@ -473,6 +550,7 @@ pub async fn bootstrap(
+@@ -567,6 +644,7 @@ pub async fn bootstrap(
+     bootstrap_with_observer(
+         network,
+         global_parameters,
++        era_history,
+         ledger_dir,
+         chain_dir,
+         snapshots_dir,
+@@ -588,6 +666,7 @@ pub async fn bootstrap(
+ pub async fn bootstrap_with_observer(
+     network: NetworkName,
+     global_parameters: &GlobalParameters,
++    era_history: &EraHistory,
+     ledger_dir: PathBuf,
+     chain_dir: PathBuf,
+     snapshots_dir: PathBuf,
+@@ -600,6 +679,7 @@ pub async fn bootstrap_with_observer(
      let result = bootstrap_inner(
          network,
          global_parameters,
@@ -186,7 +202,7 @@ index 07edd981c..82308792e 100644
          ledger_dir,
          chain_dir,
          snapshots_dir,
-@@ -489,6 +567,7 @@ pub async fn bootstrap(
+@@ -617,6 +697,7 @@ pub async fn bootstrap_with_observer(
  async fn bootstrap_inner(
      network: NetworkName,
      global_parameters: &GlobalParameters,
@@ -194,16 +210,16 @@ index 07edd981c..82308792e 100644
      ledger_dir: PathBuf,
      chain_dir: PathBuf,
      snapshots_dir: PathBuf,
-@@ -499,7 +578,7 @@ async fn bootstrap_inner(
-     let started_at = Instant::now();
+@@ -629,7 +710,7 @@ async fn bootstrap_inner(
      checkpoint(&cancellation)?;
+     observer.on_progress(BootstrapProgress::StageChanged { stage: BootstrapStage::DiscoveringSnapshots });
      let s3 = AnonymousS3Client::new(s3_config);
 -    let snapshots = bootstrap_snapshots(network, &s3, &snapshots_dir).await?;
 +    let snapshots = bootstrap_snapshots(network, &s3, &snapshots_dir, era_history, target_epoch).await?;
+     checkpoint(&cancellation)?;
+     observer.on_progress(BootstrapProgress::StageChanged { stage: BootstrapStage::SelectingSnapshots });
      let [first_snapshot, second_snapshot, third_snapshot] = select_bootstrap_snapshots(&snapshots, target_epoch)?;
-
-     download_snapshots(&[first_snapshot, second_snapshot, third_snapshot], &snapshots_dir, &s3, &cancellation).await?;
-@@ -911,7 +990,8 @@ fn import_node_snapshot_archive_data(
+@@ -1053,7 +1134,8 @@ fn import_node_snapshot_archive_data(
                  &era_history,
                  network,
                  cancellation,
@@ -213,7 +229,38 @@ index 07edd981c..82308792e 100644
 
              return Ok((epoch, point, chain_state));
          }
-@@ -1178,4 +1258,208 @@ mod tests {
+@@ -1158,12 +1240,14 @@ mod tests {
+         let observer = RecordingObserver::default();
+         let network = NetworkName::Preprod;
+         let global_parameters = network.as_global_parameters().unwrap();
++        let era_history = network.as_era_history().unwrap();
+         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+
+         let error = runtime
+             .block_on(super::bootstrap_with_observer(
+                 network,
+                 global_parameters,
++                era_history,
+                 temp_dir.path().join("ledger"),
+                 temp_dir.path().join("chain"),
+                 temp_dir.path().join("snapshots"),
+@@ -1201,6 +1285,7 @@ mod tests {
+         let observer = RecordingObserver::default();
+         let network = NetworkName::Preprod;
+         let global_parameters = network.as_global_parameters().unwrap();
++        let era_history = network.as_era_history().unwrap();
+         let s3_config =
+             crate::S3Config { public_url: format!("http://{unavailable_address}"), ..crate::S3Config::default() };
+         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+@@ -1208,6 +1293,7 @@ mod tests {
+         let result = runtime.block_on(super::bootstrap_with_observer(
+             network,
+             global_parameters,
++            era_history,
+             temp_dir.path().join("ledger"),
+             temp_dir.path().join("chain"),
+             temp_dir.path().join("snapshots"),
+@@ -1473,4 +1559,215 @@ mod tests {
          let err = select_bootstrap_snapshots(&snapshots, Some(Epoch::from(2_u64))).unwrap_err();
          assert!(dbg!(err.to_string()).contains("target epoch is too young"));
      }
@@ -328,7 +375,14 @@ index 07edd981c..82308792e 100644
 +                    })
 +                    .await?;
 +                let selected = select_bootstrap_snapshots(&snapshots, target_epoch.map(Epoch::from))?;
-+                download_snapshots(&selected, dir, &s3, &BootstrapCancellation::new()).await?;
++                download_snapshots(
++                    &selected,
++                    dir,
++                    &s3,
++                    &BootstrapCancellation::new(),
++                    &crate::progress::DefaultBootstrapObserver::new(),
++                )
++                .await?;
 +                Ok(selected.map(Clone::clone))
 +            })
 +        }
@@ -423,7 +477,7 @@ index 07edd981c..82308792e 100644
 +    }
  }
 diff --git a/crates/amaru-bootstrap/src/cardano_node/tvar.rs b/crates/amaru-bootstrap/src/cardano_node/tvar.rs
-index 83a380d1c..78a8321d9 100644
+index 9014e778c..09935c84d 100644
 --- a/crates/amaru-bootstrap/src/cardano_node/tvar.rs
 +++ b/crates/amaru-bootstrap/src/cardano_node/tvar.rs
 @@ -169,15 +169,26 @@ where
@@ -491,6 +545,46 @@ index 83a380d1c..78a8321d9 100644
                  }
              }
 
+diff --git a/crates/amaru-bootstrap/src/lib.rs b/crates/amaru-bootstrap/src/lib.rs
+index 598a4b031..fc984093e 100644
+--- a/crates/amaru-bootstrap/src/lib.rs
++++ b/crates/amaru-bootstrap/src/lib.rs
+@@ -45,6 +45,7 @@
+ //! # async fn example() -> anyhow::Result<()> {
+ //! let network = NetworkName::Preprod;
+ //! let global = network.as_global_parameters().cloned().expect("known network");
++//! let era_history = network.as_era_history().cloned().expect("known network");
+ //! let ledger_dir = PathBuf::from(default_ledger_dir(network));
+ //! let chain_dir = PathBuf::from(default_chain_dir(network));
+ //! let snapshots_dir = PathBuf::from(default_snapshots_dir(network));
+@@ -55,6 +56,7 @@
+ //! bootstrap(
+ //!     network,
+ //!     &global,
++//!     &era_history,
+ //!     ledger_dir,
+ //!     chain_dir,
+ //!     snapshots_dir,          // `snapshots/<network>/`; reuses archives already on disk
+diff --git a/crates/amaru-node/src/tests/world/fragment.rs b/crates/amaru-node/src/tests/world/fragment.rs
+index 878bc42e6..b93dc8f4b 100644
+--- a/crates/amaru-node/src/tests/world/fragment.rs
++++ b/crates/amaru-node/src/tests/world/fragment.rs
+@@ -199,6 +199,7 @@ async fn populate_fragment_stores(root: &Path, meta: &FragmentMeta) -> anyhow::R
+         let network = NetworkName::Preprod;
+         let global =
+             network.as_global_parameters().cloned().ok_or_else(|| anyhow::anyhow!("preprod global parameters"))?;
++        let era_history = network.as_era_history().cloned().ok_or_else(|| anyhow::anyhow!("preprod era history"))?;
+         let snapshots_dir = workspace_snapshots_dir(network);
+         tracing::info!(
+             target = "world_fragment",
+@@ -208,6 +209,7 @@ async fn populate_fragment_stores(root: &Path, meta: &FragmentMeta) -> anyhow::R
+         bootstrap(
+             network,
+             &global,
++            &era_history,
+             ledger,
+             chain,
+             snapshots_dir,
 diff --git a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs b/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
 index f6e6a13b7..36c572d3b 100644
 --- a/crates/amaru/src/bin/amaru/cmd/node/bootstrap.rs
@@ -556,44 +650,3 @@ index f6e6a13b7..36c572d3b 100644
          ledger_dir,
          chain_dir,
          default_snapshots_dir(network).into(),
-diff --git a/crates/amaru-bootstrap/src/lib.rs b/crates/amaru-bootstrap/src/lib.rs
-index 0cdac973d..e9d827877 100644
---- a/crates/amaru-bootstrap/src/lib.rs
-+++ b/crates/amaru-bootstrap/src/lib.rs
-@@ -45,6 +45,7 @@
- //! # async fn example() -> anyhow::Result<()> {
- //! let network = NetworkName::Preprod;
- //! let global = network.as_global_parameters().cloned().expect("known network");
-+//! let era_history = network.as_era_history().cloned().expect("known network");
- //! let ledger_dir = PathBuf::from(default_ledger_dir(network));
- //! let chain_dir = PathBuf::from(default_chain_dir(network));
- //! let snapshots_dir = PathBuf::from(default_snapshots_dir(network));
-@@ -55,6 +56,7 @@
- //! bootstrap(
- //!     network,
- //!     &global,
-+//!     &era_history,
- //!     ledger_dir,
- //!     chain_dir,
- //!     snapshots_dir,          // `snapshots/<network>/`; reuses archives already on disk
-diff --git a/crates/amaru-node/src/tests/world/fragment.rs b/crates/amaru-node/src/tests/world/fragment.rs
-index e99ccdbec..39ebc7232 100644
---- a/crates/amaru-node/src/tests/world/fragment.rs
-+++ b/crates/amaru-node/src/tests/world/fragment.rs
-@@ -199,6 +199,8 @@ async fn populate_fragment_stores(root: &Path, meta: &FragmentMeta) -> anyhow::R
-         let network = NetworkName::Preprod;
-         let global =
-             network.as_global_parameters().cloned().ok_or_else(|| anyhow::anyhow!("preprod global parameters"))?;
-+        let era_history =
-+            network.as_era_history().cloned().ok_or_else(|| anyhow::anyhow!("preprod era history"))?;
-         let snapshots_dir = workspace_snapshots_dir(network);
-         tracing::info!(
-             target = "world_fragment",
-@@ -208,6 +210,7 @@ async fn populate_fragment_stores(root: &Path, meta: &FragmentMeta) -> anyhow::R
-         bootstrap(
-             network,
-             &global,
-+            &era_history,
-             ledger,
-             chain,
-             snapshots_dir,
