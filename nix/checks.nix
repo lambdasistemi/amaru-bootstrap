@@ -371,11 +371,11 @@ let
         sed = ''s@decide_local_first(\&snapshots, target_epoch)@decide_local_first(\&snapshots, None)@''; }
       # Skip every archive inside production's download_snapshots. Unique
       # to that function's body (the fixtures call the function; they do
-      # not contain this predicate), so the named test's kill is the
+      # not contain this statement), so the named test's kill is the
       # production seam, not a fixture replica of the call.
       { name = "production-download-disconnect"; test = "remotely_listed_snapshots_reach_the_download_seam";
         reason = "a remotely listed snapshot must reach the download seam";
-        sed = ''s@if !should_download_snapshot(snapshots_dir, snapshot) {@if true { continue; } if !should_download_snapshot(snapshots_dir, snapshot) {@''; }
+        sed = ''s@if let Some(snapshot_path) = resolve_snapshot_path(snapshots_dir, snapshot) {@if true { continue; } if let Some(snapshot_path) = resolve_snapshot_path(snapshots_dir, snapshot) {@''; }
     ];
 
   tvarFile = "crates/amaru-bootstrap/src/cardano_node/tvar.rs";
