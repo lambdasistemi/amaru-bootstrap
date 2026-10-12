@@ -6,7 +6,7 @@
 # against the real flake-built binaries.
 
 # Accepted command paths per binary.
-CLI_MOCK_ACCEPTED_AMARU=("snapshot create" "node bootstrap" "node run" "run")
+CLI_MOCK_ACCEPTED_AMARU=("snapshot create" "node bootstrap" "node run")
 
 # Helpers exempt from the reachability audit. Each entry is a function
 # name declared under tests/lib/. Adding an entry is a reviewable diff.

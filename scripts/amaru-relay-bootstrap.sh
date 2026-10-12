@@ -236,7 +236,7 @@ else
   log "WARNING: $runtime/global-parameters.json not found; using network-default global parameters"
 fi
 
-exec "$AMARU_BIN" run \
+exec "$AMARU_BIN" node run \
   --network "$AMARU_NETWORK" \
   --ledger-dir "$final/ledger.$AMARU_NETWORK.db" \
   --chain-dir "$final/chain.$AMARU_NETWORK.db" \
