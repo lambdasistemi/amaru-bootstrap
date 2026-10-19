@@ -1,10 +1,10 @@
 diff --git a/crates/amaru-bootstrap/src/bootstrap/mod.rs b/crates/amaru-bootstrap/src/bootstrap/mod.rs
-index 220ac8ff1..03686264a 100644
+index 07d5d8de4..d16c36b8c 100644
 --- a/crates/amaru-bootstrap/src/bootstrap/mod.rs
 +++ b/crates/amaru-bootstrap/src/bootstrap/mod.rs
 @@ -15,14 +15,15 @@
  use std::{
-     collections::{BTreeMap, BTreeSet},
+     collections::BTreeSet,
      fs,
 +    future::Future,
      io::{self, Read},
@@ -13,19 +13,24 @@ index 220ac8ff1..03686264a 100644
  };
 
  use amaru_kernel::{
--    Credential, Epoch, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Nonce, Point,
+-    Credential, Epoch, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint, Point,
 -    RawBlock, Slot, extract_block_header_cbor, from_cbor,
 +    Credential, Epoch, EraHistory, GlobalParameters, Hash, Header, HeaderHash, IsHeader, NetworkName, NetworkPoint,
-+    Nonce, Point, RawBlock, Slot, extract_block_header_cbor, from_cbor,
++    Point, RawBlock, Slot, extract_block_header_cbor, from_cbor,
      num::{CheckedAdd, CheckedSub},
      utils::string::display_collection,
  };
-@@ -153,13 +154,15 @@ fn parse_snapshot_point(point: &str) -> Result<NetworkPoint, BootstrapError> {
+@@ -146,13 +147,20 @@ fn parse_snapshot_point(point: &str) -> Result<NetworkPoint, BootstrapError> {
          .map_err(|reason| BootstrapError::InvalidSnapshotPoint { point: point.to_string(), reason })
  }
 
 -/// Discover published snapshots and cached archives, deriving epochs via era history.
 -async fn bootstrap_snapshots(
++/// Full S3 object key of the archive at `point`: `<network>/<point>.tar.zst`.
++fn snapshot_key(network: NetworkName, point: &str) -> String {
++    format!("{}/{point}{ARCHIVE_EXTENSION}", network.to_string().to_lowercase())
++}
++
 +/// Snapshots already staged under `<network>/`, discovered before any remote listing. A staged
 +/// archive is identified by its `<slot>.<hash>.tar.zst` filename alone, so the local collection
 +/// is built without reading, validating, or downloading anything.
@@ -40,28 +45,24 @@ index 220ac8ff1..03686264a 100644
 
      match snapshots_dir.read_dir() {
          Ok(entries) => {
-@@ -167,10 +170,12 @@ async fn bootstrap_snapshots(
+@@ -160,7 +168,7 @@ async fn bootstrap_snapshots(
                  let path = dir_entry?.path();
                  let filename = path.file_name().unwrap_or_default().to_str().unwrap_or_default();
-                 if let Some(prefix) = filename.strip_suffix(Snapshot::ARCHIVE_SUFFIX) {
--                    snapshots.push(S3Snapshot {
--                        point: prefix.to_string(),
--                        key: format!("{network}/{prefix}{}", Snapshot::ARCHIVE_SUFFIX),
--                    });
-+                    push_snapshot(
-+                        &mut snapshots,
-+                        era_history,
-+                        prefix.to_string(),
-+                        format!("{network}/{prefix}{}", Snapshot::ARCHIVE_SUFFIX),
-+                    )?;
+                 if let Some(prefix) = filename.strip_suffix(ARCHIVE_EXTENSION) {
+-                    snapshots.push(prefix.to_string());
++                    push_snapshot(&mut snapshots, era_history, prefix.to_string(), snapshot_key(network, prefix))?;
                  }
              }
          }
-@@ -180,7 +185,98 @@ async fn bootstrap_snapshots(
+@@ -170,7 +178,108 @@ async fn bootstrap_snapshots(
          Err(err) => return Err(err.into()),
      }
 
 -    snapshots_with_epochs(network, snapshots)
++    // `select_bootstrap_snapshots` binary-searches by epoch; directory order is arbitrary.
++    snapshots.sort_unstable_by_key(|snapshot| snapshot.epoch);
++    snapshots.dedup_by_key(|snapshot| snapshot.epoch);
++
 +    Ok(snapshots)
 +}
 +
@@ -80,8 +81,14 @@ index 220ac8ff1..03686264a 100644
 +
 +/// The remote listing seam as production binds it: S3 objects under `<network>/`.
 +async fn list_remote_snapshots(network: NetworkName, s3: &AnonymousS3Client) -> anyhow::Result<Vec<(String, String)>> {
-+    let s3_snapshots = s3.list_snapshots(network).await?;
-+    Ok(s3_snapshots.into_iter().map(|snap| (snap.point.to_string(), snap.key.to_string())).collect())
++    let points = s3.list_snapshots(network).await?;
++    Ok(points
++        .into_iter()
++        .map(|point| {
++            let key = snapshot_key(network, &point);
++            (point, key)
++        })
++        .collect())
 +}
 +
 +/// Outcome of the local-first decision. `UseLocal` is the only route that may skip the remote
@@ -156,19 +163,23 @@ index 220ac8ff1..03686264a 100644
 +        .await
  }
 
- fn snapshots_with_epochs(network: NetworkName, s3_snapshots: Vec<S3Snapshot>) -> anyhow::Result<Vec<Snapshot>> {
-@@ -190,9 +286,7 @@ fn snapshots_with_epochs(network: NetworkName, s3_snapshots: Vec<S3Snapshot>) ->
+ fn snapshots_with_epochs(network: NetworkName, points: Vec<String>) -> anyhow::Result<Vec<Snapshot>> {
+@@ -179,12 +288,9 @@ fn snapshots_with_epochs(network: NetworkName, points: Vec<String>) -> anyhow::R
+         .ok_or_else(|| anyhow!("no era history available for network {network}; S3 bootstrap is only supported for mainnet, preprod, and preview"))?;
 
-     let mut snapshots = Vec::with_capacity(s3_snapshots.len());
-     for S3Snapshot { point, key } in s3_snapshots {
+     let mut snapshots = Vec::with_capacity(points.len());
+-    let network_prefix = network.to_string().to_lowercase();
+     for point in points {
 -        let slot = parse_slot_from_point(&point)?;
 -        let epoch = era_history.slot_to_epoch_unchecked_horizon(Slot::from(slot))?;
+-        let key = format!("{network_prefix}/{point}{ARCHIVE_EXTENSION}");
 -        snapshots.push(Snapshot { epoch, point, key });
++        let key = snapshot_key(network, &point);
 +        push_snapshot(&mut snapshots, era_history, point, key)?;
      }
      snapshots.sort_unstable_by_key(|snapshot| snapshot.epoch);
      snapshots.dedup_by_key(|snapshot| snapshot.epoch);
-@@ -559,6 +653,7 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
+@@ -522,6 +628,7 @@ fn snapshot_archive_entry_root(path: &Path, expected: &Path) -> Option<PathBuf>
  pub async fn bootstrap(
      network: NetworkName,
      global_parameters: &GlobalParameters,
@@ -176,7 +187,7 @@ index 220ac8ff1..03686264a 100644
      ledger_dir: PathBuf,
      chain_dir: PathBuf,
      snapshots_dir: PathBuf,
-@@ -570,6 +665,7 @@ pub async fn bootstrap(
+@@ -533,6 +640,7 @@ pub async fn bootstrap(
      bootstrap_with_observer(
          network,
          global_parameters,
@@ -184,7 +195,7 @@ index 220ac8ff1..03686264a 100644
          ledger_dir,
          chain_dir,
          snapshots_dir,
-@@ -591,6 +687,7 @@ pub async fn bootstrap(
+@@ -554,6 +662,7 @@ pub async fn bootstrap(
  pub async fn bootstrap_with_observer(
      network: NetworkName,
      global_parameters: &GlobalParameters,
@@ -192,32 +203,16 @@ index 220ac8ff1..03686264a 100644
      ledger_dir: PathBuf,
      chain_dir: PathBuf,
      snapshots_dir: PathBuf,
-@@ -603,6 +700,7 @@ pub async fn bootstrap_with_observer(
-     let result = bootstrap_inner(
-         network,
-         global_parameters,
-+        era_history,
-         ledger_dir,
-         chain_dir,
-         snapshots_dir,
-@@ -620,6 +718,7 @@ pub async fn bootstrap_with_observer(
- async fn bootstrap_inner(
-     network: NetworkName,
-     global_parameters: &GlobalParameters,
-+    era_history: &EraHistory,
-     ledger_dir: PathBuf,
-     chain_dir: PathBuf,
-     snapshots_dir: PathBuf,
-@@ -632,7 +731,7 @@ async fn bootstrap_inner(
-     checkpoint(&cancellation)?;
-     observer.on_progress(BootstrapProgress::StageChanged { stage: BootstrapStage::DiscoveringSnapshots });
-     let s3 = AnonymousS3Client::new(s3_config);
--    let snapshots = bootstrap_snapshots(network, &s3, &snapshots_dir).await?;
-+    let snapshots = bootstrap_snapshots(network, &s3, &snapshots_dir, era_history, target_epoch).await?;
-     checkpoint(&cancellation)?;
-     observer.on_progress(BootstrapProgress::StageChanged { stage: BootstrapStage::SelectingSnapshots });
-     let [first_snapshot, second_snapshot, third_snapshot] = select_bootstrap_snapshots(&snapshots, target_epoch)?;
-@@ -1056,7 +1155,8 @@ fn import_node_snapshot_archive_data(
+@@ -568,7 +677,7 @@ pub async fn bootstrap_with_observer(
+         checkpoint(&cancellation)?;
+         observer.on_progress(BootstrapProgress::StageChanged { stage: BootstrapStage::DiscoveringSnapshots });
+         let s3 = AnonymousS3Client::new(s3_config);
+-        let snapshots = bootstrap_snapshots(network, &s3, &snapshots_dir).await?;
++        let snapshots = bootstrap_snapshots(network, &s3, &snapshots_dir, era_history, target_epoch).await?;
+         checkpoint(&cancellation)?;
+         observer.on_progress(BootstrapProgress::StageChanged { stage: BootstrapStage::SelectingSnapshots });
+         let [first_snapshot, second_snapshot, third_snapshot] = select_bootstrap_snapshots(&snapshots, target_epoch)?;
+@@ -821,7 +930,8 @@ fn import_node_snapshot_archive_data(
                  &era_history,
                  network,
                  cancellation,
@@ -225,42 +220,11 @@ index 220ac8ff1..03686264a 100644
 +            )
 +            .map_err(|err| anyhow!("import {SNAPSHOT_UTXO_FILE_NAME}: {err}"))?;
 
-             return Ok((epoch, point, chain_state));
+             return Ok(ImportedSnapshot { epoch, chain_state });
          }
-@@ -1161,12 +1261,14 @@ mod tests {
-         let observer = RecordingObserver::default();
-         let network = NetworkName::Preprod;
-         let global_parameters = network.as_global_parameters().unwrap();
-+        let era_history = network.as_era_history().unwrap();
-         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-
-         let error = runtime
-             .block_on(super::bootstrap_with_observer(
-                 network,
-                 global_parameters,
-+                era_history,
-                 temp_dir.path().join("ledger"),
-                 temp_dir.path().join("chain"),
-                 temp_dir.path().join("snapshots"),
-@@ -1204,6 +1306,7 @@ mod tests {
-         let observer = RecordingObserver::default();
-         let network = NetworkName::Preprod;
-         let global_parameters = network.as_global_parameters().unwrap();
-+        let era_history = network.as_era_history().unwrap();
-         let s3_config =
-             crate::S3Config { public_url: format!("http://{unavailable_address}"), ..crate::S3Config::default() };
-         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-@@ -1211,6 +1314,7 @@ mod tests {
-         let result = runtime.block_on(super::bootstrap_with_observer(
-             network,
-             global_parameters,
-+            era_history,
-             temp_dir.path().join("ledger"),
-             temp_dir.path().join("chain"),
-             temp_dir.path().join("snapshots"),
-@@ -1476,4 +1580,215 @@ mod tests {
-         let err = select_bootstrap_snapshots(&snapshots, Some(Epoch::from(2_u64))).unwrap_err();
-         assert!(dbg!(err.to_string()).contains("target epoch is too young"));
+@@ -971,4 +1081,232 @@ mod tests {
+         let latest = select_bootstrap_snapshots(&snapshots[..3], None).unwrap();
+         assert_eq!(latest.map(|s| s.epoch), selected.map(|s| s.epoch));
      }
 +
 +    /// Issue 95: the local-first bootstrap snapshot decision.
@@ -282,7 +246,7 @@ index 220ac8ff1..03686264a 100644
 +
 +        use super::{
 +            super::{
-+                AnonymousS3Client, BootstrapCancellation, S3Config, Snapshot, bootstrap_snapshots,
++                ARCHIVE_EXTENSION, AnonymousS3Client, BootstrapCancellation, S3Config, Snapshot, bootstrap_snapshots,
 +                bootstrap_snapshots_with, download_snapshots, select_bootstrap_snapshots,
 +            },
 +            write_snapshot_archive,
@@ -310,7 +274,7 @@ index 220ac8ff1..03686264a 100644
 +        }
 +
 +        fn key(epoch: u64) -> String {
-+            format!("{NETWORK}/{}{}", point(epoch), Snapshot::ARCHIVE_SUFFIX)
++            format!("{NETWORK}/{}{ARCHIVE_EXTENSION}", point(epoch))
 +        }
 +
 +        /// Stage a real, valid archive for `epoch`, as the producer would leave one on disk.
@@ -318,7 +282,7 @@ index 220ac8ff1..03686264a 100644
 +            let point = point(epoch);
 +            let (state, tvar) = (format!("{point}/state"), format!("{point}/tables/tvar"));
 +            let entries: [(&str, &[u8]); 2] = [(&state, b"state"), (&tvar, b"utxo")];
-+            write_snapshot_archive(&dir.join(format!("{point}{}", Snapshot::ARCHIVE_SUFFIX)), &entries);
++            write_snapshot_archive(&dir.join(format!("{point}{ARCHIVE_EXTENSION}")), &entries);
 +        }
 +
 +        fn staged(epochs: &[u64]) -> TempDir {
@@ -403,6 +367,23 @@ index 220ac8ff1..03686264a 100644
 +            );
 +        }
 +
++        /// The exact window must be found however the directory lists its archives: selection
++        /// binary-searches by epoch, so an unsorted local collection would defer to the remote index.
++        #[test]
++        fn exact_local_window_is_found_among_many_staged_archives() {
++            let staged_epochs: Vec<u64> = (0..40).collect();
++            let dir = staged(&staged_epochs);
++            let remote = Remote::failing();
++
++            let discovered = discover(dir.path(), Some(40), &remote).unwrap();
++
++            assert_eq!(remote.calls.get(), 0, "an exact local window must not reach the remote index");
++            assert_eq!(
++                discovered.iter().map(|snapshot| snapshot.point.clone()).collect::<Vec<_>>(),
++                [37_u64, 38, 39].map(point).to_vec(),
++            );
++        }
++
 +        /// INV-095-CI2-REMOTE-FALLBACK and INV-095-CI2-SUCCESS-EXITS: every local collection short
 +        /// of the exact request defers, so a second success exit before the index — including a
 +        /// SAME-LINE-SECOND-EARLY-RETURN sharing one physical line — stops a row recording a call.
@@ -474,77 +455,8 @@ index 220ac8ff1..03686264a 100644
 +        }
 +    }
  }
-diff --git a/crates/amaru-bootstrap/src/cardano_node/tvar.rs b/crates/amaru-bootstrap/src/cardano_node/tvar.rs
-index 9014e778c..09935c84d 100644
---- a/crates/amaru-bootstrap/src/cardano_node/tvar.rs
-+++ b/crates/amaru-bootstrap/src/cardano_node/tvar.rs
-@@ -169,15 +169,26 @@ where
-             let mut chunk_size = 0;
-
-             loop {
--                if d.datatype()? == cbor::data::Type::Break {
--                    d.skip()?;
-+                // Definite-length maps have no Break. Check remaining
-+                // entries before datatype(), or the byte after the last
-+                // pair is end_of_input and LazyDecoder treats it as fatal.
-+                if size.is_some_and(|len| actual_size + chunk_size >= len) {
-                     done = true;
-                     break;
-                 }
-
--                if size.is_some_and(|len| actual_size + chunk_size >= len) {
--                    done = true;
--                    break;
-+                match d.datatype() {
-+                    Ok(cbor::data::Type::Break) => {
-+                        d.skip()?;
-+                        done = true;
-+                        break;
-+                    }
-+                    Err(err) if err.is_end_of_input() && !utxo.is_empty() => break,
-+                    Err(err) if err.is_end_of_input() => {
-+                        Err(cbor::decode::Error::end_of_input())?;
-+                    }
-+                    Err(err) => return Err(err.into()),
-+                    Ok(_) => {}
-                 }
-
-                 let mut probe = d.probe();
-@@ -185,17 +196,21 @@ where
-                     cbor::decode_bytes(&mut probe).map(|output| (input.into_owned(), output.into_owned()))
-                 });
-
--                if let Ok((input, output)) = io {
--                    chunk_size += 1;
--                    d.skip()?;
--                    d.skip()?;
--
--                    let (input, output) = decode_tvar_entry(&input, &output).map_err(cbor::decode::Error::message)?;
--                    utxo.insert(input, output);
--                } else if utxo.is_empty() {
--                    Err(cbor::decode::Error::end_of_input())?;
--                } else {
--                    break;
-+                match io {
-+                    Ok((input, output)) => {
-+                        chunk_size += 1;
-+                        d.skip()?;
-+                        d.skip()?;
-+
-+                        let (input, output) =
-+                            decode_tvar_entry(&input, &output).map_err(cbor::decode::Error::message)?;
-+                        utxo.insert(input, output);
-+                    }
-+                    Err(err) if err.is_end_of_input() && utxo.is_empty() => {
-+                        Err(cbor::decode::Error::end_of_input())?;
-+                    }
-+                    Err(err) if err.is_end_of_input() => break,
-+                    Err(err) => return Err(err.into()),
-                 }
-             }
-
 diff --git a/crates/amaru-bootstrap/src/lib.rs b/crates/amaru-bootstrap/src/lib.rs
-index 45a593305..27db101d1 100644
+index 1e71a7b1a..7a5ce9354 100644
 --- a/crates/amaru-bootstrap/src/lib.rs
 +++ b/crates/amaru-bootstrap/src/lib.rs
 @@ -45,6 +45,7 @@

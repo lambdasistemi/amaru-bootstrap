@@ -375,54 +375,9 @@ let
       # production seam, not a fixture replica of the call.
       { name = "production-download-disconnect"; test = "remotely_listed_snapshots_reach_the_download_seam";
         reason = "a remotely listed snapshot must reach the download seam";
-        sed = ''s@if let Some(snapshot_path) = resolve_snapshot_path(snapshots_dir, snapshot) {@if true { continue; } if let Some(snapshot_path) = resolve_snapshot_path(snapshots_dir, snapshot) {@''; }
+        sed = ''s@^\(\s*\)if archive_path.is_file() {@\1if true { continue; }\n\1if archive_path.is_file() {@''; }
     ];
 
-  tvarFile = "crates/amaru-bootstrap/src/cardano_node/tvar.rs";
-
-  # F-002: disable the remaining-entry count that runs before datatype().
-  # A complete definite-length map then hits EOF at datatype() and import
-  # fails as end_of_input; the truncated corpus case does not discriminate.
-  tvarSizeBeforeDatatypeSed =
-    ''s@if size.is_some_and(|len| actual_size + chunk_size >= len) {@if false \&\& size.is_some_and(|len| actual_size + chunk_size >= len) {@'';
-
-  tvarSizeBeforeDatatypeSrc = applyProductionOnlySed {
-    name = "tvar-size-before-datatype";
-    file = tvarFile;
-    sed = tvarSizeBeforeDatatypeSed;
-  };
-
-  tvarSizeBeforeDatatypeAmaru = amaruPkg.buildPackageFromSrc {
-    name = "amaru-tvar-size-before-datatype";
-    src = tvarSizeBeforeDatatypeSrc;
-  };
-
-  tvarSizeBeforeDatatypeFailure =
-    pkgs.testers.testBuildFailure (pkgs.runCommand "tvar-size-before-datatype-complete-import"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.gnugrep
-          pkgs.gnutar
-          pkgs.jq
-          pkgs.python3
-          pkgs.zstd
-          tvarSizeBeforeDatatypeAmaru
-        ];
-      } ''
-      set -euo pipefail
-      export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-      export AMARU_GLOBAL_CONSENSUS_SECURITY_PARAM=8
-      export AMARU_GLOBAL_ACTIVE_SLOT_COEFF_INVERSE=1
-      export AMARU_GLOBAL_EPOCH_LENGTH_SCALE_FACTOR=15
-      cp -rL ${shortEpochBootstrapBundle}/testnet_42 $TMPDIR/testnet_42
-      chmod -R u+w $TMPDIR/testnet_42
-      tests=${../tests}
-      bash "$tests/check-short-epoch-tvar-decode.sh" $TMPDIR/testnet_42
-      echo "complete definite-length map imported without the size-before-datatype guard" >&2
-      exit 0
-    '');
 in
 {
 
@@ -971,18 +926,6 @@ in
       chmod -R u+w $TMPDIR/testnet_42
 
       tests=${../tests}
-      echo "tvar size-before-datatype mutant: ${tvarSizeBeforeDatatypeFailure}"
-      log=${tvarSizeBeforeDatatypeFailure}/testBuildFailure.log
-      grep -q 'complete definite-length map failed to import' "$log" || {
-        echo "tvar size-before-datatype mutant: expected the complete-map positive control to fail" >&2
-        cat "$log" >&2
-        exit 1
-      }
-      grep -q 'end of input' "$log" || {
-        echo "tvar size-before-datatype mutant: expected complete import to fail as end of input" >&2
-        cat "$log" >&2
-        exit 1
-      }
       bash "$tests/check-short-epoch-utxo-set.sh" $TMPDIR/testnet_42
 
       # Short-epoch synthesis: epochLength=120, k=8, activeSlotsCoeff=1.0

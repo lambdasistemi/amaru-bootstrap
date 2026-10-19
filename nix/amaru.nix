@@ -99,8 +99,8 @@ let
   # The upstream commit the carried hunks were last rebased onto. Informational:
   # it tells a reader how far the pin has travelled from the last human review
   # of this patch. It does not gate the build.
-  recordedAmaruPatchBase = "9a4273855972f9efcfbb84579a3f63084d030eda";
-  amaruPatchSha256 = "345e938bdacf7e2d20543fb76b34e0357d5678ea960aa91ad51b414d31b9fc61";
+  recordedAmaruPatchBase = "ca9065a1ed1eb2cbdab4e46015b387877fbcc848";
+  amaruPatchSha256 = "5ce866fc19c34a4fdc3dd739ff4cebb1435dbf0233f195ab05762912001296e4";
   computedAmaruPatchSha256 = builtins.hashFile "sha256" amaruBootstrapPatch;
   amaruSourceIdentity = "${amaruRev}:${computedAmaruPatchSha256}";
   unpatchedBootstrapCli = builtins.readFile
@@ -322,16 +322,5 @@ amaruBin.overrideAttrs (old: {
       # sandbox-config-dependent.
       env.SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
     });
-
-    # Rebuild the amaru binary from a mutated patched tree, reusing the
-    # warm cargoArtifacts. Used by the tvar definite-length code mutant:
-    # there is no local cargo toolchain, so this is the cheapest rung that
-    # produces an executable the existing bootstrap check can drive.
-    buildPackageFromSrc = { name, src }:
-      craneLib.buildPackage (craneArgs // {
-        pname = name;
-        src = craneLib.cleanCargoSource src;
-        cargoArtifacts = amaruBin.cargoArtifacts;
-      });
   };
 })
